@@ -9,11 +9,22 @@ export function useTenantPath() {
   return (suffix: string) => `/tenants/${tenant?.id}${suffix}`;
 }
 
+/**
+ * Cache key for a tenant-scoped request.
+ *
+ * The user id is part of the key, not just the tenant id. Two roles at the same tenant get different
+ * payloads from the same URL — a Head Chef's /home is blind where an Owner's is not — so a
+ * tenant-only key lets one user's response be served to another.
+ */
+export function tenantKey(userId: number | undefined, tenantId: number | undefined, suffix?: string) {
+  return suffix === undefined ? ['tenant', userId, tenantId] : ['tenant', userId, tenantId, suffix];
+}
+
 export function useTenantQuery<T = any>(suffix: string, options: { enabled?: boolean } = {}) {
-  const { tenant } = useSession();
+  const { tenant, user } = useSession();
   const path = useTenantPath();
   return useQuery<T>({
-    queryKey: ['tenant', tenant?.id, suffix],
+    queryKey: tenantKey(user?.id, tenant?.id, suffix),
     queryFn: () => get<T>(path(suffix)),
     enabled: Boolean(tenant) && (options.enabled ?? true),
   });
@@ -23,7 +34,7 @@ export function useTenantMutation<TVariables = any, TData = any>(
   build: (variables: TVariables) => { suffix: string; method?: 'POST' | 'PATCH' | 'DELETE'; body?: unknown },
   invalidate: string[] = [],
 ) {
-  const { tenant } = useSession();
+  const { tenant, user } = useSession();
   const path = useTenantPath();
   const client = useQueryClient();
 
@@ -38,19 +49,21 @@ export function useTenantMutation<TVariables = any, TData = any>(
     onSuccess: () => {
       // Broad invalidation on purpose: one entry changes stock, alerts, home and the report at once,
       // and a stale cost figure is worse than a refetch.
-      client.invalidateQueries({ queryKey: ['tenant', tenant?.id] });
-      invalidate.forEach((key) => client.invalidateQueries({ queryKey: ['tenant', tenant?.id, key] }));
+      client.invalidateQueries({ queryKey: tenantKey(user?.id, tenant?.id) });
+      invalidate.forEach((key) =>
+        client.invalidateQueries({ queryKey: tenantKey(user?.id, tenant?.id, key) }),
+      );
     },
   });
 }
 
 export function useUpload<TData = any>(suffix: string) {
-  const { tenant } = useSession();
+  const { tenant, user } = useSession();
   const path = useTenantPath();
   const client = useQueryClient();
   return useMutation<TData, Error, FormData>({
     mutationFn: (form) => api<TData>(path(suffix), { method: 'POST', form }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['tenant', tenant?.id] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: tenantKey(user?.id, tenant?.id) }),
   });
 }
 

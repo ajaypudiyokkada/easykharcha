@@ -23,6 +23,7 @@ web-build/
 /deploy/web-build/
 npm-debug.*
 *.tsbuildinfo
+/mobile/screenshots/
 
 # Deploy secrets and certificates
 /deploy/.env

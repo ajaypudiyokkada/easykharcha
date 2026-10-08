@@ -5,6 +5,7 @@
  * *show* — every one of them is re-checked server-side, so a tampered client gets a 403, not data.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { clearTokens, get, loadTokens, post, saveTokens, setUnauthenticatedHandler } from '../api/client';
@@ -48,6 +49,7 @@ type SessionValue = {
 const SessionContext = createContext<SessionValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -78,7 +80,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setTenants([]);
     setTenantId(null);
     setIsSuperAdmin(false);
-  }, []);
+    // Non-negotiable #4 depends on this. Query keys are scoped by tenant, so without clearing, the
+    // next person to sign in at the same tenant is served the previous person's cached responses —
+    // a Head Chef saw the Owner's revenue and variance dashboard this way.
+    queryClient.clear();
+  }, [queryClient]);
 
   useEffect(() => {
     setUnauthenticatedHandler(() => {
@@ -102,11 +108,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(
     async (phone: string, pin: string) => {
+      // Belt and braces with the clear in signOut: a session can also end by token expiry, and this
+      // guarantees no response fetched as one user survives into another's session.
+      queryClient.clear();
       const payload = await post('/auth/login', { phone: phone.trim(), pin });
       await saveTokens(payload.access, payload.refresh);
       await applySession(payload);
     },
-    [applySession],
+    [applySession, queryClient],
   );
 
   const selectTenant = useCallback(async (id: number) => {

@@ -36,7 +36,14 @@ python manage.py seed_demo --reset    # DEMO tenant with the spec's worked examp
 # frontend (from mobile/)
 npx expo start --web --port 8081
 npx tsc --noEmit
+npm run smoke            # drives a real browser; needs both servers up
+npm run smoke:headful    # same, visible
 ```
+
+**`npm run smoke` is the only check that executes the app.** `tsc --noEmit` and a successful Metro
+bundle both pass on code that throws on first render — a mis-resolved ESM/CommonJS dependency compiles
+perfectly and then dies with `x is not a function`. Run it before claiming the client works. It uses
+`puppeteer-core` against an installed Chrome/Edge, so there is no Chromium download.
 
 Local Celery (Redis is already running natively on 6379):
 ```bash
@@ -108,6 +115,15 @@ tests should be what tells you.
 - Frontend uses cross-platform primitives only (`View`, `Text`, `TextInput`, `Pressable`, `FlatList`,
   `ScrollView`) so the same components compile to native later. Platform-specific code goes behind
   `*.web.tsx` / `*.native.tsx`.
+- **Clear the react-query cache on sign-in and sign-out, and keep the user id in every query key**
+  (`src/api/hooks.ts::tenantKey`). Two roles at one tenant get different payloads from the same URL, so
+  a tenant-only key served a Head Chef the Owner's revenue dashboard. Non-negotiable #4 is a client
+  concern as well as a server one.
+- **Five tabs maximum**, per role, in `app/(app)/_layout.tsx`. An Owner can reach eight screens; eight
+  tabs on a phone truncates every label. The rest live under More.
+- `expo-router@4` requires `query-string` but does not declare it, and React Navigation 7.5 stopped
+  providing it. It is pinned to **v7** in `package.json` — v9 is pure ESM and `require()` cannot reach
+  its `stringify`.
 
 ## Not built, deliberately
 

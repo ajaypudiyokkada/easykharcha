@@ -80,9 +80,16 @@ Chicken boneless   expected 3.480   actual 4.700   wastage 0.300
 ## Tests
 
 ```bash
-cd backend && python -m pytest        # 139 tests
+cd backend && python -m pytest             # 142 tests
+cd backend && powershell -File scripts/smoke.ps1   # 41 cross-role API checks, needs the server up
+
 cd mobile  && npx tsc --noEmit
+cd mobile  && npm run smoke                # drives a real browser, needs both servers up
 ```
+
+`npm run smoke` is the one that matters for the client: a typecheck and a successful bundle both pass
+on code that crashes on first render. It signs in as the Owner and the Head Chef, walks the screens,
+and fails on any console error, any uncaught exception, or any blind-count leak.
 
 ## Deployment
 
