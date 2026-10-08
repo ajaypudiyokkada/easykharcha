@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "EasyKharcha",
+    "slug": "easykharcha",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "easykharcha",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "in.easykharcha.app"
+    },
+    "android": {
+      "package": "in.easykharcha.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#B19461"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "apiUrl": "http://127.0.0.1:8000/api"
+    }
+  }
+}

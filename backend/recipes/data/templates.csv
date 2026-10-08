@@ -1,0 +1,4 @@
+code,name,cuisine,category,portion_label,pieces_per_portion,canonical,qty_per_portion,unit,basis,confidence
+TPL-CHILLI-CHICKEN,Chilli chicken,Indo-Chinese,Starters,1 plate (~6 pcs),6,CHICKEN_BONELESS,150,g,weight,owner_stated
+TPL-CHICKEN-NOODLES,Chicken noodles,Indo-Chinese,Noodles,1 plate,,CHICKEN_BONELESS,30,g,weight,owner_stated
+TPL-CHICKEN-SOUP,Chicken soup,Indo-Chinese,Soups,1 bowl,,CHICKEN_BONELESS,30,g,weight,owner_stated
