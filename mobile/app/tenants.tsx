@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { RequireAuth } from '../src/components/RequireAuth';
 import { Cap, useSession } from '../src/state/session';
 import { radius, spacing } from '../src/theme';
 import { Body, Button, Caption, Card, Heading, Screen, Title, usePalette } from '../src/ui';
@@ -15,6 +16,14 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function Tenants() {
+  return (
+    <RequireAuth tenantless>
+      <TenantsScreen />
+    </RequireAuth>
+  );
+}
+
+function TenantsScreen() {
   const palette = usePalette();
   const { tenants, selectTenant, signOut, isSuperAdmin, user, can } = useSession();
 
@@ -82,7 +91,9 @@ export default function Tenants() {
       {isSuperAdmin || can(Cap.TENANT_CREATE) ? (
         <Button label="Add a business" variant="secondary" onPress={() => router.push('/add-tenant')} />
       ) : null}
-      <Button label="Sign out" variant="ghost" onPress={() => signOut().then(() => router.replace('/login'))} />
+      {/* No explicit navigation: RequireAuth already redirects to /login the instant `user` goes
+          null — see app/(app)/more.tsx for why adding one here would race it. */}
+      <Button label="Sign out" variant="ghost" onPress={() => signOut()} />
     </Screen>
   );
 }

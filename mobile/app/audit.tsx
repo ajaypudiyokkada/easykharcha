@@ -1,10 +1,19 @@
 import React, { useState } from 'react';
 
 import { useTenantQuery } from '../src/api/hooks';
+import { RequireAuth } from '../src/components/RequireAuth';
 import { Cap, useSession } from '../src/state/session';
 import { Body, Caption, Card, ErrorNotice, Loading, Picker, Row, Screen, Title } from '../src/ui';
 
 export default function Audit() {
+  return (
+    <RequireAuth>
+      <AuditScreen />
+    </RequireAuth>
+  );
+}
+
+function AuditScreen() {
   const { can } = useSession();
   const [scope, setScope] = useState<'this' | 'all'>('this');
   const { data, isLoading, error } = useTenantQuery<any>(`/audit?scope=${scope}`);

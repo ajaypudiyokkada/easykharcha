@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 
 import { useBootstrap, useTenantMutation, useTenantQuery } from '../src/api/hooks';
+import { RequireAuth } from '../src/components/RequireAuth';
 import { Cap, useSession } from '../src/state/session';
 import { spacing } from '../src/theme';
 import {
@@ -24,6 +25,14 @@ import {
 type Tab = 'ingredients' | 'dishes' | 'vendors' | 'staff';
 
 export default function Admin() {
+  return (
+    <RequireAuth>
+      <AdminScreen />
+    </RequireAuth>
+  );
+}
+
+function AdminScreen() {
   const [tab, setTab] = useState<Tab>('ingredients');
   const { can } = useSession();
 

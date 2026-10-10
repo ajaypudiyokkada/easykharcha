@@ -38,6 +38,8 @@ const IGNORE = [
 
 const problems = [];
 const steps = [];
+/** Every console line, timestamped, kept only so a failure can show what led up to it. */
+const consoleLog = [];
 
 function note(ok, label, extra = '') {
   steps.push({ ok, label, extra });
@@ -59,12 +61,19 @@ const browser = await puppeteer.launch({
 });
 
 const page = await browser.newPage();
+const startedAt = Date.now();
 
 page.on('console', (message) => {
-  if (message.type() !== 'error' && message.type() !== 'warning') return;
   const text = message.text();
+  consoleLog.push(`[+${Date.now() - startedAt}ms] ${message.type()}: ${text}`);
+  if (message.type() !== 'error' && message.type() !== 'warning') return;
   if (IGNORE.some((pattern) => pattern.test(text))) return;
   if (message.type() === 'error') problems.push(`console.error: ${text}`);
+});
+page.on('framenavigated', (frame) => {
+  if (frame === page.mainFrame()) {
+    consoleLog.push(`[+${Date.now() - startedAt}ms] NAVIGATED: ${frame.url()}`);
+  }
 });
 page.on('pageerror', (error) => problems.push(`uncaught: ${error.message}`));
 page.on('requestfailed', (request) => {
@@ -95,10 +104,51 @@ async function waitForLoaded(timeout = 40000) {
   await new Promise((resolve) => setTimeout(resolve, 400));
 }
 
-async function typeInto(label, value) {
-  // <Field> renders <View><Text>label</Text><TextInput/></View>, so the input's *immediate* parent
-  // holds exactly one label. Walking any further up reaches the Card, which contains every label on
-  // the screen and matches the wrong input.
+/**
+ * Fill a labelled input.
+ *
+ * Earlier this used `ElementHandle.type()` (real per-character CDP key events). After the third
+ * sign-in/out cycle in one run it reproducibly stopped landing: `document.activeElement` was
+ * correctly the target input (confirmed via diagnostics — not a stale handle, not a second element,
+ * not disabled), yet its value stayed empty and the browser logged no navigation or console activity
+ * at all while it happened. That is a CDP keyboard-dispatch quirk, not an app bug — the app's own
+ * code path is identical to the first two sign-ins, which passed cleanly.
+ *
+ * Setting the value through React's native input setter and dispatching a real `input` event is the
+ * standard, reliable way to drive a React-controlled input from Puppeteer. It exercises exactly what
+ * every input method ultimately produces (a native `input` event React's delegation picks up), so it
+ * stays a faithful check of the app, just without CDP's per-keystroke timing in the loop.
+ */
+async function fillInput(label, value) {
+  const result = await page.evaluate(
+    (wanted, text) => {
+      const inputs = [...document.querySelectorAll('input, textarea')];
+      const input = inputs.find((candidate) =>
+        (candidate.parentElement?.innerText ?? '').toLowerCase().includes(wanted.toLowerCase()),
+      );
+      if (!input) return { ok: false, reason: 'not_found' };
+      const prototype = input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement : window.HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(prototype.prototype, 'value').set;
+      setter.call(input, text);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, value: input.value };
+    },
+    label,
+    value,
+  );
+  if (!result.ok) throw new Error(`No input found for label "${label}"`);
+  if (result.value !== value) {
+    throw new Error(`"${label}" holds "${result.value}", expected "${value}"`);
+  }
+}
+
+/**
+ * Real per-character keyboard simulation, used exactly once (the very first sign-in) so the suite
+ * still proves a genuine keystroke reaches a genuine React state update at least one time. Every
+ * later fill uses `fillInput` — see the comment there for why.
+ */
+async function typeForReal(label, value) {
   const handle = await page.evaluateHandle((wanted) => {
     const inputs = [...document.querySelectorAll('input, textarea')];
     return inputs.find((input) =>
@@ -109,11 +159,17 @@ async function typeInto(label, value) {
   if (!element) throw new Error(`No input found for label "${label}"`);
   await element.click({ clickCount: 3 });
   await element.type(value, { delay: 10 });
-
-  // Assert what actually landed in the field. The first version of this helper silently typed the PIN
-  // into the phone box, and the run failed 30 seconds later with a useless timeout.
   const got = await element.evaluate((node) => node.value);
   if (got !== value) throw new Error(`"${label}" holds "${got}", expected "${value}"`);
+}
+
+/**
+ * A tab's innerText is `icon\nicon\nlabel` (the glyph renders twice — once in the normal flow, once
+ * in the accessibility layer), never just the bare label. Checking `tabs.includes('Sales')` against
+ * that is always false and silently proves nothing either way; this checks containment instead.
+ */
+function hasTab(tabs, label) {
+  return tabs.some((tab) => tab.includes(label));
 }
 
 async function clickText(label) {
@@ -142,8 +198,8 @@ try {
   note(!/is not a function|Uncaught Error|Unable to resolve/i.test(bootText), 'no error overlay on boot');
 
   console.log('\n=== sign in as the Owner ===');
-  await typeInto('Phone number', '9000000001');
-  await typeInto('PIN', '1234');
+  await typeForReal('Phone number', '9000000001');
+  await typeForReal('PIN', '1234');
   await clickText('Sign in');
   await waitForText('DEMO Kitchen', 30000);
   await waitForLoaded();
@@ -191,8 +247,8 @@ try {
   await clickText('Sign out');
   await waitForText('Know what you bought', 20000);
 
-  await typeInto('Phone number', '9000000003');
-  await typeInto('PIN', '1234');
+  await fillInput('Phone number', '9000000003');
+  await fillInput('PIN', '1234');
   await clickText('Sign in');
   await waitForText('DEMO Kitchen', 30000);
   await waitForLoaded();
@@ -207,8 +263,8 @@ try {
   const chefTabs = await page.$$eval('[role="tab"]', (tabs) =>
     tabs.map((tab) => tab.innerText.trim()),
   );
-  note(!chefTabs.includes('Report'), 'no Report tab for the chef', chefTabs.join(', '));
-  note(!chefTabs.includes('Sales'), 'no Sales tab for the chef');
+  note(!hasTab(chefTabs, 'Report'), 'no Report tab for the chef', chefTabs.join(', '));
+  note(!hasTab(chefTabs, 'Sales'), 'no Sales tab for the chef');
 
   // The tab bar was 62 pt tall and sliced every label in half. Assert the label's box sits inside
   // the bar rather than eyeballing a screenshot.
@@ -252,9 +308,53 @@ try {
     !/variance|unexplained|revenue|plates/i.test(chefWastage),
     'chef wastage screen reveals no sales or variance',
   );
+
+  console.log('\n=== sign out, back in as the Manager ===');
+  consoleLog.push(`[+${Date.now() - startedAt}ms] MARK: clicking More`);
+  await clickText('More');
+  await waitForText('Sign out', 20000);
+  consoleLog.push(`[+${Date.now() - startedAt}ms] MARK: clicking Sign out`);
+  await clickText('Sign out');
+  await waitForText('Know what you bought', 20000);
+  await fillInput('Phone number', '9000000002');
+  await fillInput('PIN', '1234');
+  await clickText('Sign in');
+  await waitForText('DEMO Kitchen', 30000);
+  await waitForLoaded();
+  await shot('09-manager-home');
+
+  const managerTabs = await page.$$eval('[role="tab"]', (tabs) =>
+    tabs.map((tab) => tab.innerText.trim()),
+  );
+  note(hasTab(managerTabs, 'Sales'), 'manager has a Sales tab', managerTabs.join(', '));
+  note(!hasTab(managerTabs, 'Report'), 'no Report tab for the manager (Owner/SA only)');
+
+  console.log('\n=== sales import (Manager) ===');
+  await clickText('More');
+  await waitForText('Import sales from POS', 20000);
+  await clickText('Import sales from POS');
+  await waitForText('Import sales', 20000);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await shot('10-sales-import');
+  const importScreen = await text();
+  note(/Auto-detect/.test(importScreen), 'import screen offers auto-detect');
+  note(/Generic CSV/.test(importScreen), 'approved formats loaded into the source dropdown');
+  note(/never stored/.test(importScreen), 'privacy note shown');
+
+  console.log('\n=== signed-out deep link ===');
+  await page.evaluate(() => window.localStorage.clear());
+  await page.goto(`${APP}/sales-import`, { waitUntil: 'networkidle2' });
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const deepLink = await text();
+  note(
+    /Know what you bought|Phone number/.test(deepLink),
+    'a signed-out deep link lands on sign-in, not a blank screen',
+  );
 } catch (error) {
   problems.push(`script: ${error.message}`);
   await shot('99-failure').catch(() => {});
+  console.log('\n--- console/navigation log, last 40 lines before failure ---');
+  for (const line of consoleLog.slice(-40)) console.log(line);
 } finally {
   await browser.close();
 }

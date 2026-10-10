@@ -51,6 +51,24 @@ celery -A config worker -l info --pool=solo   # --pool=solo: prefork does not wo
 celery -A config beat -l info
 ```
 
+## How checks are run here
+
+- **Permissions.** `.claude/settings.json` governs what Claude Code may do without asking: file edits
+  auto-accept, the routine commands above (`pytest`, `ruff`, `black`, `manage.py`, `npm run smoke`,
+  `npx tsc --noEmit`, `npx expo start`, `docker compose config/build/up/down`) are allow-listed.
+  `git push`, `sudo`, `rm -rf`, `curl`/`wget`/`Invoke-WebRequest`/`Invoke-RestMethod` (even against
+  localhost — use `backend/scripts/smoke.ps1` for live API checks instead), reading a `.env` file, and
+  reading anything under `backend/imports/_private/` are denied. If a command you need isn't covered,
+  say which one and why instead of working around the block.
+- **No throwaway inline scripts.** Never `node -e`, a PowerShell here-string, or a Python heredoc for a
+  check, a browser test, or a data script — each one needs its own permission prompt, and nothing is left
+  for the next session to re-run. Put it in a file under `scripts/`, `mobile/scripts/`, or
+  `backend/scripts/` and expose it as a named command: `npm run smoke`, `pytest`, a `manage.py`
+  subcommand. `mobile/scripts/smoke-ui.mjs` (→ `npm run smoke`) and `backend/scripts/smoke.ps1` are the
+  existing examples — **extend those** rather than reaching for an inline script to debug something new.
+  Browser checks run headless via Puppeteer from a committed script and only ever talk to `localhost`.
+- Prefer the Read/Edit/Write tools over shell commands for file work.
+
 ## Non-negotiables
 
 These five are the ones worth failing a review over. Each has tests; if you change the behaviour, the
@@ -84,7 +102,11 @@ tests should be what tells you.
   heavily tested file in the repo. Two documented judgement calls are commented at the top of it.
 - `inventory/services.py` — once-per-day capture, impossible-count guard, request auto-fulfilment.
 - `recipes/services.py` — template adopt (copies, never links).
-- `imports/parsers.py` + `imports/services.py` — POS report parsing and dish matching.
+- `imports/parsers/` — the format registry. `base.py` defines `SalesParser` + `ParseResult`;
+  `registry.py` reads files, fingerprints and dispatches; `generic.py` is the CSV/XLSX fallback.
+  **Adding a POS is one parser class + one fixture + one test** — nothing downstream knows any vendor.
+- `imports/matching.py` — POS item name → dish. Exact alias, then exact name, then *suggestions*.
+- `imports/services.py` — preview assembly, reconciliation, idempotent confirm.
 - `core/roles.py` — the capability matrix, written out explicitly because the spec's table is **not**
   rank-monotonic (a Head Chef may raise an inventory request; a Manager may not).
 
@@ -95,9 +117,19 @@ tests should be what tells you.
   `totals.ingredients_missing_counts` say so explicitly — see `tests/test_report_honesty.py`.
 - A variance alert is **suppressed** unless recipe coverage is 100%. Half-configured ingredients report
   `incomplete_recipes`. Alerting on partial coverage trains the owner to ignore alerts.
-- A POS import never fuzzy-matches automatically. It matches on `pos_alias` then exact name, and only
-  *suggests* a fuzzy match for a human to confirm.
+- A POS import never fuzzy-matches automatically. It matches on `pos_alias`/`DishAlias` then exact
+  name, and only *suggests* a fuzzy match for a human to confirm. A wrong auto-match moves one dish's
+  plates onto another and makes the variance report accuse an honest kitchen.
 - An import never overwrites a manually entered Sale. It reports the clash in `blocked_by_manual`.
+- Confirming the same file twice is a **no-op**, not a second import (`SalesImport.file_hash`). A
+  manager on bad restaurant wifi will press the button again.
+- A parser that cannot recognise a file **fails loudly, naming the missing headers**. Guessing column
+  positions is how an importer silently corrupts a month of sales.
+- The business-day cutoff applies only to values that carry a clock time. A date-only column is already
+  a business date; shifting it would move every row in the file back one day.
+- **Never commit a real POS export.** Petpooja's carries customer name, phone and address (222 of 510
+  rows in FOMO's September file). `import_data/`, `backend/imports/_private/` and `*.xlsx` are
+  gitignored; fixtures are synthetic.
 - `seed_fomo` dishes are named `PLACEHOLDER — …` at ₹0 on purpose (DECISIONS D-003). Do not "fix" them
   by inventing prices.
 - `recipes/data/templates.csv` holds only owner-stated grams. Do not pad the library with plausible
@@ -124,6 +156,23 @@ tests should be what tells you.
 - `expo-router@4` requires `query-string` but does not declare it, and React Navigation 7.5 stopped
   providing it. It is pinned to **v7** in `package.json` — v9 is pure ESM and `require()` cannot reach
   its `stringify`.
+- **Auth/tenant guards live per-screen, in `src/components/RequireAuth.tsx`** — never in the root
+  `app/_layout.tsx`. A layout's job is to render `<Stack>` (and its `<Stack.Screen>` children)
+  unconditionally, every render; that is how expo-router learns what routes exist. Swapping it for a
+  conditional `<Redirect>` unmounts every registered route in the same pass and crashes the app rather
+  than navigating it. `RequireAuth` uses the same leaf-level `<Redirect>` shape `index.tsx` and
+  `(app)/_layout.tsx` already used successfully — wrap the screen's content in it, don't touch the
+  layout.
+- **Never navigate explicitly after `signOut()`.** `(app)/_layout.tsx` and `RequireAuth` already return
+  `<Redirect href="/login">` the instant `user` goes null; a screen that *also* calls
+  `router.replace('/login')` races that reactive redirect. Two navigations to the same route can force
+  a remount of the login screen mid-keystroke — this genuinely happened, discovered via
+  `npm run smoke`'s third sign-in/out cycle. `onPress={() => signOut()}` is complete; nothing after it.
+- **`scripts/smoke-ui.mjs` fills inputs via `fillInput` (React's native setter + a dispatched `input`
+  event), not Puppeteer's `ElementHandle.type()`.** After several sign-in/out cycles, CDP's per-key
+  dispatch reproducibly stopped landing on an input that was, by every diagnostic, correctly focused —
+  a Puppeteer/CDP timing quirk, not an app bug. `typeForReal` (genuine keystrokes) still runs once, on
+  the very first sign-in, so the suite keeps one honest check that typing works at all.
 
 ## Not built, deliberately
 

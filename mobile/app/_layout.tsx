@@ -7,6 +7,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider } from '../src/state/session';
 import { usePalette } from '../src/ui';
 
+/**
+ * The root layout. `<Stack>` and its `<Stack.Screen>` children must render on every pass — this is
+ * how expo-router learns what routes exist. Auth/tenant guarding does NOT belong here: a conditional
+ * `return <Redirect>` in place of `<Stack>` unmounts every registered route in the same render, which
+ * crashes the app rather than redirecting it. The guard lives per-screen instead, in
+ * `src/components/RequireAuth.tsx`, using the same leaf-level `<Redirect>` pattern that `index.tsx`
+ * and `(app)/_layout.tsx` already use successfully.
+ */
 function Shell() {
   const palette = usePalette();
   return (

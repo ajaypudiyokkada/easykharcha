@@ -2,10 +2,20 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 
 import { post } from '../src/api/client';
+import { RequireAuth } from '../src/components/RequireAuth';
 import { useSession } from '../src/state/session';
 import { Body, Button, Card, ErrorNotice, Field, Notice, Screen, Title } from '../src/ui';
 
 export default function ChangePin() {
+  return (
+    // skipMustChangePin: without it, a forced PIN change would redirect this very screen to itself.
+    <RequireAuth tenantless skipMustChangePin>
+      <ChangePinScreen />
+    </RequireAuth>
+  );
+}
+
+function ChangePinScreen() {
   const { user, refreshSession } = useSession();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');

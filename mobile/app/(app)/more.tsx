@@ -70,11 +70,11 @@ export default function More() {
       {tenants.length > 1 || isSuperAdmin ? (
         <Button label="Switch business" variant="secondary" onPress={() => router.push('/tenants')} />
       ) : null}
-      <Button
-        label="Sign out"
-        variant="ghost"
-        onPress={() => signOut().then(() => router.replace('/login'))}
-      />
+      {/* No explicit navigation here: (app)/_layout.tsx already returns <Redirect href="/login" />
+          the instant `user` goes null. Calling router.replace('/login') as well raced that reactive
+          redirect — two navigations to the same route forced a remount of the login screen mid-type,
+          wiping out whatever the next person typed into it. */}
+      <Button label="Sign out" variant="ghost" onPress={() => signOut()} />
       <Caption>Powered by EasyKharcha</Caption>
     </Screen>
   );

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 
 import { useTenantQuery } from '../src/api/hooks';
+import { RequireAuth } from '../src/components/RequireAuth';
 import { radius, spacing } from '../src/theme';
 import {
   Caption,
@@ -19,6 +20,14 @@ import {
 } from '../src/ui';
 
 export default function Trends() {
+  return (
+    <RequireAuth>
+      <TrendsScreen />
+    </RequireAuth>
+  );
+}
+
+function TrendsScreen() {
   const palette = usePalette();
   const [weeks, setWeeks] = useState(8);
   const { data, isLoading, error } = useTenantQuery<any>(`/trends?weeks=${weeks}`);

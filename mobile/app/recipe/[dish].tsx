@@ -4,6 +4,7 @@ import { View } from 'react-native';
 
 import { get } from '../../src/api/client';
 import { useBootstrap, useTenantMutation, useTenantQuery } from '../../src/api/hooks';
+import { RequireAuth } from '../../src/components/RequireAuth';
 import { Cap, useSession } from '../../src/state/session';
 import { spacing } from '../../src/theme';
 import {
@@ -32,6 +33,14 @@ import {
  * copy is one-way: later edits to the global library never reach back into this recipe.
  */
 export default function Recipe() {
+  return (
+    <RequireAuth>
+      <RecipeScreen />
+    </RequireAuth>
+  );
+}
+
+function RecipeScreen() {
   const { dish: dishId } = useLocalSearchParams<{ dish: string }>();
   const { can, tenant } = useSession();
   const bootstrap = useBootstrap();

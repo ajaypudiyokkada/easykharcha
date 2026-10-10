@@ -2,10 +2,19 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 
 import { post } from '../src/api/client';
+import { RequireAuth } from '../src/components/RequireAuth';
 import { useSession } from '../src/state/session';
 import { Button, Caption, Card, ErrorNotice, Field, Heading, Picker, Screen, Title } from '../src/ui';
 
 export default function AddTenant() {
+  return (
+    <RequireAuth tenantless>
+      <AddTenantScreen />
+    </RequireAuth>
+  );
+}
+
+function AddTenantScreen() {
   const { refreshSession, selectTenant } = useSession();
   const [name, setName] = useState('');
   const [tagline, setTagline] = useState('');
