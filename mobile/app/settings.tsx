@@ -1,10 +1,19 @@
 import React, { useEffect, useState } from 'react';
 
 import { useTenantMutation, useTenantQuery } from '../src/api/hooks';
+import { RequireAuth } from '../src/components/RequireAuth';
 import { useSession } from '../src/state/session';
 import { Button, Caption, Card, ErrorNotice, Field, Heading, Loading, Picker, Screen, Title } from '../src/ui';
 
 export default function Settings() {
+  return (
+    <RequireAuth>
+      <SettingsScreen />
+    </RequireAuth>
+  );
+}
+
+function SettingsScreen() {
   const { refreshSession } = useSession();
   const { data, isLoading, error } = useTenantQuery<any>('/settings');
   const [form, setForm] = useState<any>(null);
@@ -79,6 +88,23 @@ export default function Settings() {
           onChangeText={set('sla_hours')}
           keyboardType="number-pad"
           hint="Hours after midnight by which yesterday's closing must be in. Opening uses half this."
+        />
+      </Card>
+
+      <Card>
+        <Heading>Trading day</Heading>
+        <Field
+          label="Business day cutoff hour"
+          value={String(form.business_day_cutoff_hour ?? '')}
+          onChangeText={set('business_day_cutoff_hour')}
+          keyboardType="number-pad"
+          hint="Orders before this hour count toward the previous night, so a 1 a.m. order lands on the day its stock was counted."
+        />
+        <Field
+          label="Time zone"
+          value={String(form.timezone ?? '')}
+          onChangeText={set('timezone')}
+          hint="POS timestamps carry no offset, so imports read them in this zone. e.g. Asia/Kolkata"
         />
       </Card>
 

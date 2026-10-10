@@ -66,6 +66,16 @@ class Business(TimeStampedModel):
     #: Weekday of the full physical count. Reporting convenience; nothing is enforced on it yet.
     count_day = models.PositiveSmallIntegerField(choices=Weekday.choices, default=Weekday.MONDAY)
 
+    #: Orders before this hour count toward the previous business date, so a 1 a.m. order lands on the
+    #: night it was actually cooked. Stock for it was counted in yesterday's closing, so filing it
+    #: under today would read as unexplained loss.
+    business_day_cutoff_hour = models.PositiveSmallIntegerField(
+        default=4, validators=[MaxValueValidator(12)]
+    )
+    #: POS timestamps are local wall-clock time with no offset, so we need the tenant's zone to read
+    #: them. Not necessarily the server's.
+    timezone = models.CharField(max_length=64, default="Asia/Kolkata")
+
     class Meta:
         verbose_name_plural = "businesses"
         ordering = ("name",)

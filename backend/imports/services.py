@@ -1,139 +1,147 @@
-"""Matching POS rows to dishes and writing them as Sales (§5c).
+"""Turning a parsed POS file into Sale rows (§5c).
 
-The product's position, worth restating because it shapes this code: we reconcile physical counts against
-sales. We do not maintain a perpetual system inventory. So an import only ever writes Sale rows — it
-never touches stock.
+The product's position, worth restating because it shapes this code: we reconcile physical counts
+against sales. We do not maintain a perpetual system inventory. An import only ever writes Sale rows —
+it never touches stock.
+
+Nothing about the uploaded file survives the request except a hash: no file, no customer column. Real
+exports carry name, phone and address (docs/imports/petpooja_orders_master.md §8).
 """
 
-from collections import defaultdict
-from difflib import SequenceMatcher
+from __future__ import annotations
+
+import hashlib
 
 from django.db import transaction
 from django.utils import timezone
 
 from audit.services import log
+from core.exceptions import BusinessRuleError
 from core.fields import d
-from inventory.models import Dish, Sale, SalesImport, SaleSource
+from imports import matching
+from imports.parsers import ParseResult
+from inventory.models import Sale, SalesImport, SaleSource
 
 
-def _index_dishes(business) -> tuple[dict, list]:
-    dishes = list(Dish.objects.filter(business=business))
-    index = {}
-    for dish in dishes:
-        if dish.pos_alias:
-            index[dish.pos_alias.strip().lower()] = dish
-        index.setdefault(dish.name.strip().lower(), dish)
-    return index, dishes
+def content_hash(data: bytes, format_key: str, date_from, date_to) -> str:
+    """Identity of one import attempt.
 
-
-def _suggest(item: str, dishes: list) -> dict | None:
-    target = item.strip().lower()
-    best, best_score = None, 0.0
-    for dish in dishes:
-        score = SequenceMatcher(None, target, dish.name.strip().lower()).ratio()
-        if score > best_score:
-            best, best_score = dish, score
-    if best is None or best_score < 0.6:
-        return None
-    return {"dish": best.id, "dish_name": best.name, "score": round(best_score, 3)}
-
-
-def match_rows(business, rows) -> dict:
-    """Group parsed rows by (dish, date) and report what matched.
-
-    `pos_alias` is tried first, then an exact name match — both exact, because a fuzzy *automatic*
-    match would quietly attribute one dish's plates to another and corrupt every variance figure. Fuzzy
-    matching only ever produces a *suggestion* a human confirms.
+    Confirming twice must not double-count — a manager on bad restaurant wifi will press the button
+    again when nothing seems to happen.
     """
-    index, dishes = _index_dishes(business)
+    digest = hashlib.sha256()
+    digest.update(data)
+    digest.update(format_key.encode())
+    digest.update(str(date_from).encode())
+    digest.update(str(date_to).encode())
+    return digest.hexdigest()
 
-    matched: dict[tuple[int, object], dict] = defaultdict(
-        lambda: {"plates": 0, "revenue": d(0), "rows": 0}
-    )
-    unmatched: dict[str, dict] = {}
-    dates = set()
 
-    for row in rows:
-        dates.add(row.date)
-        dish = index.get(row.item.strip().lower())
-        if dish is None:
-            entry = unmatched.setdefault(
-                row.item,
-                {
-                    "item": row.item,
-                    "plates": 0,
-                    "revenue": d(0),
-                    "rows": 0,
-                    "suggestion": _suggest(row.item, dishes),
-                },
-            )
-            entry["plates"] += row.quantity
-            entry["revenue"] += d(row.amount)
-            entry["rows"] += 1
-            continue
+def build_preview(business, result: ParseResult, *, filename: str) -> dict:
+    """Everything the preview screen needs. Writes nothing."""
+    outcome = matching.match(business, result.rows)
+    matched, unmatched = outcome["matched"], outcome["unmatched"]
 
-        key = (dish.id, row.date)
-        bucket = matched[key]
-        bucket["plates"] += row.quantity
-        bucket["revenue"] += d(row.amount)
-        bucket["rows"] += 1
-        bucket["dish"] = dish.id
-        bucket["dish_name"] = dish.name
-        bucket["date"] = row.date
-
-    # A manual figure is somebody's considered entry; an import must not overwrite it (§5c).
+    # A manual figure is somebody's considered entry; an import must not overwrite it.
     manual = {
         (sale.dish_id, sale.date)
         for sale in Sale.objects.filter(
-            business=business, source=SaleSource.MANUAL, date__in=dates or [timezone.localdate()]
+            business=business,
+            source=SaleSource.MANUAL,
+            date__gte=result.date_from or timezone.localdate(),
+            date__lte=result.date_to or timezone.localdate(),
         )
     }
 
-    matched_list, blocked = [], []
-    for key, bucket in matched.items():
-        bucket = dict(bucket)
-        bucket["revenue"] = d(bucket["revenue"])
-        if key in manual:
-            blocked.append(bucket)
-        else:
-            matched_list.append(bucket)
+    importable, blocked = [], []
+    for group in matched:
+        payload = {
+            "dish": group.dish.id,
+            "dish_name": group.dish.name,
+            "date": group.business_date,
+            "plates": group.plates,
+            "revenue": group.revenue,
+            "rows": group.source_rows,
+            "channel": ", ".join(sorted(group.channels)),
+        }
+        (blocked if (group.dish.id, group.business_date) in manual else importable).append(payload)
 
-    matched_list.sort(key=lambda b: (b["date"], b["dish_name"]))
-    blocked.sort(key=lambda b: (b["date"], b["dish_name"]))
+    unmatched_payload = [
+        {
+            "item": entry.item_name,
+            "plates": entry.plates,
+            "revenue": entry.revenue,
+            "rows": entry.rows,
+            "suggestions": entry.suggestions,
+        }
+        for entry in unmatched
+    ]
 
     return {
-        "date_from": min(dates) if dates else None,
-        "date_to": max(dates) if dates else None,
-        "matched": matched_list,
+        "filename": filename,
+        "format": {"key": result.format_key, "label": result.format_label},
+        "date_from": result.date_from,
+        "date_to": result.date_to,
+        "counts": {
+            "rows_read": len(result.rows) + len(result.excluded),
+            "rows_included": len(result.rows),
+            "rows_excluded": len(result.excluded),
+            "excluded_by_reason": result.excluded_by_reason(),
+            "matched_groups": len(importable),
+            "unmatched_items": len(unmatched_payload),
+            "blocked_by_manual": len(blocked),
+        },
+        "excluded": [
+            {"row": row.source_row, "item": row.item_name, "reason": row.reason}
+            for row in result.excluded[:100]
+        ],
+        "reconciliation": result.reconciliation(),
+        "matched": importable,
         "blocked_by_manual": blocked,
-        "unmatched": sorted(unmatched.values(), key=lambda e: -e["plates"]),
+        "unmatched": unmatched_payload,
+        # So "skip the unmatched" is an informed choice rather than a shrug.
+        "unmatched_impact": {
+            "plates": sum((entry.plates for entry in unmatched), d(0)),
+            "revenue": sum((entry.revenue for entry in unmatched), d(0)),
+        },
+        "warnings": result.warnings,
     }
 
 
 @transaction.atomic
-def confirm_import(access, filename: str, result: dict, aliases: dict | None = None) -> SalesImport:
+def confirm(access, *, filename: str, result: ParseResult, preview: dict, file_hash: str) -> dict:
     """Write the matched rows, replacing only previously *imported* rows in the same range."""
     business = access.business
-    date_from, date_to = result["date_from"], result["date_to"]
+    date_from, date_to = result.date_from, result.date_to
+    if date_from is None or date_to is None:
+        raise BusinessRuleError("No dated rows to import.", code="no_rows")
 
-    if aliases:
-        for item, dish_id in aliases.items():
-            dish = Dish.objects.filter(pk=dish_id, business=business).first()
-            if dish is not None:
-                dish.pos_alias = item
-                dish.save(update_fields=["pos_alias", "updated_at"])
+    existing = SalesImport.objects.filter(business=business, file_hash=file_hash).first()
+    if existing is not None:
+        # Idempotent by design: the same file, format and range confirmed twice is a no-op, not a
+        # second set of sales.
+        return {
+            "import": existing,
+            "created": 0,
+            "replaced": 0,
+            "already_imported": True,
+            "message": (
+                f"That exact file was already imported on "
+                f"{timezone.localtime(existing.uploaded_at):%d %b %Y at %H:%M}. Nothing was changed."
+            ),
+        }
 
     batch = SalesImport.objects.create(
         business=business,
         uploaded_by=access.user,
         filename=filename[:200],
+        format_key=result.format_key,
+        file_hash=file_hash,
         date_from=date_from,
         date_to=date_to,
-        rows_total=len(result["matched"])
-        + len(result["unmatched"])
-        + len(result["blocked_by_manual"]),
-        rows_matched=len(result["matched"]),
-        rows_unmatched=len(result["unmatched"]),
+        rows_total=preview["counts"]["rows_read"],
+        rows_matched=len(preview["matched"]),
+        rows_unmatched=len(preview["unmatched"]),
     )
 
     replaced = Sale.objects.filter(
@@ -142,38 +150,55 @@ def confirm_import(access, filename: str, result: dict, aliases: dict | None = N
     replaced_count = replaced.count()
     replaced.delete()
 
+    now = timezone.now()
     created = [
         Sale(
             business=business,
-            date=bucket["date"],
-            dish_id=bucket["dish"],
-            plates=bucket["plates"],
-            revenue=d(bucket["revenue"]),
+            date=row["date"],
+            dish_id=row["dish"],
+            # Plates are whole; a half-plate alias on an odd count rounds rather than failing.
+            plates=int(round(float(row["plates"]))),
+            revenue=d(row["revenue"]),
             entered_by=access.user,
-            entered_at=timezone.now(),
+            entered_at=now,
             source=SaleSource.IMPORT,
+            channel=row.get("channel", "")[:40],
             import_batch=batch,
         )
-        for bucket in result["matched"]
+        for row in preview["matched"]
+        if int(round(float(row["plates"]))) > 0
     ]
     Sale.objects.bulk_create(created)
 
     log(
         access,
         "sales.import",
-        summary=f"Imported {len(created)} sales row(s) from {filename} "
-        f"({date_from} to {date_to}); replaced {replaced_count} previously imported row(s)",
+        summary=(
+            f"Imported {len(created)} sales row(s) from {filename} "
+            f"({date_from} to {date_to}) via {result.format_label}; "
+            f"replaced {replaced_count} previously imported row(s)"
+        ),
         detail={
             "filename": filename,
+            "format": result.format_key,
             "date_from": str(date_from),
             "date_to": str(date_to),
             "created": len(created),
             "replaced": replaced_count,
-            "unmatched": [entry["item"] for entry in result["unmatched"]],
+            "reconciliation": {
+                k: str(v) for k, v in result.reconciliation().items() if k != "message"
+            },
+            "unmatched": [entry["item"] for entry in preview["unmatched"]],
             "blocked_by_manual": [
-                {"dish": b["dish_name"], "date": str(b["date"])}
-                for b in result["blocked_by_manual"]
+                {"dish": row["dish_name"], "date": str(row["date"])}
+                for row in preview["blocked_by_manual"]
             ],
         },
     )
-    return batch
+    return {
+        "import": batch,
+        "created": len(created),
+        "replaced": replaced_count,
+        "already_imported": False,
+        "message": f"Imported {len(created)} day/dish rows.",
+    }

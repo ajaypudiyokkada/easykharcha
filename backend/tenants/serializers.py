@@ -28,6 +28,8 @@ class BusinessSerializer(serializers.ModelSerializer):
             "sla_hours",
             "count_day",
             "count_day_label",
+            "business_day_cutoff_hour",
+            "timezone",
         )
         read_only_fields = ("id",)
 

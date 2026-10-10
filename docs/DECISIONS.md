@@ -68,6 +68,40 @@ implemented strictly from `docs/product.md` §4, §5, §5b, §5c, §5d.
 
 ---
 
+## D-005 — Petpooja's Orders Master Report cannot drive sales import
+**Date:** 2026-10-09 · **Status:** Resolved (AP) — awaiting the item-wise export
+
+FOMO's September 2026 export was profiled before any parser was written
+([`docs/imports/petpooja_orders_master.md`](imports/petpooja_orders_master.md)). It is **order-level**:
+510 orders, 43 columns, **no item names and no item quantities**, no second sheet. It therefore cannot
+produce per-dish sales, cannot feed the variance engine, and cannot be used to derive FOMO's menu
+(`PETPOOJA_IMPORT_PROMPT.md` Step 4).
+
+**Consequences**
+- No Petpooja parser is written. AP is exporting the **item-wise** report; that becomes the approved
+  Petpooja format, and will be profiled the same way before anything is built against it.
+- The format-agnostic half is built and tested: parser registry, generic CSV/XLSX parser, auto-detect
+  by header signature, reconciliation, idempotent confirm, alias mapping with `plate_multiplier`.
+- **§11 and `seed_fomo`'s dish list stay blocked.** FOMO keeps placeholder dishes (D-003) until the
+  item-wise export yields an approved `fomo_dishes.csv`.
+- Reconciliation target for whatever replaces it: **₹860,273 net sales over 510 orders**, September 2026.
+- The export carries customer name, phone and address on 222 of 510 rows. `import_data/`,
+  `backend/imports/_private/` and `*.xlsx` are now gitignored; verified no spreadsheet has ever been
+  committed.
+
+---
+
+## D-006 — Imported revenue is net of discount, excluding tax
+**Date:** 2026-10-09 · **Status:** Resolved (AP)
+
+`Sale.revenue` from an import = item amount − discount, excluding GST, service charge, delivery,
+container, tip and round-off.
+
+**Why:** cost% must be measured against food sales, not tax collected. It also matches Petpooja's own
+`Net Sales (M.A - D)` column, so the order-level and item-wise reports reconcile against each other.
+
+---
+
 ## OPEN — not blocking the local build
 
 | # | Item | Spec ref | Blocked work |
@@ -78,4 +112,6 @@ implemented strictly from `docs/product.md` §4, §5, §5b, §5c, §5d.
 | O-4 | Which purchased domain (.com/.ai/.in) is primary; EasyKharcha vs Effresto in UI | §10 | nginx `server_name`, TLS, `ALLOWED_HOSTS` — all placeholder in `deploy/` |
 | O-5 | DigitalOcean droplet + credentials | prompt | No deployment attempted; nothing touches credentials |
 | O-6 | Cross-tenant learning consent terms | §5d | Not built |
+| O-8 | Petpooja's **item-wise** export, and the exact menu path to produce it (don't invent it for the UI hint) | §5c | The Petpooja parser, and FOMO's real dish list |
+| O-9 | How Petpooja marks cancelled / complimentary / aggregator orders — September contained none, all 510 are `Success` / `Dine In` | §5c | Status filtering and `channel` in the Petpooja parser |
 | O-7 | WhatsApp BSP choice (Gupshup / Interakt / Twilio) | §8 | Outbound alerts sit behind `reports/notifiers.py` interface with a logging no-op implementation |

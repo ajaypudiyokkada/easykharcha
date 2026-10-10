@@ -363,6 +363,9 @@ class Sale(TenantScopedModel):
     )
     entered_at = models.DateTimeField(null=True, blank=True)
     source = models.CharField(max_length=8, choices=SaleSource.choices, default=SaleSource.MANUAL)
+    #: Dine-in, takeaway, Swiggy, Zomato… Carried so reports can split channels later; nothing
+    #: branches on it yet. Blank for manual entry.
+    channel = models.CharField(max_length=40, blank=True)
     import_batch = models.ForeignKey(
         "inventory.SalesImport",
         on_delete=models.SET_NULL,
@@ -418,6 +421,46 @@ class Request(TenantScopedModel):
         return f"{self.date} {self.ingredient.name} {self.qty} ({self.status})"
 
 
+class DishAlias(TenantScopedModel):
+    """A POS item name mapped to a dish, with an optional portion multiplier.
+
+    `Dish.pos_alias` holds one name; this holds the rest, and adds `plate_multiplier` so a menu that
+    sells "Chilli Chicken (Half)" as a separate POS item can count as half a plate of the full dish
+    rather than needing a duplicate dish with its own recipe.
+    """
+
+    dish = models.ForeignKey(Dish, on_delete=models.CASCADE, related_name="aliases")
+    #: Exactly as the POS spells it, for display.
+    pos_name = models.CharField(max_length=160)
+    #: Case/space/punctuation-insensitive key actually used for matching.
+    normalised = models.CharField(max_length=160, db_index=True)
+    plate_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=3,
+        default=Decimal("1"),
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+
+    class Meta:
+        verbose_name_plural = "dish aliases"
+        ordering = ("pos_name",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["business", "normalised"], name="unique_alias_per_business"
+            )
+        ]
+
+    def __str__(self) -> str:
+        suffix = f" x{self.plate_multiplier}" if self.plate_multiplier != Decimal("1") else ""
+        return f"{self.pos_name} -> {self.dish.name}{suffix}"
+
+    def save(self, *args, **kwargs):
+        from imports.parsers.base import normalise_item
+
+        self.normalised = normalise_item(self.pos_name)
+        super().save(*args, **kwargs)
+
+
 class SalesImport(TenantScopedModel):
     """One uploaded POS report (§5c)."""
 
@@ -426,6 +469,11 @@ class SalesImport(TenantScopedModel):
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
     filename = models.CharField(max_length=200)
+    #: Which parser read it, so a later discrepancy can be traced to a format rather than a user.
+    format_key = models.CharField(max_length=40, blank=True)
+    #: sha256 of (file bytes + format + range). Confirming the same preview twice must not
+    #: double-count, and a restaurant on bad wifi will press the button twice.
+    file_hash = models.CharField(max_length=64, blank=True, db_index=True)
     date_from = models.DateField()
     date_to = models.DateField()
     rows_total = models.PositiveIntegerField(default=0)

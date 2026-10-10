@@ -53,7 +53,9 @@ The owner's requirement: *one person must not control both the inventory numbers
 
 ## 3. Data model (field-level, from the validated implementation)
 
-**Restaurant**: `id, name, tagline, logo_url, primary_colour, accent_colour, status(active/inactive), default_target_pct, waste_alert_pct, rate_creep_pct, sla_hours, count_day`
+**Restaurant**: `id, name, tagline, logo_url, primary_colour, accent_colour, status(active/inactive), default_target_pct, waste_alert_pct, rate_creep_pct, sla_hours, count_day` **+ v3.1:** `business_day_cutoff_hour` (default 4 — orders before this hour count toward the previous business date), `timezone` (default `Asia/Kolkata` — POS timestamps carry no offset)
+
+**DishAlias** (v3.1, per restaurant): `dish, pos_name, normalised, plate_multiplier` — a POS item name mapped to a dish. `plate_multiplier` lets "Chilli Chicken (Half)" count as 0.5 plates of the full dish instead of needing a duplicate dish with its own recipe. Unique on (restaurant, normalised).
 
 **Ingredient** (per restaurant): `code, name, category, unit, rate, vendor, target_pct, waste_alert_pct, shared(Y/N), track(Y/N), notes` **+ v3.1:** `canonical` (global ingredient tag, nullable), `piece_weight_g` (nullable), `recipe_unit` (e.g. `g`, `ml`, `pc`), `recipe_units_per_stock_unit` (e.g. 1000 g per kg; default 1), `yield_pct` (usable fraction after trimming/cooking loss, default 100), `variance_alert_pct` (optional per-ingredient override)
 — `shared = Y` marks a misc/overhead ingredient (oil, spices, packaging) not tied to one dish; see §5.
@@ -71,13 +73,14 @@ The owner's requirement: *one person must not control both the inventory numbers
 
 **Wastage**: `date, ingredient_code, qty, reason, entered_by, entered_at` — **v3.1:** `reason` becomes a fixed list (`Spoilage`, `Trim/prep loss`, `Staff meal`, `Spill/damage`, `Returned/rejected`, `Other` + free-text note required for Other) so the report can show *where* waste comes from.
 
-**Sale**: `date, dish_code, plates, revenue, entered_by, entered_at` — revenue auto-fills from menu price × plates, editable for discounts. **v3.1:** `source` (`manual` | `import`), `import_batch` (nullable).
+**Sale**: `date, dish_code, plates, revenue, entered_by, entered_at` — revenue auto-fills from menu price × plates, editable for discounts. **v3.1:** `source` (`manual` | `import`), `import_batch` (nullable), `channel` (dine-in / takeaway / aggregator, carried so reports can split it later; nothing branches on it yet).
+— imported `revenue` is **net of discount, excluding tax and all charges**: cost% is measured against food sales, not tax collected.
 
 **RecipeLine** (v3.1, per dish): `dish_code, ingredient_code, qty_per_portion` (in the ingredient's `recipe_unit`). A dish with ≥1 line is a *recipe dish*. Constraints: ingredient must be **non-shared** (shared/misc ingredients stay pooled per §5 — oil, salt, masalas, sauces are never given gram recipes); unique (dish, ingredient). `dish.ing` stays required and should equal the dish's main recipe line.
 
 **RecipeTemplate / RecipeTemplateLine** (v3.1, global, see §5d): `code, name, cuisine, category, portion_label, pieces_per_portion` / `canonical, qty_per_portion, unit, basis, size_multipliers, confidence`. `RecipeLine` gains `source_template` (nullable) and `confidence`.
 
-**SalesImport** (v3.1): `id, date_range, filename, uploaded_by, uploaded_at, rows_total, rows_matched, rows_unmatched` — one row per uploaded POS report.
+**SalesImport** (v3.1): `id, date_range, filename, uploaded_by, uploaded_at, rows_total, rows_matched, rows_unmatched` **+** `format_key` (which parser read it), `file_hash` (sha256 of file + format + range, so confirming twice is a no-op) — one row per uploaded POS report. The uploaded file itself is never stored.
 
 **Request** (inventory request, Head Chef → Manager/Owner): `date, ingredient_code, qty, note, requested_by, status(open/fulfilled), fulfilled_purchase_id` — auto-fulfilled when a purchase is entered referencing it, or marked manually.
 
@@ -152,6 +155,7 @@ Goal: a new restaurant should get working recipes in minutes by *adopting* a tem
 
 The owner already has per-dish sales in Petpooja and could not make Petpooja's own inventory/recipe module accurate. The product's position: **we reconcile physical counts against sales; we do not try to maintain a perpetual system inventory.**
 - **MVP:** Manager+ uploads the POS item-wise sales report (CSV/XLSX: date, item name, quantity, amount). Server matches rows to dishes by `pos_alias` then exact name; shows a preview (matched / unmatched / suggested match); on confirm writes `Sale` rows with `source=import`. Re-uploading the same date range replaces that range's *imported* rows only (manual rows untouched) and logs to Audit. Unmatched items are listed and can be mapped once (saving `pos_alias`).
+- **Approved formats (registry of parsers):** (1) **Generic CSV/XLSX** — built, the fallback any POS can reach. (2) **Petpooja item-wise report** — pending the export; see [`docs/imports/petpooja_orders_master.md`](imports/petpooja_orders_master.md) for why the Orders Master Report could not be used (it is order-level and carries no item names or quantities). Adding a POS = one parser class + fixture + test. The Import screen has a source dropdown with auto-detect by header signature, a reconciliation line (parsed total vs the file's own total), and an unmatched-items mapper. Fuzzy matching only ever *suggests*. New tenant settings: `business_day_cutoff_hour` (default 4), `timezone` (default Asia/Kolkata). Confirm is idempotent on a hash of (file + format + range). Uploaded files and customer columns are never stored.
 - **Phase 2 (⚠ unverified):** direct Petpooja API sync. I have not confirmed Petpooja offers a public API for third parties or its terms; confirm with Petpooja before promising it to clients. Same import path can serve other POS exports (Posist, Torqus, generic CSV).
 - **Phase 2:** invoice photo → auto-fill purchase lines (OCR/vision). MVP stores the photo only.
 

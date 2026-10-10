@@ -29,6 +29,13 @@ npm-debug.*
 /deploy/.env
 /deploy/certbot/
 
+# Real POS exports. Petpooja's Orders Master Report carries customer name, phone and address
+# (222 of 510 rows in FOMO's September file). Never commit one; work from masked fixtures instead.
+/import_data/
+/backend/imports/_private/
+*.xlsx
+!backend/imports/tests/fixtures/*.xlsx
+
 # Editors / OS
 .vscode/
 .idea/
