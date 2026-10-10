@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="EasyKharcha helps you track what you buy, what gets used, what gets sold, and where stock or money may be slipping away.">
+  <meta property="og:title" content="EasyKharcha: Know where your money goes">
+  <meta property="og:description" content="EasyKharcha helps you track what you buy, what gets used, what gets sold, and where stock or money may be slipping away.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="EasyKharcha">
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="%231F6F63"/><path d="M18 17h30v8H27v7h18v8H27v7h21v8H18z" fill="white"/></svg>'>
+  <title>EasyKharcha: Know where your money goes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --primary:#1F6F63;--secondary:#6F72C9;--highlight:#F28C45;--mint:#EAF6F2;
+      --background:#FFF9F2;--card:#FFFFFF;--text:#22312E;--muted:#65736F;
+      --success:#2F7D5A;--warning:#A96008;--danger:#B34242;
+      --fomo-teak:#B19461;--fomo-blue:#8EABC1;--bakery-pink:#D98AA6;
+      --r1:16px;--r2:24px;--r3:34px;--max:1160px
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth;background:var(--background)}
+    body{margin:0;background:var(--background);color:var(--text);font:17px/1.6 "Nunito Sans",system-ui,sans-serif}
+    h1,h2,h3,.wordmark{font-family:"Poppins",system-ui,sans-serif;line-height:1.12;margin:0}
+    h1{font-size:clamp(2.7rem,10vw,5.3rem);letter-spacing:-.05em;max-width:9ch}
+    h2{font-size:clamp(2rem,7vw,3.3rem);letter-spacing:-.035em}
+    h3{font-size:1.15rem}
+    p{margin:0}
+    a{color:var(--primary);text-underline-offset:3px}
+    button,input,select{font:inherit}
+    :focus-visible{outline:4px solid var(--highlight);outline-offset:3px}
+    .container{width:min(calc(100% - 32px),var(--max));margin:auto}
+    .section{padding:72px 0}
+    .section-head{max-width:720px;margin-bottom:30px}
+    .label{display:inline-flex;align-items:center;gap:8px;font-weight:800;color:var(--primary);margin-bottom:12px}
+    .label:before{content:"";width:10px;height:10px;border-radius:50%;background:var(--highlight)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:13px 22px;border:0;border-radius:999px;background:var(--primary);color:var(--card);font-weight:800;text-decoration:none;cursor:pointer}
+    .btn:hover{transform:translateY(-1px)}
+    .topbar{display:none;position:sticky;top:0;z-index:40;background:var(--background);border-bottom:2px solid var(--mint)}
+    .topbar .inner{height:74px;display:flex;align-items:center;justify-content:space-between}
+    .wordmark{color:var(--text);text-decoration:none;font-size:1.3rem;font-weight:700}
+    .hero{padding:30px 0 68px;overflow:hidden}
+    .hero-grid{display:grid;gap:38px;align-items:center}
+    .tag{display:inline-block;background:var(--highlight);color:var(--text);border-radius:999px;padding:8px 14px;font-weight:800;margin-bottom:18px}
+    .hero-copy>p{margin-top:20px;max-width:650px;font-size:1.08rem}
+    .hero-actions{margin-top:26px}.hero-note{margin-top:10px;color:var(--muted);font-weight:700;font-size:.95rem}
+    .hero-art{min-height:500px;display:grid;place-items:center;position:relative}
+    .shape{position:absolute;border-radius:50%}.s1{width:330px;height:330px;background:var(--mint);top:40px;left:50%;transform:translateX(-58%)}
+    .s2{width:165px;height:165px;background:var(--highlight);right:0;bottom:20px}.s3{width:105px;height:105px;background:var(--secondary);left:0;bottom:55px}
+    .phone{position:relative;width:min(82vw,310px);border:10px solid var(--text);border-radius:38px;background:var(--card);padding:14px;box-shadow:0 12px 0 var(--mint)}
+    .phone:before{content:"";display:block;width:90px;height:20px;border-radius:0 0 14px 14px;background:var(--text);margin:-14px auto 10px}
+    .screen-head{background:var(--primary);color:var(--card);border-radius:22px;padding:19px;margin-bottom:13px}
+    .screen-head small{display:block}.screen-head strong{font-family:"Poppins";font-size:1.25rem}
+    .stock{display:grid;gap:9px}.stock-row{display:flex;justify-content:space-between;gap:12px;background:var(--mint);border-radius:14px;padding:12px 14px;font-weight:800}
+    .stock-row span:last-child{color:var(--primary)}.waste{margin-top:11px;background:var(--highlight);color:var(--text);padding:13px 14px;border-radius:14px;font-weight:800}
+    .problem{background:var(--primary);color:var(--card)}
+    .problem .label{color:var(--card)}.problem-lines{display:grid;gap:14px}
+    .problem-line{background:var(--card);color:var(--text);padding:20px;border-radius:var(--r2);font-weight:700}
+    .how{background:var(--mint)}.steps{display:grid;gap:18px;position:relative}
+    .step{background:var(--card);padding:24px;border-radius:var(--r2);position:relative;z-index:1}
+    .iconbox{width:50px;height:50px;border-radius:16px;display:grid;place-items:center;margin-bottom:16px;background:var(--mint);color:var(--primary)}
+    .step:nth-child(1) .iconbox{background:var(--highlight);color:var(--text)}
+    .step:nth-child(2) .iconbox{background:var(--secondary);color:var(--text)}
+    .step:nth-child(3) .iconbox{background:var(--primary);color:var(--card)}
+    .step p,.benefit p,.intro,.signup-copy p,details p{margin-top:9px;color:var(--muted)}
+    .benefits{background:var(--background)}.benefit-grid{display:grid;gap:16px}
+    .benefit{background:var(--card);border:2px solid var(--mint);padding:22px;border-radius:var(--r2);min-height:210px}
+    .benefit:nth-child(2) .iconbox{background:var(--highlight);color:var(--text)}.benefit:nth-child(3) .iconbox{background:var(--secondary);color:var(--text)}
+    .coming{display:block;margin-top:10px;color:var(--warning);font-weight:800}
+    .brand{background:var(--mint)}.brand-copy{max-width:720px}.brand-copy p+p{margin-top:12px}
+    .brand-caption{margin-top:18px;font-family:"Poppins";font-weight:700;color:var(--secondary);font-size:1.1rem}
+    .mockups{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:30px}
+    .mini-wrap{display:grid;gap:9px}.mini-phone{border:7px solid var(--text);background:var(--card);border-radius:28px;padding:9px;min-height:340px}
+    .notch{width:58px;height:12px;border-radius:0 0 10px 10px;background:var(--text);margin:-9px auto 9px}
+    .mini-head{border-radius:18px;padding:14px;min-height:88px;color:var(--text)}.fomo .mini-head{background:var(--fomo-teak)}.bakery .mini-head{background:var(--bakery-pink)}
+    .mini-brand{font-family:"Poppins";font-weight:700}.mini-sub{font-size:.78rem;margin-top:4px}.mini-body{display:grid;gap:9px;padding-top:11px}
+    .mini-chip{border-radius:12px;padding:11px;font-size:.78rem;font-weight:800;color:var(--text)}.fomo .mini-chip{background:var(--fomo-blue)}.bakery .mini-chip{background:var(--background)}
+    .mini-label{text-align:center;font-weight:800;font-size:.9rem}
+    .who{background:var(--background)}.intro{max-width:760px}.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:28px}
+    .tile{background:var(--card);border:2px solid var(--mint);border-radius:var(--r2);padding:18px;min-height:150px;font-weight:800}
+    .tile .iconbox{margin-bottom:12px}.tile:nth-child(3n+2) .iconbox{background:var(--highlight);color:var(--text)}.tile:nth-child(3n+3) .iconbox{background:var(--secondary);color:var(--text)}
+    .story{background:var(--secondary);position:relative;overflow:hidden}.story:before{content:"";position:absolute;width:220px;height:220px;border-radius:50%;background:var(--highlight);right:-70px;top:-70px}
+    .story-card{position:relative;max-width:770px;background:var(--card);color:var(--text);padding:28px;border-radius:var(--r3)}.story-card p+p{margin-top:14px}
+    .signup{background:var(--background)}.signup-grid{display:grid;gap:28px}.form-shell{background:var(--card);border:2px solid var(--mint);border-radius:var(--r3);padding:22px}
+    form{display:grid;gap:18px}.field{display:grid;gap:7px}label{font-weight:800}
+    input,select{width:100%;min-height:52px;border:2px solid var(--mint);border-radius:14px;padding:12px 14px;background:var(--card);color:var(--text)}
+    input:focus,select:focus{border-color:var(--primary);outline:3px solid var(--mint);outline-offset:1px}.error{min-height:1.2em;color:var(--danger);font-size:.92rem;font-weight:800}
+    [aria-invalid="true"]{border-color:var(--danger)}
+    .privacy{color:var(--muted);font-size:.95rem}
+    .form-warning{background:var(--highlight);color:var(--text);padding:12px 14px;border-radius:14px;font-weight:800;margin-bottom:18px}
+    .consent{display:flex;align-items:flex-start;gap:10px;font-weight:700}
+    .consent input{width:22px;height:22px;min-height:22px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--primary)}
+    .send-error{display:none;background:var(--danger);color:var(--card);padding:12px 14px;border-radius:14px;font-weight:800}
+    .send-error.show{display:block}
+    .spam-trap{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important}
+    .thanks{display:none;background:var(--mint);padding:24px;border-radius:var(--r2);font-weight:800}
+    .thanks.show{display:block}.submitted form{display:none}
+    .faq{background:var(--mint)}.faq-list{display:grid;gap:12px}details{background:var(--card);border-radius:var(--r2);padding:0 18px}
+    summary{list-style:none;min-height:62px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:16px;font-weight:800}
+    summary::-webkit-details-marker{display:none}summary:after{content:"+";color:var(--primary);font:700 1.45rem "Poppins"}details[open] summary:after{content:"–"}details p{padding:0 0 18px;margin-top:0}
+    footer{background:var(--text);color:var(--card);padding:48px 0 100px}.footer-grid{display:grid;gap:22px}.footer-word{font:700 1.45rem "Poppins"}.footer-tag{font-weight:800;margin-top:6px}.footer-meta{display:grid;gap:8px}footer a{color:var(--card)}
+    .sticky{position:fixed;z-index:60;left:0;right:0;bottom:0;background:var(--card);padding:10px 16px;border-top:2px solid var(--mint)}.sticky .btn{width:100%}
+    @media(min-width:760px){
+      .topbar{display:block}.hero{padding:72px 0 88px}.hero-grid{grid-template-columns:1.05fr .95fr;gap:52px}.section{padding:96px 0}
+      .steps{grid-template-columns:repeat(3,1fr);gap:22px}.steps:before{content:"";position:absolute;top:48px;left:15%;right:15%;height:4px;background:var(--highlight)}
+      .benefit-grid{grid-template-columns:repeat(3,1fr)}.tiles{grid-template-columns:repeat(4,1fr)}.signup-grid{grid-template-columns:.85fr 1.15fr;align-items:start}
+      .form-shell{padding:30px}.footer-grid{grid-template-columns:1fr auto;align-items:end}.sticky{display:none}footer{padding-bottom:48px}
+    }
+    @media(min-width:1020px){.problem-lines{grid-template-columns:repeat(3,1fr)}.problem-line{min-height:170px;display:flex;align-items:center}.brand .container{display:grid;grid-template-columns:1fr .9fr;gap:64px;align-items:center}.mockups{margin-top:0}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container inner">
+      <a class="wordmark" href="#top">EasyKharcha</a>
+      <a class="btn" href="#signup">Start free</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="tag">Buy. Use. Sell.</div>
+          <h1 id="hero-title">Know where your money goes.</h1>
+          <p>EasyKharcha helps you track what you buy, what gets used, what gets sold, and where stock or money may be slipping away.</p>
+          <div class="hero-actions">
+            <a class="btn" href="#signup">Start free</a>
+            <p class="hero-note">Takes about 2 minutes a day.</p>
+          </div>
+        </div>
+
+        <div class="hero-art" aria-label="EasyKharcha stock screen with made-up sample data">
+          <div class="shape s1" aria-hidden="true"></div><div class="shape s2" aria-hidden="true"></div><div class="shape s3" aria-hidden="true"></div>
+          <div class="phone">
+            <div class="screen-head"><small>Today</small><strong>Stock</strong></div>
+            <div class="stock">
+              <div class="stock-row"><span>Milk</span><span>12 L</span></div>
+              <div class="stock-row"><span>Flour</span><span>40 kg</span></div>
+              <div class="stock-row"><span>Oil</span><span>8 L</span></div>
+            </div>
+            <div class="waste">Wasted today: 1.5 kg</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section problem" aria-labelledby="problem-title">
+      <div class="container">
+        <div class="section-head"><div class="label">The problem</div><h2 id="problem-title">Sound familiar?</h2></div>
+        <div class="problem-lines">
+          <div class="problem-line">I know what I bought, but I don’t always know where it went.</div>
+          <div class="problem-line">Stock gets used, wasted or missed, and the numbers only show up later.</div>
+          <div class="problem-line">I sell every day, but I still have to guess what each item is really costing me.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section how" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head"><div class="label">How it works</div><h2 id="how-title">Three simple steps</h2></div>
+        <div class="steps">
+          <article class="step">
+            <div class="iconbox" aria-label="Buy icon">
+              <svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 4H5L3 8v2h1l1.4 8.4A2 2 0 0 0 7.4 20h9.2a2 2 0 0 0 2-1.6L20 10h1V8l-2-4h-2l1 4H6l1-4Zm1 7h8v2H8v-2Zm1 4h6v2H9v-2Z"/></svg>
+            </div>
+            <h3>Buy</h3>
+            <p>Record what you buy and how much it costs, so you always know what stock came in.</p>
+          </article>
+          <article class="step">
+            <div class="iconbox" aria-label="Use icon">
+              <svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2h10v3h2v17H5V5h2V2Zm2 3h6V4H9v1Zm-1 5h8V8H8v2Zm0 4h8v-2H8v2Zm0 4h5v-2H8v2Z"/></svg>
+            </div>
+            <h3>Use</h3>
+            <p>On your phone, record stock and wastage in about two minutes a day, without turning it into extra work.</p>
+          </article>
+          <article class="step">
+            <div class="iconbox" aria-label="Sell icon">
+              <svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 4h16v4H4V4Zm1 6h14v10H5V10Zm3 2v2h8v-2H8Zm0 4v2h5v-2H8Z"/></svg>
+            </div>
+            <h3>Sell</h3>
+            <p>Enter what you sold, then EasyKharcha helps you see what should be left, what may be missing, and what each item really cost you.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section benefits" aria-labelledby="benefits-title">
+      <div class="container">
+        <div class="section-head"><div class="label">What you get</div><h2 id="benefits-title">What EasyKharcha does for you</h2></div>
+        <div class="benefit-grid">
+          <article class="benefit"><div class="iconbox" aria-label="Missing stock icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v4H3V5Zm2 6h14v8H5v-8Zm3 2v4h3v-4H8Z"/></svg></div><h3>Catch missing stock</h3><p>See when what is left does not match what should be there.</p></article>
+          <article class="benefit"><div class="iconbox" aria-label="Wastage icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Z"/></svg></div><h3>Reduce wastage</h3><p>Keep track of stock that gets wasted, unused or written off.</p><span class="coming">Expiry alerts coming soon.</span></article>
+          <article class="benefit"><div class="iconbox" aria-label="Cost and profit icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 18h3v2H4v-2Zm5-4h3v6H9v-6Zm5-5h3v11h-3V9Zm5-5h2v16h-2V4Z"/></svg></div><h3>Know your real cost and profit</h3><p>See what each item costs you and what you make on it. Start from ready-made templates.</p></article>
+          <article class="benefit"><div class="iconbox" aria-label="Helper access icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0H5Zm14-8h3v2h-3v-2Zm0 4h3v2h-3v-2Z"/></svg></div><h3>Give helpers limited access</h3><p>Let your team update stock without giving them access to everything.</p></article>
+          <article class="benefit"><div class="iconbox" aria-label="Alerts icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-5H5l2-3v-4a5 5 0 0 1 10 0v4l2 3Z"/></svg></div><h3>Get useful alerts</h3><p>See when something needs attention, such as unusual waste or rising costs.</p></article>
+          <article class="benefit"><div class="iconbox" aria-label="Weekly summary icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 3h16v14H7l-3 3V3Zm4 4v2h8V7H8Zm0 4v2h6v-2H8Z"/></svg></div><h3>Get a weekly WhatsApp summary</h3><p>Share a simple weekly view with your partner or team on WhatsApp.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section brand" aria-labelledby="brand-title">
+      <div class="container">
+        <div class="brand-copy">
+          <div class="label">Your brand inside</div><h2 id="brand-title">Your brand inside</h2>
+          <p>EasyKharcha should feel like your own business tool.</p>
+          <p>Add your business name, logo and colours, and your workspace can match the way your business looks.</p>
+          <p>Every business gets its own identity inside the app.</p>
+          <div class="brand-caption">Your name, your logo, your colours.</div>
+        </div>
+        <div class="mockups">
+          <div class="mini-wrap">
+            <div class="mini-phone fomo" aria-label="FOMO, a restaurant">
+              <div class="notch"></div><div class="mini-head"><div class="mini-brand">FOMO</div><div class="mini-sub">Stock</div></div>
+              <div class="mini-body"><div class="mini-chip">Milk 12 L</div><div class="mini-chip">Flour 40 kg</div><div class="mini-chip">Oil 8 L</div></div>
+            </div><div class="mini-label">FOMO, a restaurant</div>
+          </div>
+          <div class="mini-wrap">
+            <div class="mini-phone bakery" aria-label="A bakery, example">
+              <div class="notch"></div><div class="mini-head"><div class="mini-brand">A bakery</div><div class="mini-sub">Stock</div></div>
+              <div class="mini-body"><div class="mini-chip">Butter 6 kg</div><div class="mini-chip">Sugar 18 kg</div><div class="mini-chip">Flour 32 kg</div></div>
+            </div><div class="mini-label">A bakery, example</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section who" aria-labelledby="who-title">
+      <div class="container">
+        <div class="section-head"><div class="label">Who it’s for</div><h2 id="who-title">Made for businesses like yours</h2><p class="intro">If you buy stock, use it to make or prepare something, and then sell it, EasyKharcha can help you keep track.</p></div>
+        <div class="tiles">
+          <div class="tile"><div class="iconbox" aria-label="Restaurants and cafés icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 3h2v8h2V3h2v8a4 4 0 0 1-3 3.87V21H5v-6.13A4 4 0 0 1 2 11V3h2v8h2V3H4Zm11 0h2v8h2V3h2v18h-2v-8h-4V3Z"/></svg></div>Restaurants and cafés</div>
+          <div class="tile"><div class="iconbox" aria-label="Cloud kitchens icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 10h16v10H4V10Zm2-6h12l2 4H4l2-4Zm2 9v4h3v-4H8Zm5 0v4h3v-4h-3Z"/></svg></div>Cloud kitchens</div>
+          <div class="tile"><div class="iconbox" aria-label="Bakeries and sweet shops icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 9h14l1 11H4L5 9Zm3-5h8l2 3H6l2-3Zm1 8v5h2v-5H9Zm4 0v5h2v-5h-2Z"/></svg></div>Bakeries and sweet shops</div>
+          <div class="tile"><div class="iconbox" aria-label="Tiffin and catering businesses icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 6h16v4H4V6Zm1 6h14v7H5v-7Zm3 2v3h8v-3H8Z"/></svg></div>Tiffin and catering businesses</div>
+          <div class="tile"><div class="iconbox" aria-label="Homestays icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m3 11 9-8 9 8v10h-7v-6h-4v6H3V11Z"/></svg></div>Homestays</div>
+          <div class="tile"><div class="iconbox" aria-label="Small manufacturers icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 20V8l6 3V8l6 3V4h6v16H3Zm3-4h3v2H6v-2Zm5 0h3v2h-3v-2Zm5 0h3v2h-3v-2Z"/></svg></div>Small manufacturers</div>
+          <div class="tile"><div class="iconbox" aria-label="Home businesses icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m3 11 9-8 9 8-1.4 1.4L12 5.7l-7.6 6.7L3 11Zm3 2h12v8h-5v-5h-2v5H6v-8Z"/></svg></div>Home businesses</div>
+          <div class="tile"><div class="iconbox" aria-label="Shops that pack or repack goods icon"><svg width="27" height="27" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v4H4V5Zm1 6h14v9H5v-9Zm4 2v2h6v-2H9Z"/></svg></div>Shops that pack or repack goods</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section story" aria-labelledby="story-title">
+      <div class="container">
+        <div class="story-card">
+          <div class="label">Our story</div><h2 id="story-title">Our story</h2>
+          <p>We built EasyKharcha because we wanted a simpler way to understand where stock and money were going.</p>
+          <p>We built it with and tested it at a restaurant in Bengaluru.</p>
+          <p>We are starting there, but the idea is much broader: make kharcha easier to understand for small business owners.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section signup" id="signup" aria-labelledby="signup-title">
+      <div class="container signup-grid">
+        <div class="signup-copy"><div class="label">Sign up</div><h2 id="signup-title">Start with EasyKharcha</h2><p>Tell us a little about your business and we’ll help you get started.</p></div>
+        <div class="form-shell" id="formShell">
+          <div class="form-warning" id="formWarning" role="status">Form is not connected yet</div>
+          <form id="signupForm" novalidate>
+            <div class="spam-trap" aria-hidden="true">
+              <label for="website">Website</label>
+              <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+            <div class="field"><label for="name">Your name</label><input id="name" name="name" autocomplete="name" required><div class="error" id="nameError" aria-live="polite"></div></div>
+            <div class="field"><label for="mobile">Mobile number</label><input id="mobile" name="mobile" inputmode="numeric" autocomplete="tel" maxlength="10" required><div class="error" id="mobileError" aria-live="polite"></div></div>
+            <div class="field"><label for="business">Business name</label><input id="business" name="businessName" autocomplete="organization" required><div class="error" id="businessError" aria-live="polite"></div></div>
+            <div class="field"><label for="city">City</label><input id="city" name="city" autocomplete="address-level2" required><div class="error" id="cityError" aria-live="polite"></div></div>
+            <div class="field">
+              <label for="businessType">Type of business</label>
+              <select id="businessType" name="businessType">
+                <option value="">Select one</option><option>Restaurant or cafe</option><option>Cloud kitchen</option><option>Bakery or sweets</option><option>Tiffin or catering</option><option>Homestay</option><option>Small manufacturing</option><option>Home business</option><option>Shop that packs or repacks</option><option>Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="salesTracking">How do you track sales today?</label>
+              <select id="salesTracking" name="salesTracking">
+                <option value="">Select one</option><option>Billing or POS software</option><option>Notebook</option><option>Excel</option><option>Not at all</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="consent" for="consent">
+                <input id="consent" name="consent" type="checkbox" required>
+                <span>I agree to be contacted about EasyKharcha and have read the <a href="[PRIVACY URL]">privacy page</a>.</span>
+              </label>
+              <div class="error" id="consentError" aria-live="polite"></div>
+            </div>
+            <div class="send-error" id="sendError" role="alert">Something went wrong. Please try again, or message us on WhatsApp.</div>
+            <button class="btn" type="submit" id="submitBtn">Start free</button>
+            <p class="privacy">We use your number only to set up your account and contact you about EasyKharcha. No spam.</p>
+          </form>
+          <div class="thanks" id="thanks" role="status" aria-live="polite">You’re in. We’ll contact you on WhatsApp or SMS within <strong>[X]</strong> to help you finish setup.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section faq" aria-labelledby="faq-title">
+      <div class="container">
+        <div class="section-head"><div class="label">FAQ</div><h2 id="faq-title">Questions owners ask</h2></div>
+        <div class="faq-list">
+          <details><summary>Is my data private?</summary><p>Yes. Your business information is kept private and used only to provide EasyKharcha to you.<br>[ADD PRIVACY DETAILS IF NEEDED]</p></details>
+          <details><summary>Do I need to change my billing system?</summary><p>No. Keep your current billing. You enter your sales in EasyKharcha, or upload your sales report.</p></details>
+          <details><summary>How long does setup take?</summary><p>Basic setup is designed to be quick. The exact time depends on how much stock and how many items you want to add.</p></details>
+          <details><summary>Do I need to enter every item before I start?</summary><p>No. You can start small and add more items as you go.</p></details>
+          <details><summary>Will it work on an old phone?</summary><p>EasyKharcha is designed for phone use and simple daily updates.<br>[ADD MINIMUM PHONE OR BROWSER REQUIREMENTS]</p></details>
+          <details><summary>What does it cost?</summary><p>[PRICING TO BE ADDED]</p></details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div><div class="footer-word">EasyKharcha</div><div class="footer-tag">Buy. Use. Sell.</div></div>
+      <div class="footer-meta">
+        <div>Built in Bengaluru</div>
+        <div>Contact: <strong>[EMAIL / WHATSAPP]</strong></div>
+        <div><a href="[PRIVACY URL]">Privacy</a></div>
+        <div><a href="[TERMS URL]">Terms</a></div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="sticky"><a class="btn" href="#signup">Start free</a></div>
+
+  <script>
+    const FORM_ENDPOINT = "";
+
+    const form = document.getElementById("signupForm");
+    const shell = document.getElementById("formShell");
+    const thanks = document.getElementById("thanks");
+    const submitBtn = document.getElementById("submitBtn");
+    const formWarning = document.getElementById("formWarning");
+    const sendError = document.getElementById("sendError");
+    const consent = document.getElementById("consent");
+    const consentError = document.getElementById("consentError");
+    const spamTrap = document.getElementById("website");
+
+    if (FORM_ENDPOINT.trim()) {
+      formWarning.hidden = true;
+    }
+
+    const checks = [
+      ["name","nameError",v => v.trim() ? "" : "Please enter your name."],
+      ["mobile","mobileError",v => /^[6-9]\d{9}$/.test(v.replace(/\D/g,"")) ? "" : "Enter a valid 10-digit Indian mobile number."],
+      ["business","businessError",v => v.trim() ? "" : "Please enter your business name."],
+      ["city","cityError",v => v.trim() ? "" : "Please enter your city."]
+    ];
+
+    function validateOne(id,errorId,rule){
+      const el=document.getElementById(id), error=document.getElementById(errorId), msg=rule(el.value);
+      error.textContent=msg;
+      el.setAttribute("aria-invalid",msg ? "true":"false");
+      return !msg;
+    }
+
+    function validateConsent(){
+      const msg = consent.checked ? "" : "Please agree before continuing.";
+      consentError.textContent = msg;
+      consent.setAttribute("aria-invalid", msg ? "true" : "false");
+      return !msg;
+    }
+
+    function showSuccess(){
+      shell.classList.add("submitted");
+      thanks.classList.add("show");
+    }
+
+    checks.forEach(([id,errorId,rule])=>{
+      const el=document.getElementById(id);
+      el.addEventListener("blur",()=>validateOne(id,errorId,rule));
+      el.addEventListener("input",()=>{if(el.getAttribute("aria-invalid")==="true") validateOne(id,errorId,rule)});
+    });
+
+    consent.addEventListener("change", validateConsent);
+
+    form.addEventListener("submit",async e=>{
+      e.preventDefault();
+      sendError.classList.remove("show");
+
+      if (spamTrap.value.trim()) {
+        showSuccess();
+        return;
+      }
+
+      let ok=true, first=null;
+      checks.forEach(([id,errorId,rule])=>{
+        const valid=validateOne(id,errorId,rule);
+        if(!valid&&!first) first=document.getElementById(id);
+        ok=ok&&valid;
+      });
+
+      const consentValid = validateConsent();
+      if(!consentValid && !first) first=consent;
+      ok=ok&&consentValid;
+
+      if(!ok){
+        first.focus();
+        return;
+      }
+
+      const payload={
+        name:document.getElementById("name").value.trim(),
+        mobile:document.getElementById("mobile").value.replace(/\D/g,""),
+        businessName:document.getElementById("business").value.trim(),
+        city:document.getElementById("city").value.trim(),
+        businessType:document.getElementById("businessType").value,
+        salesTracking:document.getElementById("salesTracking").value,
+        source:window.location.href,
+        timestamp:new Date().toISOString()
+      };
+
+      submitBtn.disabled=true;
+
+      try{
+        if(!FORM_ENDPOINT.trim()){
+          showSuccess();
+          return;
+        }
+
+        const r=await fetch(FORM_ENDPOINT,{
+          method:"POST",
+          headers:{"Content-Type":"text/plain;charset=utf-8"},
+          body:JSON.stringify(payload)
+        });
+
+        if(!r.ok) throw new Error("Request failed");
+        showSuccess();
+      }catch{
+        submitBtn.disabled=false;
+        sendError.classList.add("show");
+        sendError.scrollIntoView({block:"nearest"});
+      }
+    });
+  </script>
+</body>
+</html>

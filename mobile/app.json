@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "EasyKharcha",
+    "slug": "easykharcha",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "easykharcha",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": ["expo-router", "expo-font", "expo-asset"],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

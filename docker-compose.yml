@@ -1,0 +1,23 @@
+# PostgreSQL, ready for later. SQLite is what the backend actually uses locally by default (see
+# README) — this exists so switching is a DATABASE_URL change, not a project restructure, whenever
+# that's actually wanted.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: easykharcha
+      POSTGRES_USER: easykharcha
+      POSTGRES_PASSWORD: easykharcha
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easykharcha -d easykharcha"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

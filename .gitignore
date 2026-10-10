@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+db.sqlite3
+media/
+
+# Node
+node_modules/
+.expo/
+dist/
+*.tsbuildinfo
+npm-debug.*
+
+# Anything explicitly marked private, and the real POS export under legacy/ — never committed, stays
+# that way. None of these patterns are anchored to root, so they also cover legacy/'s own copies.
+_private/
+import_data/
+*.xlsx
+!legacy/**/fixtures/*.xlsx
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

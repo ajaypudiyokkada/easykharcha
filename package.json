@@ -1,0 +1,10 @@
+{
+  "name": "easykharcha",
+  "private": true,
+  "scripts": {
+    "check": "npm run check:backend && npm run check:mobile",
+    "check:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_backend.ps1",
+    "check:mobile": "npm --prefix mobile run check",
+    "smoke": "python scripts/smoke.py"
+  }
+}
