@@ -19,12 +19,24 @@ from audit.services import log
 from core.exceptions import AlreadyCapturedError, BusinessRuleError
 from core.fields import ZERO, d, q3
 from core.roles import Capability
-from inventory.models import DailyStock, Purchase, Request, RequestStatus
+from inventory.models import DailyStock, Purchase, Request, RequestStatus, Wastage
 
 
 def purchased_on(business, ingredient, day: date_type) -> Decimal:
     total = Purchase.objects.filter(business=business, ingredient=ingredient, date=day).aggregate(
         total=Sum("qty_received")
+    )["total"]
+    return d(total or ZERO)
+
+
+def wastage_on(business, ingredient, day: date_type) -> Decimal:
+    """Today's wastage logged so far for one ingredient.
+
+    Unlike opening/closing, wastage is not once-per-day — several spills can happen in one shift — so
+    this is a running total for the stock ledger to show, not a capture guard.
+    """
+    total = Wastage.objects.filter(business=business, ingredient=ingredient, date=day).aggregate(
+        total=Sum("qty")
     )["total"]
     return d(total or ZERO)
 

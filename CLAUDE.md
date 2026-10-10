@@ -136,6 +136,12 @@ tests should be what tells you.
   numbers — wrong defaults produce false variance alerts (DECISIONS O-3).
 - `yield_pct` divides **inside** the per-line sum, not outside it: yield is an ingredient property, so
   dishes mixing ingredients of different yields would otherwise be costed wrong.
+- The **Stock screen is a ledger**, not just opening/closing: `GET /stock` also returns `wastage_today`
+  (today's running total for that ingredient) and `can_add_ingredient` (whether the caller has
+  `Capability.CONFIG_ADD`, so Owner/Manager/SA get a quick-add form right there instead of a dead end
+  pointing at Admin). Showing an ingredient's *own* logged wastage back is not a blind-count violation
+  — it's what the same person just typed, not a sales-derived figure — but wastage has no
+  once-per-day lock the way opening/closing does: several spills can happen in one shift.
 
 ## Conventions
 

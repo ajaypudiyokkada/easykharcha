@@ -310,9 +310,19 @@ class StockListView(TenantAPIView):
                         opening or services.suggested_opening(business, ingredient, day)
                     )
                     + purchased,
+                    # Reflecting the ingredient's own logged wastage back on the stock ledger is not a
+                    # blind-count violation (non-negotiable #4) — it's what the same person just typed
+                    # in, not an expected-usage or variance figure computed from sales.
+                    "wastage_today": services.wastage_on(business, ingredient, day),
                 }
             )
-        return Response({"date": day, "rows": payload})
+        return Response(
+            {
+                "date": day,
+                "rows": payload,
+                "can_add_ingredient": self.access.can(Capability.CONFIG_ADD),
+            }
+        )
 
 
 class StockOpenView(TenantAPIView):

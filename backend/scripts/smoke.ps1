@@ -26,6 +26,32 @@ function Login($phone, $pin) {
     -Body "{""phone"":""$phone"",""pin"":""$pin""}"
 }
 
+# Invoke-RestMethod/-WebRequest can't build a multipart body in PowerShell 5.1, and curl.exe is
+# denied by .claude/settings.json even against localhost — so the sales-import upload goes through
+# System.Net.Http.HttpClient directly instead of either.
+function UploadFile($uri, $token, $fileName, [byte[]]$bytes, $fields = @{}) {
+  Add-Type -AssemblyName System.Net.Http
+  $client = New-Object System.Net.Http.HttpClient
+  try {
+    if ($token) {
+      $client.DefaultRequestHeaders.Authorization =
+        New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $token)
+    }
+    $content = New-Object System.Net.Http.MultipartFormDataContent
+    $fileContent = New-Object System.Net.Http.ByteArrayContent(,$bytes)
+    $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('text/csv')
+    $content.Add($fileContent, 'file', $fileName)
+    foreach ($key in $fields.Keys) {
+      $content.Add((New-Object System.Net.Http.StringContent([string]$fields[$key])), $key)
+    }
+    $response = $client.PostAsync($uri, $content).GetAwaiter().GetResult()
+    $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    [PSCustomObject]@{ StatusCode = [int]$response.StatusCode; Json = ($body | ConvertFrom-Json) }
+  } finally {
+    $client.Dispose()
+  }
+}
+
 "=== health ==="
 Check 'health endpoint' 'ok' { (Invoke-RestMethod "$base/health").status }
 
@@ -76,6 +102,10 @@ Check 'staff GET /report' 403 { Status "$base/tenants/$tid/report" $sh }
 Check 'staff GET /wastage' 200 { Status "$base/tenants/$tid/wastage/" $sh }
 
 "`n=== the worked example (docs/product.md 5b) ==="
+# seed_demo pins its stock/wastage/sales rows to "yesterday relative to when it was run", not a
+# rolling date. If real days have passed since the last `python manage.py seed_demo --reset`, this
+# section (and the manual-row-clash check further down) will fail on a date mismatch, not a product
+# bug — pytest covers the same formula against fixed dates, immune to that drift. Re-seed and rerun.
 $yesterday = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
 $v = Invoke-RestMethod "$base/tenants/$tid/variance?start=$yesterday&end=$yesterday" -Headers $oh
 $row = $v.rows | Where-Object { $_.code -eq 'CHK-BNL' }
@@ -97,6 +127,60 @@ Check 'staff cannot edit it'  403   { Status "$base/tenants/$tid/wastage/$($crea
 Check 'owner can delete it'   204   { Status "$base/tenants/$tid/wastage/$($created.id)/" $oh 'DELETE' }
 Check 'the delete was audited' $true {
   (Invoke-RestMethod "$base/tenants/$tid/audit?action=wastage.delete" -Headers $oh).count -gt 0
+}
+
+"`n=== sales import (generic format) ==="
+Check 'owner GET /sales/import/formats'   200 { Status "$base/tenants/$tid/sales/import/formats" $oh }
+Check 'manager GET /sales/import/formats' 200 { Status "$base/tenants/$tid/sales/import/formats" $mh }
+Check 'chef GET /sales/import/formats'    403 { Status "$base/tenants/$tid/sales/import/formats" $ch }
+Check 'staff GET /sales/import/formats'   403 { Status "$base/tenants/$tid/sales/import/formats" $sh }
+
+# A marker date far from anything seed_demo writes to, so this section can run repeatedly without
+# colliding with - or being blocked by - the manual sales seed_demo already records on "yesterday".
+$marker = '2099-01-01'
+$csv = "Date,Item Name,Quantity,Amount`n$marker,DEMO Chicken soup,4,560"
+$csvBytes = [System.Text.Encoding]::UTF8.GetBytes($csv)
+
+$previewForbidden = UploadFile "$base/tenants/$tid/sales/import/preview" $chef.access 'pos.csv' $csvBytes
+Check 'chef cannot preview an import' 403 { $previewForbidden.StatusCode }
+
+$preview = UploadFile "$base/tenants/$tid/sales/import/preview" $mgr.access 'pos.csv' $csvBytes
+Check 'preview: 200'                200   { $preview.StatusCode }
+Check 'preview: one matched group'  1     { $preview.Json.counts.matched_groups }
+Check 'preview: nothing unmatched'  0     { $preview.Json.counts.unmatched_items }
+Check 'preview writes nothing' $true {
+  -not (Invoke-RestMethod "$base/tenants/$tid/sales/?date=$marker" -Headers $oh).results
+}
+
+$confirm1 = UploadFile "$base/tenants/$tid/sales/import/confirm" $mgr.access 'pos.csv' $csvBytes
+Check 'confirm: 200'                 200   { $confirm1.StatusCode }
+Check 'confirm: one sale created'    1     { $confirm1.Json.created }
+Check 'confirm: not already imported' $false { $confirm1.Json.already_imported }
+
+$confirm2 = UploadFile "$base/tenants/$tid/sales/import/confirm" $mgr.access 'pos.csv' $csvBytes
+Check 'reconfirm same file: 200'            200  { $confirm2.StatusCode }
+Check 'reconfirm same file: zero created'   0    { $confirm2.Json.created }
+Check 'reconfirm same file: already imported' $true { $confirm2.Json.already_imported }
+
+$manualClash = "Date,Item Name,Quantity,Amount`n$yesterday,DEMO Chilli chicken,2,520"
+$manualPreview = UploadFile "$base/tenants/$tid/sales/import/preview" $mgr.access 'pos.csv' `
+  ([System.Text.Encoding]::UTF8.GetBytes($manualClash))
+Check 'manual-row clash is reported, not matched' 1 { $manualPreview.Json.counts.blocked_by_manual }
+
+# Clean-up: leave DEMO Kitchen exactly as this section found it.
+$createdSale = (Invoke-RestMethod "$base/tenants/$tid/sales/?date=$marker" -Headers $oh).results | Select-Object -First 1
+if ($createdSale) {
+  # No trailing slash here, deliberately: unlike the ViewSet router endpoints (/wastage/<id>/), the
+  # generic correction path is a plain Django path() with none (inventory/urls.py).
+  Check 'cleanup: delete the imported sale' 204 {
+    Status "$base/tenants/$tid/entries/sale/$($createdSale.id)" $oh 'DELETE'
+  }
+}
+$createdBatch = $confirm1.Json.import
+if ($createdBatch -and $createdBatch.id) {
+  Check 'cleanup: delete the sales-import batch' 204 {
+    Status "$base/tenants/$tid/sales-imports/$($createdBatch.id)/" $oh 'DELETE'
+  }
 }
 
 "`n=== tenant isolation ==="

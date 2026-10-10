@@ -33,64 +33,172 @@ type StockRow = {
   suggested_opening: string;
   purchased_today: string;
   closing_ceiling: string;
+  wastage_today: string;
 };
 
+const UNITS = [
+  { value: 'kg', label: 'kg' },
+  { value: 'l', label: 'litre' },
+  { value: 'pc', label: 'piece' },
+  { value: 'pkt', label: 'packet' },
+];
+
+const WASTAGE_REASONS = [
+  { value: 'spoilage', label: 'Spoilage' },
+  { value: 'trim', label: 'Trim/prep loss' },
+  { value: 'staff_meal', label: 'Staff meal' },
+  { value: 'spill', label: 'Spill/damage' },
+  { value: 'returned', label: 'Returned/rejected' },
+  { value: 'other', label: 'Other' },
+];
+
 /**
- * Daily stock capture.
+ * Daily stock ledger.
  *
- * This screen shows the previous closing (to pre-fill) and today's purchases (the impossible-count
- * ceiling) and nothing else. No expected usage, no variance, no sales — a count written to match a
- * displayed target is worthless (§1b).
+ * One card per tracked ingredient, three sections each: opening, closing, wastage — the three things
+ * anyone with a clipboard physically observes. No expected usage, no variance, no sales anywhere on
+ * this screen (§1b) — reflecting an ingredient's *own* logged wastage back is fine (it's what the same
+ * person just typed), but nothing here is computed from a sale.
+ *
+ * Owner/Manager/SA additionally get a quick "add an item" form at the top, so a new ingredient can be
+ * started without leaving this screen for Admin.
  */
 export default function Stock() {
   const [date, setDate] = useState(today());
-  const [mode, setMode] = useState<'open' | 'close'>('open');
-  const { data, isLoading, error, refetch } = useTenantQuery<{ date: string; rows: StockRow[] }>(
-    `/stock?date=${date}`,
-  );
+  const { data, isLoading, error, refetch } = useTenantQuery<{
+    date: string;
+    rows: StockRow[];
+    can_add_ingredient: boolean;
+  }>(`/stock?date=${date}`);
   const alerts = useAlerts();
 
   return (
     <Screen>
       <Title>Daily stock</Title>
+      <Caption>One ledger per ingredient — opening, closing and wastage all live here.</Caption>
       <Banner alerts={alerts.data ?? []} />
 
       <Card>
-        <Field label="Date" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" hint="YYYY-MM-DD" />
-        <Picker
-          label="Recording"
-          value={mode}
-          options={[
-            { value: 'open' as const, label: 'Opening count' },
-            { value: 'close' as const, label: 'Closing count' },
-          ]}
-          onChange={setMode}
+        <Field
+          label="Date"
+          value={date}
+          onChangeText={setDate}
+          placeholder="YYYY-MM-DD"
+          hint="YYYY-MM-DD"
         />
       </Card>
+
+      {data?.can_add_ingredient ? <AddIngredient onAdded={() => refetch()} /> : null}
 
       <ErrorNotice error={error} />
       {isLoading ? <Loading /> : null}
 
       {data?.rows.map((row) => (
-        <StockCard key={row.ingredient} row={row} date={date} mode={mode} onSaved={() => refetch()} />
+        <LedgerCard key={row.ingredient} row={row} date={date} onSaved={() => refetch()} />
       ))}
 
       {data && data.rows.length === 0 ? (
-        <Notice>No tracked ingredients yet. An Owner or Manager adds them under Admin → Ingredients.</Notice>
+        data.can_add_ingredient ? (
+          <Notice>Nothing to count yet — add the first ingredient above.</Notice>
+        ) : (
+          <Notice>No tracked ingredients yet. Ask an Owner or Manager to add them.</Notice>
+        )
       ) : null}
     </Screen>
   );
 }
 
-function StockCard({
+function AddIngredient({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [unit, setUnit] = useState('kg');
+  const [rate, setRate] = useState('');
+
+  const create = useTenantMutation(() => ({
+    suffix: '/ingredients/',
+    body: {
+      code,
+      name,
+      unit,
+      rate: rate || '0',
+      // Sensible defaults for a quick add. Yield %, shared/misc and the canonical tag are config a
+      // recipe needs, not what's needed to start counting stock — those stay in Admin.
+      recipe_unit: unit === 'pc' || unit === 'pkt' ? 'pc' : unit === 'l' ? 'ml' : 'g',
+      recipe_units_per_stock_unit: unit === 'kg' || unit === 'l' ? '1000' : '1',
+      yield_pct: '100',
+    },
+  }));
+
+  const reset = () => {
+    setOpen(false);
+    setCode('');
+    setName('');
+    setRate('');
+  };
+
+  if (!open) {
+    return (
+      <Button label="+ Add an item to the stock list" variant="secondary" onPress={() => setOpen(true)} />
+    );
+  }
+
+  return (
+    <Card>
+      <Heading>Add an item</Heading>
+      <Field label="Code" value={code} onChangeText={setCode} placeholder="CHK-BNL" />
+      <Field label="Name" value={name} onChangeText={setName} placeholder="Chicken boneless" />
+      <Picker label="Unit" value={unit} options={UNITS} onChange={setUnit} />
+      <Field
+        label="Standard rate per unit (optional)"
+        value={rate}
+        onChangeText={setRate}
+        keyboardType="decimal-pad"
+        hint="Used when there's no purchase yet to weight the cost against."
+      />
+      <ErrorNotice error={create.error} />
+      <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+        <View style={{ flex: 1 }}>
+          <Button
+            label="Add"
+            busy={create.isPending}
+            disabled={!code || !name}
+            onPress={() => create.mutate(undefined as never, { onSuccess: () => { reset(); onAdded(); } })}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button label="Cancel" variant="ghost" onPress={reset} />
+        </View>
+      </View>
+      <Caption>
+        Recipe yield, shared/misc, and the canonical tag are under More → Admin → Ingredients.
+      </Caption>
+    </Card>
+  );
+}
+
+function LedgerCard({ row, date, onSaved }: { row: StockRow; date: string; onSaved: () => void }) {
+  return (
+    <Card>
+      <Heading>{row.name}</Heading>
+      <CaptureSection mode="open" row={row} date={date} onSaved={onSaved} />
+      <View style={{ height: spacing.md }} />
+      <CaptureSection mode="close" row={row} date={date} onSaved={onSaved} />
+      <View style={{ height: spacing.md }} />
+      <WastageSection row={row} date={date} onSaved={onSaved} />
+    </Card>
+  );
+}
+
+function CaptureSection({
+  mode,
   row,
   date,
-  mode,
   onSaved,
 }: {
+  mode: 'open' | 'close';
   row: StockRow;
   date: string;
-  mode: 'open' | 'close';
   onSaved: () => void;
 }) {
   const existing = mode === 'open' ? row.opening_qty : row.closing_qty;
@@ -112,19 +220,16 @@ function StockCard({
 
   if (existing !== null && existing !== undefined) {
     return (
-      <Card>
-        <Heading>{row.name}</Heading>
-        <Body>
-          {mode === 'open' ? 'Opening' : 'Closing'} recorded: {qty(existing, row.unit)}
-        </Body>
+      <View style={{ gap: 2 }}>
+        <Caption>{mode === 'open' ? 'Opening' : 'Closing'}</Caption>
+        <Body>{qty(existing, row.unit)}</Body>
         <Caption>{by ? `by ${by}` : ''} · Corrections go through an Owner.</Caption>
-      </Card>
+      </View>
     );
   }
 
   return (
-    <Card>
-      <Heading>{row.name}</Heading>
+    <View style={{ gap: spacing.xs }}>
       <Field
         label={`${mode === 'open' ? 'Opening' : 'Closing'} count (${row.unit})`}
         value={value}
@@ -134,23 +239,84 @@ function StockCard({
         hint={hint}
       />
       {mutation.error ? <ErrorNotice error={mutation.error} /> : null}
-      <View style={{ height: spacing.xs }} />
       <Button
-        label="Save count"
+        label={`Save ${mode === 'open' ? 'opening' : 'closing'}`}
         disabled={!value}
         busy={mutation.isPending}
         onPress={() =>
           mutation.mutate(
             { qty: value },
-            {
-              onSuccess: () => {
-                setValue('');
-                onSaved();
-              },
-            },
+            { onSuccess: () => { setValue(''); onSaved(); } },
           )
         }
       />
-    </Card>
+    </View>
+  );
+}
+
+function WastageSection({ row, date, onSaved }: { row: StockRow; date: string; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('spoilage');
+  const [note, setNote] = useState('');
+
+  // Wastage is not once-per-day like opening/closing — several spills can happen in one shift — so
+  // this stays a running total with an always-available "add another" action, never a locked state.
+  const create = useTenantMutation(() => ({
+    suffix: '/wastage/',
+    body: { date, ingredient: row.ingredient, qty: amount, reason, note },
+  }));
+
+  const reset = () => {
+    setAmount('');
+    setNote('');
+    setOpen(false);
+  };
+
+  return (
+    <View style={{ gap: spacing.xs }}>
+      <Caption>Wastage today</Caption>
+      <Body>{qty(row.wastage_today, row.unit)}</Body>
+
+      {!open ? (
+        <Button label="+ Add wastage" variant="secondary" onPress={() => setOpen(true)} />
+      ) : (
+        <>
+          <Field
+            label={`Quantity (${row.unit})`}
+            value={amount}
+            onChangeText={setAmount}
+            keyboardType="decimal-pad"
+            placeholder="0.000"
+          />
+          <Picker label="Reason" value={reason} options={WASTAGE_REASONS} onChange={setReason} />
+          {reason === 'other' ? (
+            <Field
+              label="What happened?"
+              value={note}
+              onChangeText={setNote}
+              placeholder="e.g. power cut overnight"
+              hint="Required for Other — otherwise the report cannot tell you where waste comes from."
+            />
+          ) : null}
+          {create.error ? <ErrorNotice error={create.error} /> : null}
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <Button
+                label="Save wastage"
+                busy={create.isPending}
+                disabled={!amount || (reason === 'other' && !note.trim())}
+                onPress={() =>
+                  create.mutate(undefined as never, { onSuccess: () => { reset(); onSaved(); } })
+                }
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Cancel" variant="ghost" onPress={reset} />
+            </View>
+          </View>
+        </>
+      )}
+    </View>
   );
 }

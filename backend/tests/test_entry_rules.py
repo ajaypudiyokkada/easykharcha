@@ -138,6 +138,52 @@ class TestOpeningPrefill:
         assert Decimal(str(row["suggested_opening"])) == Decimal("0")
 
 
+class TestStockLedger:
+    """The stock screen is a ledger, not just opening/closing — it also reflects today's own
+    wastage entries back, and tells the client who may add a new item to track."""
+
+    def test_wastage_today_sums_every_entry_so_far(self, api, chef, business, chicken):
+        from inventory.models import Wastage
+
+        Wastage.objects.create(
+            business=business, date=DAY, ingredient=chicken, qty=Decimal("0.2"), reason="spoilage"
+        )
+        Wastage.objects.create(
+            business=business, date=DAY, ingredient=chicken, qty=Decimal("0.1"), reason="spill"
+        )
+        response = api(chef).get(f"/api/tenants/{business.id}/stock?date={DAY}")
+        row = next(r for r in response.data["rows"] if r["ingredient"] == chicken.id)
+        assert Decimal(str(row["wastage_today"])) == Decimal("0.300")
+
+    def test_wastage_today_is_zero_not_missing_when_nothing_logged(
+        self, api, chef, business, chicken
+    ):
+        response = api(chef).get(f"/api/tenants/{business.id}/stock?date={DAY}")
+        row = next(r for r in response.data["rows"] if r["ingredient"] == chicken.id)
+        assert Decimal(str(row["wastage_today"])) == Decimal("0")
+
+    def test_showing_logged_wastage_is_not_a_blind_count_violation(
+        self, api, chef, business, chicken
+    ):
+        """Reflecting what the chef just typed back to them is not the same as revealing an
+        expected-usage or variance figure computed from sales (non-negotiable #4)."""
+        response = api(chef).get(f"/api/tenants/{business.id}/stock?date={DAY}")
+        row = next(r for r in response.data["rows"] if r["ingredient"] == chicken.id)
+        assert {"expected", "variance", "unexplained", "sales", "revenue"}.isdisjoint(row.keys())
+
+    def test_can_add_ingredient_true_for_manager(self, api, manager, business):
+        response = api(manager).get(f"/api/tenants/{business.id}/stock?date={DAY}")
+        assert response.data["can_add_ingredient"] is True
+
+    def test_can_add_ingredient_true_for_owner(self, api, owner, business):
+        response = api(owner).get(f"/api/tenants/{business.id}/stock?date={DAY}")
+        assert response.data["can_add_ingredient"] is True
+
+    def test_can_add_ingredient_false_for_head_chef(self, api, chef, business):
+        response = api(chef).get(f"/api/tenants/{business.id}/stock?date={DAY}")
+        assert response.data["can_add_ingredient"] is False
+
+
 class TestBlindCounts:
     """Non-negotiable #4 — the stock screen must not reveal what the count 'should' be."""
 
