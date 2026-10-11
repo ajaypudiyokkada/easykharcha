@@ -11,14 +11,16 @@ type Props = Omit<
 >;
 
 /**
- * §3 in the kit: a `TextField` with a fixed "+91" prefix, numeric keypad, and a hard 10-digit limit
- * — India's mobile number length, not configurable per the kit.
+ * §3 in the kit: a `TextField` with a fixed "+91" prefix, a phone keypad, and a hard 10-digit limit
+ * — India's mobile number length, not configurable per the kit. `keyboardType="phone-pad"` (rather
+ * than `number-pad`) is what react-native-web turns into `inputMode="tel"` on the actual `<input>`.
  */
 export function MobileField(props: Props) {
   return (
     <TextField
       {...props}
-      keyboardType="number-pad"
+      keyboardType="phone-pad"
+      autoComplete="tel"
       maxLength={10}
       left={
         <View style={styles.prefix}>

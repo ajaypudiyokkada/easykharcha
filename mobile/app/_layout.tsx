@@ -9,6 +9,7 @@ import { Stack } from 'expo-router';
 import React from 'react';
 import { View } from 'react-native';
 
+import { AuthProvider } from '../src/auth/AuthContext';
 import { colours } from '../src/theme/tokens';
 
 export default function RootLayout() {
@@ -29,11 +30,19 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack
-      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colours.background } }}
-    >
-      <Stack.Screen name="index" options={{ title: 'EasyKharcha' }} />
-      <Stack.Screen name="dev/kit" options={{ title: 'Component kit' }} />
-    </Stack>
+    <AuthProvider>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colours.background },
+        }}
+      >
+        <Stack.Screen name="index" options={{ title: 'EasyKharcha' }} />
+        <Stack.Screen name="signup" options={{ title: 'Create account' }} />
+        <Stack.Screen name="login" options={{ title: 'Log in' }} />
+        <Stack.Screen name="home" options={{ title: 'Home' }} />
+        <Stack.Screen name="dev/kit" options={{ title: 'Component kit' }} />
+      </Stack>
+    </AuthProvider>
   );
 }

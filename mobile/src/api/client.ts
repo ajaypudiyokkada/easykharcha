@@ -27,6 +27,8 @@ export class ApiError extends Error {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
+  /** Sent as `Authorization: Bearer <token>` when present. */
+  token?: string;
 };
 
 /**
@@ -45,7 +47,11 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
   try {
     response = await fetch(`${API_URL}${path}`, {
       method: options.method ?? 'GET',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : null),
+      },
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });

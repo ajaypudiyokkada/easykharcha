@@ -1,5 +1,12 @@
 import React, { useId, useState } from 'react';
-import { Platform, StyleSheet, TextInput, View, type KeyboardTypeOptions } from 'react-native';
+import {
+  Platform,
+  StyleSheet,
+  TextInput,
+  View,
+  type KeyboardTypeOptions,
+  type TextInputProps,
+} from 'react-native';
 
 import { colours, fonts, radii, spacing, type } from '../theme/tokens';
 import { CONTROL_HEIGHT } from './constants';
@@ -16,6 +23,7 @@ export type TextFieldProps = {
   success?: string;
   secureTextEntry?: boolean;
   keyboardType?: KeyboardTypeOptions;
+  autoComplete?: TextInputProps['autoComplete'];
   maxLength?: number;
   autoFocus?: boolean;
   editable?: boolean;
@@ -40,6 +48,7 @@ export function TextField({
   success,
   secureTextEntry,
   keyboardType,
+  autoComplete,
   maxLength,
   autoFocus,
   editable = true,
@@ -74,6 +83,7 @@ export function TextField({
           placeholderTextColor={colours.muted}
           secureTextEntry={secureTextEntry}
           keyboardType={keyboardType}
+          autoComplete={autoComplete}
           maxLength={maxLength}
           autoFocus={autoFocus}
           editable={editable}
