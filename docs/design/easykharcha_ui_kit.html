@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EasyKharcha UI Kit</title>
+  <meta name="description" content="EasyKharcha mobile UI kit and component states.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --primary:#1F6F63;
+      --secondary:#6F72C9;
+      --highlight:#F28C45;
+      --mint:#EAF6F2;
+      --background:#FFF9F2;
+      --card:#FFFFFF;
+      --text:#22312E;
+      --muted:#65736F;
+      --success:#2F7D5A;
+      --warning:#A96008;
+      --danger:#B34242;
+
+      --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:40px; --s8:48px;
+      --r1:10px; --r2:16px; --r3:24px; --pill:999px;
+      --t-xs:13px; --t-sm:15px; --t-body:17px; --t-lg:20px; --t-xl:26px; --t-2xl:34px;
+    }
+
+    *{box-sizing:border-box}
+    html{background:var(--background);scroll-behavior:smooth}
+    body{
+      margin:0;
+      background:var(--background);
+      color:var(--text);
+      font:var(--t-body)/1.5 "Nunito Sans",system-ui,sans-serif;
+      -webkit-font-smoothing:antialiased;
+    }
+    button,input,select{font:inherit}
+    button,a,input,select,[role="button"]{min-height:48px}
+    a{color:var(--primary);font-weight:800;text-underline-offset:3px}
+    h1,h2,h3{font-family:"Poppins",system-ui,sans-serif;line-height:1.15;margin:0}
+    h1{font-size:var(--t-2xl)}
+    h2{font-size:var(--t-xl)}
+    h3{font-size:var(--t-lg)}
+    p{margin:0}
+    :focus-visible{outline:4px solid var(--highlight);outline-offset:3px;border-radius:12px}
+
+    .phone-width{
+      width:min(390px,100%);
+      margin:0 auto;
+      padding:var(--s5) var(--s4) 120px;
+    }
+    .kit-head{
+      background:var(--primary);
+      color:var(--card);
+      border-radius:var(--r3);
+      padding:var(--s5);
+      margin-bottom:var(--s6);
+    }
+    .kit-head p{margin-top:var(--s2)}
+    .tokens{
+      margin-top:var(--s5);
+      display:grid;
+      gap:var(--s3);
+    }
+    .token-row{
+      background:var(--card);
+      color:var(--text);
+      border-radius:var(--r2);
+      padding:var(--s4);
+    }
+    .token-row strong{display:block;font-family:"Poppins";margin-bottom:var(--s1)}
+    .token-row span{color:var(--muted);font-size:var(--t-sm)}
+
+    section{
+      margin-top:var(--s7);
+    }
+    .section-title{
+      margin-bottom:var(--s4);
+    }
+    .section-title p{
+      color:var(--muted);
+      margin-top:var(--s1);
+    }
+    .stack{display:grid;gap:var(--s4)}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
+
+    .demo{
+      background:var(--card);
+      border:2px solid var(--mint);
+      border-radius:var(--r3);
+      padding:var(--s4);
+    }
+    .demo-label{
+      font-size:var(--t-sm);
+      font-weight:800;
+      color:var(--muted);
+      margin-bottom:var(--s2);
+    }
+
+    .btn{
+      width:100%;
+      border-radius:var(--pill);
+      min-height:52px;
+      padding:12px 20px;
+      border:2px solid transparent;
+      font-weight:800;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      text-decoration:none;
+    }
+    .btn-primary{background:var(--primary);color:var(--card)}
+    .btn-secondary{background:var(--card);color:var(--text);border-color:var(--secondary)}
+    .btn-disabled{background:var(--mint);color:var(--muted);cursor:not-allowed}
+    .btn-link{background:transparent;color:var(--primary);border-color:transparent}
+    .spinner{
+      width:18px;height:18px;border-radius:50%;
+      border:3px solid var(--card);border-right-color:transparent;
+      animation:spin .8s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .field{display:grid;gap:7px}
+    label{font-weight:800}
+    .hint{font-size:var(--t-sm);color:var(--muted)}
+    .field-status{font-size:var(--t-sm);font-weight:800;display:flex;gap:7px;align-items:flex-start}
+    .field-status.error{color:var(--danger)}
+    .field-status.success{color:var(--success)}
+
+    .input-wrap{
+      min-height:52px;
+      display:flex;
+      align-items:center;
+      background:var(--card);
+      border:2px solid var(--mint);
+      border-radius:var(--r2);
+      overflow:hidden;
+    }
+    .input-wrap.focused{border-color:var(--primary);outline:3px solid var(--mint)}
+    .input-wrap.error{border-color:var(--danger)}
+    .input-wrap.success{border-color:var(--success)}
+    .input-wrap input{
+      width:100%;
+      min-height:48px;
+      border:0;
+      outline:0;
+      padding:0 14px;
+      background:transparent;
+      color:var(--text);
+    }
+    .prefix{
+      min-height:48px;
+      display:flex;
+      align-items:center;
+      padding:0 12px 0 14px;
+      border-right:2px solid var(--mint);
+      font-weight:800;
+      color:var(--text);
+    }
+    .inline-action{
+      min-width:64px;
+      border:0;
+      background:transparent;
+      color:var(--primary);
+      font-weight:800;
+      cursor:pointer;
+    }
+
+    .strength{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:6px;
+      margin-top:7px;
+    }
+    .strength span{
+      height:8px;border-radius:var(--pill);background:var(--mint)
+    }
+    .strength.weak span:nth-child(1){background:var(--danger)}
+    .strength.okay span:nth-child(-n+2){background:var(--warning)}
+    .strength.strong span{background:var(--success)}
+    .strength-word{font-size:var(--t-sm);font-weight:800;margin-top:6px}
+
+    select{
+      width:100%;
+      min-height:52px;
+      border:2px solid var(--mint);
+      border-radius:var(--r2);
+      padding:0 14px;
+      background:var(--card);
+      color:var(--text);
+    }
+
+    .picker{
+      border:2px solid var(--mint);
+      border-radius:var(--r2);
+      overflow:hidden;
+      background:var(--card);
+    }
+    .picker input{
+      width:100%;
+      min-height:52px;
+      border:0;
+      border-bottom:2px solid var(--mint);
+      padding:0 14px;
+      outline:0;
+      color:var(--text);
+    }
+    .picker-list{display:grid}
+    .picker-option{
+      border:0;
+      border-bottom:1px solid var(--mint);
+      background:var(--card);
+      color:var(--text);
+      text-align:left;
+      padding:12px 14px;
+      cursor:pointer;
+    }
+    .picker-option:last-child{border-bottom:0}
+
+    .check-row,.toggle-row{
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+    }
+    .check-row input{
+      width:24px;height:24px;min-height:24px;margin-top:2px;accent-color:var(--primary)
+    }
+    .two-line small,.toggle-copy small{display:block;color:var(--muted);font-size:var(--t-sm);font-weight:600;margin-top:2px}
+    .toggle-row{justify-content:space-between}
+    .toggle-copy{padding-right:10px}
+    .switch{
+      width:54px;height:30px;min-height:30px;
+      background:var(--muted);
+      border:0;border-radius:var(--pill);
+      padding:3px;cursor:pointer;flex:0 0 auto;
+    }
+    .switch::after{
+      content:"";display:block;width:24px;height:24px;border-radius:50%;
+      background:var(--card);transition:.18s transform ease;
+    }
+    .switch.on{background:var(--primary)}
+    .switch.on::after{transform:translateX(24px)}
+
+    .stepper{
+      background:var(--card);
+      border:2px solid var(--mint);
+      border-radius:var(--r3);
+      padding:var(--s4);
+    }
+    .stepper-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .back{
+      width:48px;height:48px;border:0;border-radius:50%;
+      background:var(--mint);color:var(--text);font-size:24px;cursor:pointer
+    }
+    .step-copy{flex:1}
+    .step-copy strong{font-family:"Poppins"}
+    .save-link{font-size:var(--t-sm)}
+    .progress{height:10px;background:var(--mint);border-radius:var(--pill);overflow:hidden;margin-top:14px}
+    .progress > span{display:block;width:50%;height:100%;background:var(--primary)}
+
+    .banner{
+      border-radius:var(--r2);
+      padding:14px;
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      font-weight:700;
+    }
+    .banner .badge{
+      width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+      font-weight:800;flex:0 0 auto;
+    }
+    .banner-success{background:var(--success);color:var(--card)}
+    .banner-error{background:var(--danger);color:var(--card)}
+    .banner-warning{background:var(--warning);color:var(--card)}
+    .banner-info{background:var(--mint);color:var(--text)}
+    .banner-info .badge{background:var(--secondary);color:var(--text)}
+    .banner-success .badge,.banner-error .badge,.banner-warning .badge{background:var(--card);color:var(--text)}
+
+    .card{
+      border:2px solid var(--mint);
+      border-radius:var(--r3);
+      background:var(--card);
+      padding:var(--s4);
+    }
+    .card p{color:var(--muted);margin-top:6px}
+    .list-row{
+      min-height:64px;
+      display:flex;align-items:center;gap:12px;
+      border:2px solid var(--mint);border-radius:var(--r2);padding:10px 12px;
+      background:var(--card)
+    }
+    .row-icon{
+      width:40px;height:40px;border-radius:12px;background:var(--highlight);
+      display:grid;place-items:center;color:var(--text);font-weight:800;flex:0 0 auto
+    }
+    .row-copy{flex:1}
+    .row-copy small{display:block;color:var(--muted)}
+    .chip{
+      min-height:32px;padding:6px 10px;border-radius:var(--pill);
+      background:var(--mint);color:var(--text);font-size:var(--t-sm);font-weight:800;
+      display:inline-flex;align-items:center
+    }
+    .empty{
+      text-align:center;border:2px dashed var(--secondary);border-radius:var(--r3);padding:var(--s5);background:var(--card)
+    }
+    .empty-icon{
+      width:56px;height:56px;border-radius:18px;background:var(--highlight);color:var(--text);
+      display:grid;place-items:center;margin:0 auto 12px;font-size:24px
+    }
+    .empty p{color:var(--muted);margin-top:6px}
+
+    .bottom-bar-demo{
+      position:relative;
+      border:2px solid var(--mint);
+      border-radius:var(--r3);
+      overflow:hidden;
+      min-height:180px;
+      background:var(--background);
+    }
+    .fake-content{padding:16px;color:var(--muted)}
+    .action-bar{
+      position:absolute;left:0;right:0;bottom:0;
+      background:var(--card);border-top:2px solid var(--mint);
+      padding:12px;display:grid;gap:8px
+    }
+
+    .swatches{
+      display:grid;grid-template-columns:repeat(5,1fr);gap:10px;
+    }
+    .swatch{
+      aspect-ratio:1;border:2px solid var(--mint);border-radius:16px;
+      cursor:pointer;display:grid;place-items:center;font-weight:900;font-size:20px;
+    }
+    .swatch.selected{outline:4px solid var(--text);outline-offset:2px}
+    .swatch[data-c="primary"]{background:var(--primary);color:var(--card)}
+    .swatch[data-c="secondary"]{background:var(--secondary);color:var(--text)}
+    .swatch[data-c="highlight"]{background:var(--highlight);color:var(--text)}
+    .swatch[data-c="mint"]{background:var(--mint);color:var(--text)}
+    .swatch[data-c="background"]{background:var(--background);color:var(--text)}
+    .swatch[data-c="card"]{background:var(--card);color:var(--text)}
+    .swatch[data-c="text"]{background:var(--text);color:var(--card)}
+    .swatch[data-c="success"]{background:var(--success);color:var(--card)}
+    .swatch[data-c="warning"]{background:var(--warning);color:var(--card)}
+    .swatch[data-c="danger"]{background:var(--danger);color:var(--card)}
+
+    .phone-preview{
+      width:220px;margin:0 auto;border:8px solid var(--text);border-radius:34px;
+      background:var(--card);padding:10px
+    }
+    .phone-preview::before{
+      content:"";display:block;width:70px;height:14px;background:var(--text);
+      border-radius:0 0 10px 10px;margin:-10px auto 8px
+    }
+    .preview-head{background:var(--primary);color:var(--card);border-radius:18px;padding:14px}
+    .preview-body{padding-top:10px;display:grid;gap:8px}
+    .preview-row{background:var(--mint);border-radius:12px;padding:10px;font-size:var(--t-sm);font-weight:800}
+
+    .sticky-page-note{
+      position:fixed;left:50%;transform:translateX(-50%);bottom:12px;
+      width:min(358px,calc(100% - 32px));background:var(--card);
+      border:2px solid var(--mint);border-radius:var(--r3);padding:10px;z-index:10
+    }
+
+
+    .appbar{
+      min-height:64px;display:flex;align-items:center;gap:10px;
+      background:var(--card);border:2px solid var(--mint);border-radius:var(--r3);
+      padding:8px 10px
+    }
+    .appbar .icon-btn{
+      width:48px;height:48px;border:0;border-radius:50%;
+      background:var(--mint);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:22px
+    }
+    .appbar-title{flex:1}
+    .appbar-title strong{font-family:"Poppins";display:block}
+    .appbar-title small{color:var(--muted)}
+    .bottom-nav{
+      display:grid;grid-template-columns:repeat(4,1fr);
+      background:var(--card);border:2px solid var(--mint);border-radius:var(--r3);padding:8px
+    }
+    .nav-item{
+      min-height:58px;border:0;background:transparent;color:var(--muted);
+      display:grid;place-items:center;gap:2px;border-radius:16px;font-size:13px;font-weight:800;cursor:pointer
+    }
+    .nav-item .nav-icon{font-size:20px;line-height:1}
+    .nav-item.active{background:var(--mint);color:var(--primary)}
+    .sheet-demo{
+      position:relative;min-height:310px;background:var(--background);
+      border:2px solid var(--mint);border-radius:var(--r3);overflow:hidden
+    }
+    .sheet-backdrop{position:absolute;inset:0;background:var(--text);opacity:.16}
+    .bottom-sheet{
+      position:absolute;left:0;right:0;bottom:0;background:var(--card);
+      border-radius:24px 24px 0 0;padding:12px 16px 18px
+    }
+    .grabber{width:48px;height:5px;border-radius:999px;background:var(--muted);margin:0 auto 14px}
+    .sheet-actions{display:grid;gap:10px;margin-top:14px}
+    .dialog-demo{
+      min-height:280px;display:grid;place-items:center;background:var(--mint);
+      border-radius:var(--r3);padding:18px
+    }
+    .dialog{
+      width:100%;background:var(--card);border-radius:var(--r3);padding:20px;border:2px solid var(--background)
+    }
+    .dialog p{color:var(--muted);margin-top:8px}
+    .dialog-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+    .toast-demo{
+      min-height:130px;position:relative;background:var(--background);
+      border:2px solid var(--mint);border-radius:var(--r3);padding:16px
+    }
+    .toast{
+      position:absolute;left:12px;right:12px;bottom:12px;
+      background:var(--text);color:var(--card);border-radius:16px;padding:13px 14px;
+      display:flex;align-items:center;gap:10px;font-weight:700
+    }
+    .toast span:first-child{
+      width:26px;height:26px;border-radius:50%;background:var(--success);color:var(--card);
+      display:grid;place-items:center;flex:0 0 auto
+    }
+    .skeleton-card{
+      background:var(--card);border:2px solid var(--mint);border-radius:var(--r3);padding:16px
+    }
+    .sk{background:var(--mint);border-radius:999px;overflow:hidden;position:relative}
+    .sk:after{
+      content:"";position:absolute;inset:0;transform:translateX(-100%);
+      background:linear-gradient(90deg,transparent,var(--card),transparent);animation:shimmer 1.4s infinite
+    }
+    @keyframes shimmer{100%{transform:translateX(100%)}}
+    .sk-title{height:20px;width:55%;margin-bottom:12px}.sk-line{height:14px;width:100%;margin-top:8px}.sk-line.short{width:72%}
+    .offline{
+      background:var(--card);border:2px solid var(--mint);border-radius:var(--r3);
+      padding:24px;text-align:center
+    }
+    .offline-icon{
+      width:62px;height:62px;border-radius:20px;background:var(--warning);color:var(--card);
+      display:grid;place-items:center;margin:0 auto 14px;font-size:26px;font-weight:800
+    }
+    .offline p{color:var(--muted);margin:7px 0 16px}
+    .upload{
+      border:2px dashed var(--secondary);border-radius:var(--r3);padding:22px;text-align:center;background:var(--card)
+    }
+    .upload-icon{
+      width:56px;height:56px;border-radius:18px;background:var(--highlight);color:var(--text);
+      display:grid;place-items:center;margin:0 auto 12px;font-size:24px
+    }
+    .upload p{color:var(--muted);margin:6px 0 14px}
+    .quantity{
+      display:grid;grid-template-columns:52px 1fr 52px;gap:10px;align-items:center
+    }
+    .qty-btn{
+      width:52px;height:52px;border:0;border-radius:50%;background:var(--mint);color:var(--text);
+      font-size:24px;font-weight:800;cursor:pointer
+    }
+    .qty-value{
+      min-height:52px;border:2px solid var(--mint);border-radius:var(--r2);
+      display:grid;place-items:center;background:var(--card);font-weight:800
+    }
+    .date-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .native-field{
+      min-height:52px;border:2px solid var(--mint);border-radius:var(--r2);
+      padding:0 12px;background:var(--card);color:var(--text);width:100%
+    }
+    .danger-outline{
+      background:var(--card);color:var(--danger);border-color:var(--danger)
+    }
+    .pull-demo{
+      border:2px solid var(--mint);border-radius:var(--r3);background:var(--card);padding:16px;text-align:center
+    }
+    .pull-indicator{
+      width:42px;height:42px;border-radius:50%;background:var(--mint);color:var(--primary);
+      display:grid;place-items:center;margin:0 auto 10px;font-size:22px
+    }
+    .safe-area-note{
+      background:var(--mint);border-radius:var(--r2);padding:12px 14px;color:var(--text);font-size:var(--t-sm)
+    }
+
+    @media (prefers-reduced-motion:reduce){
+      *{animation:none!important;transition:none!important}
+      html{scroll-behavior:auto}
+    }
+  </style>
+</head>
+<body>
+  <main class="phone-width">
+    <header class="kit-head">
+      <h1>EasyKharcha UI Kit</h1>
+      <p>Warm, simple components for a phone-first small-business app.</p>
+      <div class="tokens">
+        <div class="token-row">
+          <strong>Spacing scale</strong>
+          <span>4 · 8 · 12 · 16 · 24 · 32 · 40 · 48 px</span>
+        </div>
+        <div class="token-row">
+          <strong>Corner radii</strong>
+          <span>10 · 16 · 24 px · fully rounded</span>
+        </div>
+        <div class="token-row">
+          <strong>Type scale</strong>
+          <span>13 · 15 · 17 · 20 · 26 · 34 px</span>
+        </div>
+      </div>
+    </header>
+
+    <section>
+      <div class="section-title"><h2>1. Buttons</h2><p>All actions are at least 52px tall.</p></div>
+      <div class="stack">
+        <button class="btn btn-primary">Primary action</button>
+        <button class="btn btn-secondary">Secondary action</button>
+        <a class="btn btn-link" href="#inputs">Text link</a>
+        <button class="btn btn-disabled" disabled>Disabled</button>
+        <button class="btn btn-primary" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Loading</button>
+      </div>
+    </section>
+
+    <section id="inputs">
+      <div class="section-title"><h2>2. Text inputs</h2><p>Label, hint and state text stay visible.</p></div>
+      <div class="stack">
+        <div class="demo">
+          <div class="demo-label">Empty</div>
+          <div class="field">
+            <label for="empty">Business name</label>
+            <div class="input-wrap"><input id="empty" placeholder="e.g. Sahana Foods"></div>
+            <div class="hint">Use the name your customers know.</div>
+          </div>
+        </div>
+
+        <div class="demo">
+          <div class="demo-label">Focused</div>
+          <div class="field">
+            <label for="focused">City</label>
+            <div class="input-wrap focused"><input id="focused" value="Bengaluru"></div>
+            <div class="hint">Used for your business profile.</div>
+          </div>
+        </div>
+
+        <div class="demo">
+          <div class="demo-label">Filled</div>
+          <div class="field">
+            <label for="filled">Owner name</label>
+            <div class="input-wrap"><input id="filled" value="Anita Rao"></div>
+          </div>
+        </div>
+
+        <div class="demo">
+          <div class="demo-label">Error</div>
+          <div class="field">
+            <label for="errorInput">GST number</label>
+            <div class="input-wrap error"><input id="errorInput" value="ABC123" aria-invalid="true"></div>
+            <div class="field-status error"><span aria-hidden="true">!</span><span>Check this number and try again.</span></div>
+          </div>
+        </div>
+
+        <div class="demo">
+          <div class="demo-label">Success</div>
+          <div class="field">
+            <label for="successInput">Business name</label>
+            <div class="input-wrap success"><input id="successInput" value="Maya Bakes"></div>
+            <div class="field-status success"><span aria-hidden="true">✓</span><span>Looks good.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>3. Mobile number</h2><p>India-first entry with a fixed +91 prefix.</p></div>
+      <div class="demo">
+        <div class="field">
+          <label for="mobile">Mobile number</label>
+          <div class="input-wrap">
+            <span class="prefix">+91</span>
+            <input id="mobile" inputmode="numeric" maxlength="10" placeholder="98765 43210">
+          </div>
+          <div class="hint">10-digit mobile number.</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>4. Password</h2><p>Strength is shown with words as well as colour.</p></div>
+      <div class="stack">
+        <div class="demo">
+          <div class="field">
+            <label for="password">Create password</label>
+            <div class="input-wrap">
+              <input id="password" type="password" value="easy1234">
+              <button class="inline-action" type="button" id="togglePassword">Show</button>
+            </div>
+            <div class="strength okay" id="strengthMeter"><span></span><span></span><span></span></div>
+            <div class="strength-word" id="strengthWord">Okay</div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="demo"><div class="strength weak"><span></span><span></span><span></span></div><div class="strength-word">Weak</div></div>
+          <div class="demo"><div class="strength strong"><span></span><span></span><span></span></div><div class="strength-word">Strong</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>5. Pickers</h2><p>Use a simple select for short lists and search for longer ones.</p></div>
+      <div class="stack">
+        <div class="demo field">
+          <label for="typeSelect">Type of business</label>
+          <select id="typeSelect">
+            <option>Restaurant or cafe</option>
+            <option>Bakery or sweets</option>
+            <option>Home business</option>
+          </select>
+        </div>
+
+        <div class="demo">
+          <label for="pickerSearch">Searchable picker</label>
+          <div class="picker">
+            <input id="pickerSearch" placeholder="Search item">
+            <div class="picker-list" id="pickerList">
+              <button class="picker-option" type="button">Milk</button>
+              <button class="picker-option" type="button">Flour</button>
+              <button class="picker-option" type="button">Sugar</button>
+              <button class="picker-option" type="button">Oil</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>6. Checkbox & toggle</h2><p>Labels explain the action clearly.</p></div>
+      <div class="stack">
+        <div class="demo">
+          <label class="check-row">
+            <input type="checkbox">
+            <span class="two-line">I agree to save this stock count.<small>You can still edit it later.</small></span>
+          </label>
+        </div>
+        <div class="demo toggle-row">
+          <div class="toggle-copy">
+            <strong>Stock alerts</strong>
+            <small>Tell me when something needs attention.</small>
+          </div>
+          <button class="switch on" id="toggleSwitch" type="button" role="switch" aria-checked="true" aria-label="Stock alerts"></button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>7. Stepper header</h2><p>Progress stays clear without feeling heavy.</p></div>
+      <div class="stepper">
+        <div class="stepper-top">
+          <button class="back" type="button" aria-label="Go back">←</button>
+          <div class="step-copy"><strong>Step 3 of 6</strong></div>
+          <a class="save-link" href="#bottom">Save and continue later</a>
+        </div>
+        <div class="progress" aria-label="50 percent complete"><span></span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>8. Banners</h2><p>Status always includes an icon and words.</p></div>
+      <div class="stack">
+        <div class="banner banner-success"><span class="badge">✓</span><span>Saved successfully. Your stock count is up to date.</span></div>
+        <div class="banner banner-error"><span class="badge">!</span><span>Couldn’t save. Check your connection and try again.</span></div>
+        <div class="banner banner-warning"><span class="badge">!</span><span>2 items need attention before you finish.</span></div>
+        <div class="banner banner-info"><span class="badge">i</span><span>You can add more items later.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>9. Cards & rows</h2><p>Simple containers for everyday information.</p></div>
+      <div class="stack">
+        <div class="card">
+          <h3>Today’s stock</h3>
+          <p>12 items counted. 2 still need checking.</p>
+        </div>
+        <div class="list-row">
+          <div class="row-icon" aria-hidden="true">□</div>
+          <div class="row-copy"><strong>Milk</strong><small>12 L in stock</small></div>
+          <span class="chip">Checked</span>
+        </div>
+        <div class="empty">
+          <div class="empty-icon" aria-hidden="true">＋</div>
+          <h3>No items yet</h3>
+          <p>Add your first stock item to get started.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="bottom">
+      <div class="section-title"><h2>10. Sticky bottom action</h2><p>Primary action first, escape route second.</p></div>
+      <div class="bottom-bar-demo">
+        <div class="fake-content">Screen content continues above this action bar.</div>
+        <div class="action-bar">
+          <button class="btn btn-primary">Save and continue</button>
+          <a class="btn btn-link" href="#top">Skip for now</a>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>11. Colour swatch picker</h2><p>Ten approved colours. Selection uses a check mark and outline.</p></div>
+      <div class="demo">
+        <div class="swatches" id="swatches" aria-label="Choose a brand colour">
+          <button class="swatch selected" data-c="primary" aria-label="Primary selected" aria-pressed="true">✓</button>
+          <button class="swatch" data-c="secondary" aria-label="Secondary" aria-pressed="false"></button>
+          <button class="swatch" data-c="highlight" aria-label="Highlight" aria-pressed="false"></button>
+          <button class="swatch" data-c="mint" aria-label="Mint" aria-pressed="false"></button>
+          <button class="swatch" data-c="background" aria-label="Background" aria-pressed="false"></button>
+          <button class="swatch" data-c="card" aria-label="Card" aria-pressed="false"></button>
+          <button class="swatch" data-c="text" aria-label="Text" aria-pressed="false"></button>
+          <button class="swatch" data-c="success" aria-label="Success" aria-pressed="false"></button>
+          <button class="swatch" data-c="warning" aria-label="Warning" aria-pressed="false"></button>
+          <button class="swatch" data-c="danger" aria-label="Danger" aria-pressed="false"></button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>12. Phone preview</h2><p>A compact preview for branded screens and setup flows.</p></div>
+      <div class="demo">
+        <div class="phone-preview" aria-label="Small EasyKharcha phone preview">
+          <div class="preview-head">
+            <strong>EasyKharcha</strong>
+            <div style="margin-top:4px;font-size:15px">Today</div>
+          </div>
+          <div class="preview-body">
+            <div class="preview-row">Milk · 12 L</div>
+            <div class="preview-row">Flour · 40 kg</div>
+            <div class="preview-row">Oil · 8 L</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>13. Top app bar</h2><p>Back, title and optional action states for app screens.</p></div>
+      <div class="stack">
+        <div class="appbar">
+          <button class="icon-btn" type="button" aria-label="Go back">←</button>
+          <div class="appbar-title"><strong>Stock count</strong><small>Today</small></div>
+          <button class="icon-btn" type="button" aria-label="More options">⋮</button>
+        </div>
+        <div class="appbar">
+          <div class="appbar-title"><strong>EasyKharcha</strong><small>Your business</small></div>
+          <button class="icon-btn" type="button" aria-label="Profile">☺</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>14. Bottom navigation</h2><p>Four destinations, with one clear active state.</p></div>
+      <div class="bottom-nav" role="navigation" aria-label="Example bottom navigation">
+        <button class="nav-item active" type="button"><span class="nav-icon">⌂</span><span>Home</span></button>
+        <button class="nav-item" type="button"><span class="nav-icon">□</span><span>Stock</span></button>
+        <button class="nav-item" type="button"><span class="nav-icon">₹</span><span>Costs</span></button>
+        <button class="nav-item" type="button"><span class="nav-icon">☰</span><span>More</span></button>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>15. Bottom sheet</h2><p>Use for quick choices without leaving the current task.</p></div>
+      <div class="sheet-demo">
+        <div class="sheet-backdrop" aria-hidden="true"></div>
+        <div class="bottom-sheet" role="dialog" aria-modal="true" aria-label="Choose action">
+          <div class="grabber" aria-hidden="true"></div>
+          <h3>What do you want to add?</h3>
+          <div class="sheet-actions">
+            <button class="btn btn-primary" type="button">Add stock item</button>
+            <button class="btn btn-secondary" type="button">Record wastage</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>16. Dialog</h2><p>Short, focused decisions with one safe primary path.</p></div>
+      <div class="dialog-demo">
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+          <h3 id="dialogTitle">Leave without saving?</h3>
+          <p>Your changes on this screen will be lost.</p>
+          <div class="dialog-actions">
+            <button class="btn btn-secondary" type="button">Stay</button>
+            <button class="btn danger-outline" type="button">Leave</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>17. Toast / snackbar</h2><p>Brief confirmation after an action.</p></div>
+      <div class="toast-demo">
+        <div class="toast" role="status"><span>✓</span><span>Stock count saved.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>18. Loading skeleton</h2><p>Use while content is loading instead of a blank screen.</p></div>
+      <div class="skeleton-card" aria-label="Loading content">
+        <div class="sk sk-title"></div>
+        <div class="sk sk-line"></div>
+        <div class="sk sk-line"></div>
+        <div class="sk sk-line short"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>19. Offline state</h2><p>Important for weak or intermittent mobile connections.</p></div>
+      <div class="offline">
+        <div class="offline-icon" aria-hidden="true">↯</div>
+        <h3>You’re offline</h3>
+        <p>You can keep working. We’ll sync your changes when you’re connected again.</p>
+        <button class="btn btn-primary" type="button">Try again</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>20. Camera / file upload</h2><p>For bills, stock sheets and supporting photos.</p></div>
+      <div class="upload">
+        <div class="upload-icon" aria-hidden="true">▣</div>
+        <h3>Add a photo or file</h3>
+        <p>Take a photo or choose a file from your phone.</p>
+        <div class="stack">
+          <button class="btn btn-primary" type="button">Use camera</button>
+          <button class="btn btn-secondary" type="button">Choose file</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>21. Quantity input</h2><p>Large controls for one-handed stock counting.</p></div>
+      <div class="demo">
+        <label for="qtyValue">Quantity</label>
+        <div class="quantity" style="margin-top:8px">
+          <button class="qty-btn" id="qtyMinus" type="button" aria-label="Decrease quantity">−</button>
+          <div class="qty-value" id="qtyValue" aria-live="polite">12 kg</div>
+          <button class="qty-btn" id="qtyPlus" type="button" aria-label="Increase quantity">+</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>22. Date & time</h2><p>Native controls work well in both PWA and compiled app shells.</p></div>
+      <div class="demo">
+        <div class="date-row">
+          <div class="field"><label for="dateField">Date</label><input class="native-field" id="dateField" type="date"></div>
+          <div class="field"><label for="timeField">Time</label><input class="native-field" id="timeField" type="time"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>23. Destructive confirmation</h2><p>Danger is explicit in both words and styling.</p></div>
+      <div class="dialog">
+        <h3>Delete this stock item?</h3>
+        <p>This cannot be undone.</p>
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" type="button">Cancel</button>
+          <button class="btn" style="background:var(--danger);color:var(--card)" type="button">Delete item</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>24. Pull to refresh</h2><p>A lightweight refresh treatment for list screens.</p></div>
+      <div class="pull-demo">
+        <div class="pull-indicator" aria-hidden="true">↓</div>
+        <strong>Pull down to refresh</strong>
+        <div class="hint">Last updated just now</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>PWA → app notes</h2><p>Keep these rules when screens move into a native shell.</p></div>
+      <div class="stack">
+        <div class="safe-area-note">Use <strong>env(safe-area-inset-top)</strong> and <strong>env(safe-area-inset-bottom)</strong> around fixed bars.</div>
+        <div class="safe-area-note">Keep text inputs at 16px or larger so iOS does not auto-zoom.</div>
+        <div class="safe-area-note">Treat offline, loading, camera, file access and sync as first-class states from the start.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="sticky-page-note" aria-label="UI kit note">
+    <strong>390px mobile kit</strong>
+  </div>
+
+  <script>
+    const password = document.getElementById('password');
+    const togglePassword = document.getElementById('togglePassword');
+    const strengthMeter = document.getElementById('strengthMeter');
+    const strengthWord = document.getElementById('strengthWord');
+
+    togglePassword.addEventListener('click', () => {
+      const showing = password.type === 'text';
+      password.type = showing ? 'password' : 'text';
+      togglePassword.textContent = showing ? 'Show' : 'Hide';
+    });
+
+    password.addEventListener('input', () => {
+      const v = password.value;
+      let level = 'weak', word = 'Weak';
+      if (v.length >= 10 && /[A-Z]/.test(v) && /[0-9]/.test(v)) { level = 'strong'; word = 'Strong'; }
+      else if (v.length >= 8) { level = 'okay'; word = 'Okay'; }
+      strengthMeter.className = 'strength ' + level;
+      strengthWord.textContent = word;
+    });
+
+    const switchButton = document.getElementById('toggleSwitch');
+    switchButton.addEventListener('click', () => {
+      const isOn = switchButton.classList.toggle('on');
+      switchButton.setAttribute('aria-checked', String(isOn));
+    });
+
+    const search = document.getElementById('pickerSearch');
+    const options = [...document.querySelectorAll('.picker-option')];
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      options.forEach(o => o.hidden = !o.textContent.toLowerCase().includes(q));
+    });
+    options.forEach(o => o.addEventListener('click', () => {
+      search.value = o.textContent;
+      options.forEach(x => x.hidden = false);
+    }));
+
+    const swatches = [...document.querySelectorAll('.swatch')];
+    swatches.forEach(s => s.addEventListener('click', () => {
+      swatches.forEach(x => {
+        x.classList.remove('selected');
+        x.textContent = '';
+        x.setAttribute('aria-pressed','false');
+      });
+      s.classList.add('selected');
+      s.textContent = '✓';
+      s.setAttribute('aria-pressed','true');
+    }));
+
+    const qtyValue = document.getElementById('qtyValue');
+    let qty = 12;
+    document.getElementById('qtyMinus').addEventListener('click', () => {
+      qty = Math.max(0, qty - 1);
+      qtyValue.textContent = qty + ' kg';
+    });
+    document.getElementById('qtyPlus').addEventListener('click', () => {
+      qty += 1;
+      qtyValue.textContent = qty + ' kg';
+    });
+
+    const navItems = [...document.querySelectorAll('.nav-item')];
+    navItems.forEach(item => item.addEventListener('click', () => {
+      navItems.forEach(x => x.classList.remove('active'));
+      item.classList.add('active');
+    }));
+
+  </script>
+</body>
+</html>

@@ -1,4 +1,8 @@
-import { NunitoSans_400Regular, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
+import {
+  NunitoSans_400Regular,
+  NunitoSans_700Bold,
+  NunitoSans_800ExtraBold,
+} from '@expo-google-fonts/nunito-sans';
 import { Poppins_600SemiBold, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
@@ -15,6 +19,7 @@ export default function RootLayout() {
     Poppins_700Bold,
     NunitoSans_400Regular,
     NunitoSans_700Bold,
+    NunitoSans_800ExtraBold,
   });
 
   if (!fontsLoaded) {
@@ -28,6 +33,7 @@ export default function RootLayout() {
       screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colours.background } }}
     >
       <Stack.Screen name="index" options={{ title: 'EasyKharcha' }} />
+      <Stack.Screen name="dev/kit" options={{ title: 'Component kit' }} />
     </Stack>
   );
 }

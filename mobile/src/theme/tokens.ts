@@ -49,4 +49,8 @@ export const fonts = {
   headingBold: 'Poppins_700Bold',
   body: 'NunitoSans_400Regular',
   bodyBold: 'NunitoSans_700Bold',
+  // Added in Step 2, additive only (no existing value changed): the approved UI kit sets
+  // font-weight:800 on buttons, field labels, status text and badges throughout. 400/600/700 alone
+  // can't reach that weight.
+  bodyExtraBold: 'NunitoSans_800ExtraBold',
 } as const;
