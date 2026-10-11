@@ -4,6 +4,7 @@ One file, not a base/dev/prod split — Step 1 is foundation only. Everything th
 laptop and a real deployment is read from the environment, not from which file gets imported.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -23,6 +24,8 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "rest_framework",
+    "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "accounts",
 ]
@@ -43,6 +46,23 @@ DATABASES = {
 
 AUTH_USER_MODEL = "accounts.User"
 
+# Argon2 first (used for every new hash); the rest are Django's own defaults, kept only so a password
+# hashed by a prior algorithm would still verify — there are none yet, since this user model is new.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+]
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+]
+
 LANGUAGE_CODE = "en-in"
 TIME_ZONE = "Asia/Kolkata"
 USE_I18N = True
@@ -51,11 +71,39 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
-    # No login yet (Step 1 is foundation only), so no authentication classes — that also means
-    # contrib.sessions is not needed, since DRF's default SessionAuthentication would otherwise want it.
-    "DEFAULT_AUTHENTICATION_CLASSES": (),
+    # JWT only — no SessionAuthentication, so contrib.sessions is still not needed.
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.AllowAny",),
     "EXCEPTION_HANDLER": "config.exceptions.exception_handler",
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_ACCESS_MINUTES", default=60)),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_REFRESH_DAYS", default=30)),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+}
+
+# Shown to the user at signup; stored on the user as consent_version so a later change to the
+# consent text can be told apart from what an existing user actually agreed to.
+CONSENT_VERSION = env.str("CONSENT_VERSION", default="1.0")
+
+# Interface + flag only (accounts/otp.py) — no OTP endpoint exists yet, so this has no effect yet.
+OTP_REQUIRED = env.bool("OTP_REQUIRED", default=False)
+
+LOGIN_LOCKOUT_THRESHOLD = 5
+LOGIN_LOCKOUT_MINUTES = 15
+
+# (attempts, window in seconds). Dev-only LocMemCache backs this — see accounts/ratelimit.py.
+RATE_LIMITS = {
+    "signup_per_mobile": (5, 3600),
+    "signup_per_ip": (20, 3600),
+    "login_per_mobile": (10, 900),
+    "login_per_ip": (30, 900),
 }
 
 # Dev default matches the Expo web dev server exactly (see mobile/package.json's `start` script).
