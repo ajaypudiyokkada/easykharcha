@@ -24,8 +24,10 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = {
+export type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** A `FormData` body (e.g. a file upload) is sent as-is, with no `Content-Type` set — the browser
+   * fills in the multipart boundary itself. Anything else is JSON-encoded. */
   body?: unknown;
   /** Sent as `Authorization: Bearer <token>` when present. */
   token?: string;
@@ -43,16 +45,23 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
       method: options.method ?? 'GET',
       headers: {
-        'Content-Type': 'application/json',
         Accept: 'application/json',
+        ...(isFormData ? null : { 'Content-Type': 'application/json' }),
         ...(options.token ? { Authorization: `Bearer ${options.token}` } : null),
       },
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body:
+        options.body === undefined
+          ? undefined
+          : isFormData
+            ? (options.body as FormData)
+            : JSON.stringify(options.body),
       signal: controller.signal,
     });
   } catch {

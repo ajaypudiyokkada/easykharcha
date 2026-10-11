@@ -28,6 +28,8 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "accounts",
+    "businesses",
+    "audit",
 ]
 
 MIDDLEWARE = [
@@ -45,6 +47,12 @@ DATABASES = {
 }
 
 AUTH_USER_MODEL = "accounts.User"
+
+# Uploaded files are runtime data, not source code: gitignored (see .gitignore's `media/` entry) and
+# overridable so a real deployment can point this at a storage volume outside the deployed code tree
+# entirely, the same way DATABASE_URL overrides the dev sqlite default above.
+MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "media"))
+MEDIA_URL = "/media/"
 
 # Argon2 first (used for every new hash); the rest are Django's own defaults, kept only so a password
 # hashed by a prior algorithm would still verify — there are none yet, since this user model is new.
@@ -97,6 +105,9 @@ OTP_REQUIRED = env.bool("OTP_REQUIRED", default=False)
 
 LOGIN_LOCKOUT_THRESHOLD = 5
 LOGIN_LOCKOUT_MINUTES = 15
+
+MAX_BUSINESSES_PER_USER = env.int("MAX_BUSINESSES_PER_USER", default=3)
+MAX_LOGO_UPLOAD_BYTES = 2 * 1024 * 1024
 
 # (attempts, window in seconds). Dev-only LocMemCache backs this — see accounts/ratelimit.py.
 RATE_LIMITS = {

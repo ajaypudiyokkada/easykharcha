@@ -41,6 +41,9 @@ export default function RootLayout() {
         <Stack.Screen name="signup" options={{ title: 'Create account' }} />
         <Stack.Screen name="login" options={{ title: 'Log in' }} />
         <Stack.Screen name="home" options={{ title: 'Home' }} />
+        <Stack.Screen name="setup/1" options={{ title: 'Your business' }} />
+        <Stack.Screen name="setup/2" options={{ title: 'Your brand' }} />
+        <Stack.Screen name="setup/saved" options={{ title: 'Setup saved' }} />
         <Stack.Screen name="dev/kit" options={{ title: 'Component kit' }} />
       </Stack>
     </AuthProvider>

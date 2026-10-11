@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { Business } from './business';
 
 export type AuthUser = {
   id: number;
@@ -50,7 +51,7 @@ export async function logout(refreshToken: string): Promise<void> {
 
 export type MeResponse = {
   user: AuthUser;
-  businesses: unknown[];
+  businesses: Business[];
 };
 
 export function me(accessToken: string): Promise<MeResponse> {

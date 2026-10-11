@@ -8,14 +8,15 @@ import React, {
   useState,
 } from 'react';
 
+import type { Business } from '../api/business';
 import {
   login as loginApi,
   logout as logoutApi,
-  me as meApi,
   refresh as refreshApi,
   type AuthUser,
+  type MeResponse,
 } from '../api/auth';
-import { ApiError } from '../api/client';
+import { api, ApiError, type RequestOptions } from '../api/client';
 import { tokenStorage } from './storage';
 
 export type AuthStatus = 'bootstrapping' | 'signedOut' | 'signedIn';
@@ -23,8 +24,14 @@ export type AuthStatus = 'bootstrapping' | 'signedOut' | 'signedIn';
 type AuthContextValue = {
   status: AuthStatus;
   user: AuthUser | null;
-  login: (mobile: string, secret: string) => Promise<void>;
+  businesses: Business[];
+  login: (mobile: string, secret: string) => Promise<MeResponse>;
   logout: () => Promise<void>;
+  /** A token-attached, refresh-on-401-once fetch for any endpoint that needs a signed-in user. */
+  authedFetch: <T>(path: string, options?: RequestOptions) => Promise<T>;
+  /** Re-fetches /me and updates `user`/`businesses` — used after the wizard writes a business, so
+   * the rest of the app sees the change without needing a fresh login. */
+  refreshMe: () => Promise<MeResponse>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -32,6 +39,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('bootstrapping');
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
   // The tokens that actually go on the wire. Refs, not state — they're read inside callbacks that
   // must never see a stale closure, and reading them should never itself trigger a re-render.
   const accessRef = useRef<string | null>(null);
@@ -42,30 +50,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshRef.current = null;
     await tokenStorage.clear();
     setUser(null);
+    setBusinesses([]);
     setStatus('signedOut');
   }, []);
 
-  // GET /me, refreshing the access token exactly once if it's expired. Any failure past that one
-  // retry (expired refresh token, blacklisted, network down) propagates to the caller.
-  const fetchMeWithRefresh = useCallback(async (): Promise<AuthUser> => {
-    if (!accessRef.current) {
-      throw new ApiError('server', 'Not signed in.');
-    }
-    try {
-      const response = await meApi(accessRef.current);
-      return response.user;
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401 && refreshRef.current) {
-        const pair = await refreshApi(refreshRef.current);
-        accessRef.current = pair.access;
-        refreshRef.current = pair.refresh;
-        await tokenStorage.save(pair.access, pair.refresh);
-        const response = await meApi(accessRef.current);
-        return response.user;
+  // Attaches the current access token, retries exactly once after a refresh on a 401, and signs the
+  // device out locally if that retry also fails — any authenticated call in the app goes through
+  // this, not just /me.
+  const authedFetch = useCallback(
+    async function authedFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+      if (!accessRef.current) {
+        throw new ApiError('server', 'Not signed in.');
       }
-      throw err;
-    }
-  }, []);
+      try {
+        return await api<T>(path, { ...options, token: accessRef.current });
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401 && refreshRef.current) {
+          try {
+            const pair = await refreshApi(refreshRef.current);
+            accessRef.current = pair.access;
+            refreshRef.current = pair.refresh;
+            await tokenStorage.save(pair.access, pair.refresh);
+            return await api<T>(path, { ...options, token: accessRef.current });
+          } catch (refreshErr) {
+            await signOutLocally();
+            throw refreshErr;
+          }
+        }
+        throw err;
+      }
+    },
+    [signOutLocally],
+  );
+
+  const refreshMe = useCallback(async (): Promise<MeResponse> => {
+    const response = await authedFetch<MeResponse>('/me/');
+    setUser(response.user);
+    setBusinesses(response.businesses);
+    return response;
+  }, [authedFetch]);
 
   useEffect(() => {
     (async () => {
@@ -77,8 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accessRef.current = stored.access;
       refreshRef.current = stored.refresh;
       try {
-        const freshUser = await fetchMeWithRefresh();
-        setUser(freshUser);
+        await refreshMe();
         setStatus('signedIn');
       } catch {
         await signOutLocally();
@@ -89,16 +111,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (mobile: string, secret: string) => {
+    async (mobile: string, secret: string): Promise<MeResponse> => {
       const pair = await loginApi(mobile, secret);
       accessRef.current = pair.access;
       refreshRef.current = pair.refresh;
-      const freshUser = await fetchMeWithRefresh();
+      const response = await authedFetch<MeResponse>('/me/');
       await tokenStorage.save(pair.access, pair.refresh);
-      setUser(freshUser);
+      setUser(response.user);
+      setBusinesses(response.businesses);
       setStatus('signedIn');
+      return response;
     },
-    [fetchMeWithRefresh],
+    [authedFetch],
   );
 
   const logout = useCallback(async () => {
@@ -114,7 +138,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOutLocally();
   }, [signOutLocally]);
 
-  const value = useMemo(() => ({ status, user, login, logout }), [status, user, login, logout]);
+  const value = useMemo(
+    () => ({ status, user, businesses, login, logout, authedFetch, refreshMe }),
+    [status, user, businesses, login, logout, authedFetch, refreshMe],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

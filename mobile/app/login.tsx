@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../src/auth/AuthContext';
 import { ApiError } from '../src/api/client';
+import { nextRouteAfterAuth } from '../src/business/routing';
 import { strings } from '../src/strings';
 import { Banner, BottomActionBar, Heading, MobileField, Screen, Small, TextField } from '../src/ui';
 import { colours, fonts, spacing } from '../src/theme/tokens';
@@ -47,8 +48,8 @@ export default function Login() {
 
     setSubmitting(true);
     try {
-      await login(mobile, password);
-      router.replace('/home');
+      const { businesses } = await login(mobile, password);
+      router.replace(nextRouteAfterAuth(businesses));
     } catch (err) {
       if (err instanceof ApiError && err.code === 'invalid_credentials') {
         setPasswordError(s.errors.invalidCredentials);

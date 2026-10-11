@@ -13,6 +13,11 @@ type Props = {
   variant?: ButtonVariant;
   disabled?: boolean;
   loading?: boolean;
+  /** Overrides the primary variant's background — e.g. a business's own brand colour on /home,
+   * already run through ensureContrast. Ignored for secondary/link variants. */
+  colour?: string;
+  /** Pairs with `colour` — the text/spinner colour that reads clearly on it (see bestTextOn). */
+  textColour?: string;
 };
 
 /**
@@ -26,8 +31,12 @@ export function Button({
   variant = 'primary',
   disabled = false,
   loading = false,
+  colour,
+  textColour,
 }: Props) {
   const isDisabled = disabled || loading;
+  const colourOverride = variant === 'primary' && colour ? { backgroundColor: colour } : null;
+  const textColourOverride = variant === 'primary' && textColour ? { color: textColour } : null;
 
   return (
     <Pressable
@@ -38,6 +47,7 @@ export function Button({
       style={({ pressed }) => [
         styles.base,
         variantStyles[variant],
+        colourOverride,
         isDisabled && variant !== 'link' ? styles.disabled : null,
         pressed && !isDisabled ? styles.pressed : null,
       ]}
@@ -45,7 +55,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'primary' ? colours.card : colours.primary}
+          color={textColour ?? (variant === 'primary' ? colours.card : colours.primary)}
           accessibilityLabel="Loading"
         />
       ) : null}
@@ -53,6 +63,7 @@ export function Button({
         style={[
           styles.label,
           textStyles[variant],
+          textColourOverride,
           isDisabled && variant !== 'link' ? styles.disabledLabel : null,
         ]}
       >

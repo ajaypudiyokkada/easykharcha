@@ -10,6 +10,8 @@ from accounts.exceptions import DuplicateMobile, InvalidCredentials, RateLimited
 from accounts.models import User
 from accounts.ratelimit import get_client_ip, hit
 from accounts.serializers import LoginSerializer, LogoutSerializer, SignupSerializer, UserSerializer
+from businesses.models import Business
+from businesses.serializers import BusinessSerializer
 
 
 def _tokens_for(user: User) -> dict:
@@ -121,4 +123,12 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({"user": UserSerializer(request.user).data, "businesses": []})
+        businesses = Business.objects.filter(access__user=request.user)
+        return Response(
+            {
+                "user": UserSerializer(request.user).data,
+                "businesses": BusinessSerializer(
+                    businesses, many=True, context={"request": request}
+                ).data,
+            }
+        )
