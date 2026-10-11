@@ -1,7 +1,14 @@
 from rest_framework import serializers
 
 from .colour import white_text_contrast
-from .models import Business, BusinessType, hex_colour_validator
+from .models import (
+    SKIPPABLE_ONBOARDING_STEPS,
+    Business,
+    BusinessType,
+    OnboardingProgress,
+    OnboardingStepStatus,
+    hex_colour_validator,
+)
 
 
 def validate_brand_colour(value: str) -> str:
@@ -36,8 +43,28 @@ class BusinessUpdateSerializer(serializers.Serializer):
         return business
 
 
+class OnboardingStepSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OnboardingProgress
+        fields = ("step", "status")
+
+
+class OnboardingUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=OnboardingStepStatus.choices)
+
+    def validate(self, attrs: dict) -> dict:
+        step = self.context["step"]
+        if (
+            attrs["status"] == OnboardingStepStatus.SKIPPED
+            and step not in SKIPPABLE_ONBOARDING_STEPS
+        ):
+            raise serializers.ValidationError({"status": "This step can't be skipped."})
+        return attrs
+
+
 class BusinessSerializer(serializers.ModelSerializer):
     logo = serializers.SerializerMethodField()
+    onboarding = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
@@ -53,6 +80,7 @@ class BusinessSerializer(serializers.ModelSerializer):
             "currency",
             "onboarding_step",
             "onboarding_completed_at",
+            "onboarding",
             "created_at",
         )
 
@@ -61,3 +89,6 @@ class BusinessSerializer(serializers.ModelSerializer):
             return None
         request = self.context.get("request")
         return request.build_absolute_uri(obj.logo.url) if request else obj.logo.url
+
+    def get_onboarding(self, obj: Business) -> list:
+        return OnboardingStepSerializer(obj.onboarding_progress.all(), many=True).data

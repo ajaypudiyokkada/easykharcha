@@ -1,3 +1,10 @@
+export type OnboardingStepStatus = 'todo' | 'done' | 'skipped';
+
+export type OnboardingStep = {
+  step: number;
+  status: OnboardingStepStatus;
+};
+
 export type Business = {
   id: number;
   name: string;
@@ -10,5 +17,6 @@ export type Business = {
   currency: string;
   onboarding_step: number;
   onboarding_completed_at: string | null;
+  onboarding: OnboardingStep[];
   created_at: string;
 };

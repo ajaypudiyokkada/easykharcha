@@ -1,4 +1,12 @@
-import { AlertCircle, ArrowLeft, Check, Info, type LucideIcon } from 'lucide-react-native';
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  Info,
+  Pencil,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react-native';
 import React from 'react';
 
 import { colours, type } from '../theme/tokens';
@@ -14,6 +22,8 @@ const REGISTRY = {
   error: AlertCircle,
   warning: AlertCircle,
   info: Info,
+  edit: Pencil,
+  delete: Trash2,
 } as const;
 
 export type IconName = keyof typeof REGISTRY;

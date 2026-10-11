@@ -1,0 +1,267 @@
+{
+  "restaurant_cafe": {
+    "stock_items": [
+      { "name": "Rice", "unit": "kg" },
+      { "name": "Wheat flour", "unit": "kg" },
+      { "name": "Cooking oil", "unit": "L" },
+      { "name": "Salt", "unit": "kg" },
+      { "name": "Sugar", "unit": "kg" },
+      { "name": "Onion", "unit": "kg" },
+      { "name": "Tomato", "unit": "kg" },
+      { "name": "Potato", "unit": "kg" },
+      { "name": "Ginger-garlic paste", "unit": "kg" },
+      { "name": "Red chilli powder", "unit": "kg" },
+      { "name": "Turmeric powder", "unit": "kg" },
+      { "name": "Garam masala", "unit": "kg" },
+      { "name": "Milk", "unit": "L" },
+      { "name": "Paneer", "unit": "kg" },
+      { "name": "Chicken", "unit": "kg" },
+      { "name": "Eggs", "unit": "piece" },
+      { "name": "Butter", "unit": "kg" },
+      { "name": "Tea leaves", "unit": "kg" },
+      { "name": "Disposable containers", "unit": "pack" },
+      { "name": "Paper napkins", "unit": "pack" }
+    ],
+    "sell_items": [
+      { "name": "Masala chai" },
+      { "name": "Veg thali" },
+      { "name": "Paneer butter masala" },
+      { "name": "Chicken curry" },
+      { "name": "Butter naan" },
+      { "name": "Fried rice" },
+      { "name": "Cold coffee" },
+      { "name": "Gulab jamun" }
+    ]
+  },
+  "cloud_kitchen": {
+    "stock_items": [
+      { "name": "Rice", "unit": "kg" },
+      { "name": "Wheat flour", "unit": "kg" },
+      { "name": "Cooking oil", "unit": "L" },
+      { "name": "Salt", "unit": "kg" },
+      { "name": "Sugar", "unit": "kg" },
+      { "name": "Onion", "unit": "kg" },
+      { "name": "Tomato", "unit": "kg" },
+      { "name": "Paneer", "unit": "kg" },
+      { "name": "Chicken", "unit": "kg" },
+      { "name": "Eggs", "unit": "piece" },
+      { "name": "Red chilli powder", "unit": "kg" },
+      { "name": "Garam masala", "unit": "kg" },
+      { "name": "Packaging boxes", "unit": "pack" },
+      { "name": "Aluminium foil", "unit": "pack" },
+      { "name": "Cling wrap", "unit": "pack" },
+      { "name": "Delivery bags", "unit": "pack" },
+      { "name": "Tomato ketchup", "unit": "kg" },
+      { "name": "Mayonnaise", "unit": "kg" },
+      { "name": "Cheese", "unit": "kg" },
+      { "name": "Butter", "unit": "kg" }
+    ],
+    "sell_items": [
+      { "name": "Veg biryani" },
+      { "name": "Chicken biryani" },
+      { "name": "Paneer roll" },
+      { "name": "Chicken roll" },
+      { "name": "Fried rice" },
+      { "name": "Noodles" },
+      { "name": "Burger" },
+      { "name": "Pizza" }
+    ]
+  },
+  "bakery_sweets": {
+    "stock_items": [
+      { "name": "Maida (refined flour)", "unit": "kg" },
+      { "name": "Sugar", "unit": "kg" },
+      { "name": "Butter", "unit": "kg" },
+      { "name": "Milk", "unit": "L" },
+      { "name": "Eggs", "unit": "piece" },
+      { "name": "Baking powder", "unit": "kg" },
+      { "name": "Baking soda", "unit": "kg" },
+      { "name": "Yeast", "unit": "kg" },
+      { "name": "Cocoa powder", "unit": "kg" },
+      { "name": "Vanilla essence", "unit": "ml" },
+      { "name": "Chocolate chips", "unit": "kg" },
+      { "name": "Fresh cream", "unit": "L" },
+      { "name": "Ghee", "unit": "kg" },
+      { "name": "Khoya", "unit": "kg" },
+      { "name": "Cashew nuts", "unit": "kg" },
+      { "name": "Almonds", "unit": "kg" },
+      { "name": "Food colour", "unit": "ml" },
+      { "name": "Cake boxes", "unit": "pack" },
+      { "name": "Sweet boxes", "unit": "pack" },
+      { "name": "Butter paper", "unit": "pack" }
+    ],
+    "sell_items": [
+      { "name": "Birthday cake" },
+      { "name": "Pastry" },
+      { "name": "Bread" },
+      { "name": "Cookies" },
+      { "name": "Rasgulla" },
+      { "name": "Gulab jamun" },
+      { "name": "Kaju katli" },
+      { "name": "Ladoo" }
+    ]
+  },
+  "tiffin_catering": {
+    "stock_items": [
+      { "name": "Rice", "unit": "kg" },
+      { "name": "Wheat flour", "unit": "kg" },
+      { "name": "Cooking oil", "unit": "L" },
+      { "name": "Salt", "unit": "kg" },
+      { "name": "Sugar", "unit": "kg" },
+      { "name": "Toor dal", "unit": "kg" },
+      { "name": "Moong dal", "unit": "kg" },
+      { "name": "Onion", "unit": "kg" },
+      { "name": "Tomato", "unit": "kg" },
+      { "name": "Potato", "unit": "kg" },
+      { "name": "Mixed vegetables", "unit": "kg" },
+      { "name": "Turmeric powder", "unit": "kg" },
+      { "name": "Red chilli powder", "unit": "kg" },
+      { "name": "Cumin seeds", "unit": "kg" },
+      { "name": "Mustard seeds", "unit": "kg" },
+      { "name": "Ghee", "unit": "kg" },
+      { "name": "Curd", "unit": "kg" },
+      { "name": "Papad", "unit": "pack" },
+      { "name": "Pickle", "unit": "kg" },
+      { "name": "Tiffin boxes", "unit": "pack" }
+    ],
+    "sell_items": [
+      { "name": "Daily veg thali" },
+      { "name": "Daily non-veg thali" },
+      { "name": "Roti and sabzi" },
+      { "name": "Dal rice" },
+      { "name": "Curd rice" },
+      { "name": "Weekly meal plan" }
+    ]
+  },
+  "homestay": {
+    "stock_items": [
+      { "name": "Bedsheets", "unit": "piece" },
+      { "name": "Pillow covers", "unit": "piece" },
+      { "name": "Towels", "unit": "piece" },
+      { "name": "Soap", "unit": "piece" },
+      { "name": "Shampoo sachets", "unit": "piece" },
+      { "name": "Toilet paper", "unit": "pack" },
+      { "name": "Tea bags", "unit": "pack" },
+      { "name": "Coffee powder", "unit": "kg" },
+      { "name": "Milk", "unit": "L" },
+      { "name": "Bread", "unit": "pack" },
+      { "name": "Butter", "unit": "kg" },
+      { "name": "Jam", "unit": "kg" },
+      { "name": "Eggs", "unit": "piece" },
+      { "name": "Drinking water bottles", "unit": "piece" },
+      { "name": "Cleaning liquid", "unit": "L" },
+      { "name": "Detergent", "unit": "kg" },
+      { "name": "Air freshener", "unit": "piece" },
+      { "name": "Candles", "unit": "piece" },
+      { "name": "Stationery", "unit": "pack" },
+      { "name": "Laundry bags", "unit": "pack" }
+    ],
+    "sell_items": [
+      { "name": "Room stay (1 night)" },
+      { "name": "Breakfast" },
+      { "name": "Airport pickup" },
+      { "name": "Local sightseeing" },
+      { "name": "Extra bed" },
+      { "name": "Late checkout" }
+    ]
+  },
+  "small_manufacturing": {
+    "stock_items": [
+      { "name": "Raw material", "unit": "kg" },
+      { "name": "Packaging material", "unit": "pack" },
+      { "name": "Labels and stickers", "unit": "pack" },
+      { "name": "Cardboard boxes", "unit": "pack" },
+      { "name": "Bubble wrap", "unit": "pack" },
+      { "name": "Tape", "unit": "pack" },
+      { "name": "Glue or adhesive", "unit": "kg" },
+      { "name": "Colour or dye", "unit": "kg" },
+      { "name": "Fragrance or essential oil", "unit": "ml" },
+      { "name": "Gloves", "unit": "pack" },
+      { "name": "Cleaning supplies", "unit": "L" },
+      { "name": "Machine oil", "unit": "L" },
+      { "name": "Spare parts", "unit": "piece" },
+      { "name": "Thread or wire", "unit": "piece" },
+      { "name": "Printing ink", "unit": "L" }
+    ],
+    "sell_items": [
+      { "name": "Handmade soap" },
+      { "name": "Candle" },
+      { "name": "Incense sticks" },
+      { "name": "Craft item" },
+      { "name": "Gift pack" },
+      { "name": "Custom order" }
+    ]
+  },
+  "home_business": {
+    "stock_items": [
+      { "name": "Raw material", "unit": "kg" },
+      { "name": "Packaging material", "unit": "pack" },
+      { "name": "Labels", "unit": "pack" },
+      { "name": "Thread", "unit": "piece" },
+      { "name": "Fabric", "unit": "piece" },
+      { "name": "Paint or colour", "unit": "ml" },
+      { "name": "Glue", "unit": "kg" },
+      { "name": "Boxes", "unit": "pack" },
+      { "name": "Ribbon", "unit": "piece" },
+      { "name": "Stationery", "unit": "pack" },
+      { "name": "Printing paper", "unit": "pack" },
+      { "name": "Courier bags", "unit": "pack" }
+    ],
+    "sell_items": [
+      { "name": "Custom order" },
+      { "name": "Handmade item" },
+      { "name": "Tailoring service" },
+      { "name": "Home-cooked meal" },
+      { "name": "Tuition class" },
+      { "name": "Craft workshop" }
+    ]
+  },
+  "pack_repack_shop": {
+    "stock_items": [
+      { "name": "Rice", "unit": "kg" },
+      { "name": "Wheat flour", "unit": "kg" },
+      { "name": "Pulses", "unit": "kg" },
+      { "name": "Sugar", "unit": "kg" },
+      { "name": "Salt", "unit": "kg" },
+      { "name": "Spices", "unit": "kg" },
+      { "name": "Dry fruits", "unit": "kg" },
+      { "name": "Packaging pouches", "unit": "pack" },
+      { "name": "Labels", "unit": "pack" },
+      { "name": "Sealing machine rolls", "unit": "pack" },
+      { "name": "Weighing paper", "unit": "pack" },
+      { "name": "Tape", "unit": "pack" },
+      { "name": "Cartons", "unit": "pack" },
+      { "name": "Rubber bands", "unit": "pack" },
+      { "name": "Plastic bags", "unit": "pack" }
+    ],
+    "sell_items": [
+      { "name": "Packed rice (1 kg)" },
+      { "name": "Packed pulses (1 kg)" },
+      { "name": "Packed spices (100 g)" },
+      { "name": "Packed dry fruits (250 g)" },
+      { "name": "Gift hamper" },
+      { "name": "Bulk order" }
+    ]
+  },
+  "other": {
+    "stock_items": [
+      { "name": "Raw material", "unit": "piece" },
+      { "name": "Packaging material", "unit": "pack" },
+      { "name": "Office supplies", "unit": "pack" },
+      { "name": "Cleaning supplies", "unit": "L" },
+      { "name": "Stationery", "unit": "pack" },
+      { "name": "Printing paper", "unit": "pack" },
+      { "name": "Labels", "unit": "pack" },
+      { "name": "Tape", "unit": "pack" },
+      { "name": "Boxes", "unit": "pack" },
+      { "name": "Miscellaneous supplies", "unit": "piece" }
+    ],
+    "sell_items": [
+      { "name": "Product or service" },
+      { "name": "Custom order" },
+      { "name": "Consultation" },
+      { "name": "Delivery charge" },
+      { "name": "Miscellaneous item" }
+    ]
+  }
+}

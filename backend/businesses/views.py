@@ -1,28 +1,38 @@
+import json
+from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from PIL import Image
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.log import log_action
 
+from .access import owner_access_or_403
 from .exceptions import BusinessLimitReached, InvalidLogoFile
-from .models import Access, AccessRole, Business
-from .serializers import BusinessCreateSerializer, BusinessSerializer, BusinessUpdateSerializer
+from .models import ONBOARDING_STEPS, Access, AccessRole, Business, OnboardingProgress
+from .serializers import (
+    BusinessCreateSerializer,
+    BusinessSerializer,
+    BusinessUpdateSerializer,
+    OnboardingStepSerializer,
+    OnboardingUpdateSerializer,
+)
 
 LOGO_SIZE = 512
+STARTER_PACKS_PATH = Path(__file__).resolve().parent / "starter_packs.json"
 
 
-def _owner_access_or_403(business: Business, user) -> Access:
-    access = Access.objects.filter(user=user, business=business).first()
-    if not access or access.role != AccessRole.OWNER:
-        raise PermissionDenied()
-    return access
+@lru_cache
+def _load_starter_packs() -> dict:
+    return json.loads(STARTER_PACKS_PATH.read_text(encoding="utf-8"))
 
 
 class BusinessCreateView(APIView):
@@ -37,6 +47,9 @@ class BusinessCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         business = Business.objects.create(created_by=request.user, **serializer.validated_data)
         Access.objects.create(user=request.user, business=business, role=AccessRole.OWNER)
+        OnboardingProgress.objects.bulk_create(
+            [OnboardingProgress(business=business, step=step) for step in ONBOARDING_STEPS]
+        )
         log_action(
             user=request.user, action="business.create", business=business, name=business.name
         )
@@ -48,7 +61,7 @@ class BusinessUpdateView(APIView):
 
     def patch(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        _owner_access_or_403(business, request.user)
+        owner_access_or_403(business, request.user)
 
         serializer = BusinessUpdateSerializer(business, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -67,7 +80,7 @@ class BusinessLogoView(APIView):
 
     def post(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        _owner_access_or_403(business, request.user)
+        owner_access_or_403(business, request.user)
 
         upload = request.FILES.get("logo")
         if not upload:
@@ -105,3 +118,47 @@ class BusinessLogoView(APIView):
 
         log_action(user=request.user, action="business.logo_upload", business=business)
         return Response(BusinessSerializer(business, context={"request": request}).data)
+
+
+class OnboardingListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = get_object_or_404(Business, id=business_id)
+        owner_access_or_403(business, request.user)
+        rows = business.onboarding_progress.all()
+        return Response({"steps": OnboardingStepSerializer(rows, many=True).data})
+
+
+class OnboardingStepView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, business_id, step):
+        if step not in ONBOARDING_STEPS:
+            raise Http404()
+        business = get_object_or_404(Business, id=business_id)
+        owner_access_or_403(business, request.user)
+
+        serializer = OnboardingUpdateSerializer(data=request.data, context={"step": step})
+        serializer.is_valid(raise_exception=True)
+        progress, _ = OnboardingProgress.objects.update_or_create(
+            business=business, step=step, defaults={"status": serializer.validated_data["status"]}
+        )
+        log_action(
+            user=request.user,
+            action="onboarding.step_update",
+            business=business,
+            step=step,
+            status=progress.status,
+        )
+        return Response(OnboardingStepSerializer(progress).data)
+
+
+class StarterPackView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_type):
+        pack = _load_starter_packs().get(business_type)
+        if pack is None:
+            raise Http404()
+        return Response(pack)

@@ -66,3 +66,36 @@ class Access(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id} as {self.role} on {self.business_id}"
+
+
+ONBOARDING_STEPS = range(1, 7)
+SKIPPABLE_ONBOARDING_STEPS = frozenset(range(3, 7))
+
+
+class OnboardingStepStatus(models.TextChoices):
+    TODO = "todo", "To do"
+    DONE = "done", "Done"
+    SKIPPED = "skipped", "Skipped"
+
+
+class OnboardingProgress(models.Model):
+    """One row per wizard step (1-6) per business — created up front when the business is, so a
+    status is always available for every step without special-casing "not started yet"."""
+
+    business = models.ForeignKey(
+        Business, on_delete=models.CASCADE, related_name="onboarding_progress"
+    )
+    step = models.PositiveSmallIntegerField()
+    status = models.CharField(
+        max_length=10, choices=OnboardingStepStatus.choices, default=OnboardingStepStatus.TODO
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("step",)
+        constraints = [
+            models.UniqueConstraint(fields=["business", "step"], name="unique_business_step")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.business_id} step {self.step}: {self.status}"

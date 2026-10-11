@@ -19,7 +19,12 @@ def exception_handler(exc, context):
         code = getattr(exc, "default_code", "error")
         message = _first_message(response.data)
 
-    return Response({"error": {"code": code, "message": message}}, status=response.status_code)
+    body = {"error": {"code": code, "message": message}}
+    row_errors = getattr(exc, "row_errors", None)
+    if row_errors is not None:
+        body["row_errors"] = row_errors
+
+    return Response(body, status=response.status_code)
 
 
 def _first_message(detail) -> str:

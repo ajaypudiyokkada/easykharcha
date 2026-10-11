@@ -13,6 +13,11 @@ Then walks the Step 3 auth flow end to end against a freshly generated mobile nu
 Then the Step 5 business flow: create a business -> PATCH its colour -> a bad colour is rejected ->
 a real PNG logo upload works -> a non-image upload is rejected -> /me shows the business -> a second,
 unrelated user cannot see or edit it.
+
+Then the Step 6 stock flow: bulk stock items -> a bad row in a bulk save returns per-row errors and
+saves nothing -> a duplicate name is rejected -> a sell item linked to a shared stock item is
+rejected -> skipping a non-skippable onboarding step is rejected, a skippable one is accepted -> a
+second user gets 403/404 on both endpoints.
 """
 
 import binascii
@@ -204,6 +209,130 @@ def check_business_flow() -> None:
     print("OK — a second user can neither see nor edit the business.")
 
 
+def check_stock_flow() -> None:
+    owner_mobile, owner_access, _ = signup_and_login("Stock Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Stock Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"stock flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    # bulk stock items OK
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Rice", "unit": "kg", "usual_price": "60.00"},
+                {"name": "Cooking Oil", "unit": "L", "shared": True},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201 or len(body) != 2:
+        fail(f"stock bulk create: expected 201 with 2 items, got {status} ({body})")
+    rice_id = next(i["id"] for i in body if i["name"] == "Rice")
+    oil_id = next(i["id"] for i in body if i["name"] == "Cooking Oil")
+    print(f"OK — bulk stock items created ({len(body)} rows) for {owner_mobile}.")
+
+    # bulk with one bad row -> per-row errors, all-or-nothing (nothing saved)
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Salt", "unit": "kg"}, {"name": "", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status not in (400, 422) or not body.get("row_errors"):
+        fail(f"stock bulk create bad row: expected row_errors, got {status} ({body})")
+    if not any(e["row"] == 2 for e in body["row_errors"]):
+        fail(f"stock bulk create bad row: expected an error for row 2, got {body['row_errors']}")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
+    if "Salt" in [i["name"] for i in body]:
+        fail("stock bulk create bad row: all-or-nothing violated — Salt was saved despite a bad row")
+    print("OK — a bad row in a bulk stock save returns per-row errors and saves nothing.")
+
+    # duplicate name rejected, case-insensitive, against existing rows
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "rice", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status not in (400, 422) or not body.get("row_errors"):
+        fail(f"stock bulk duplicate: expected a row error, got {status} ({body})")
+    print("OK — a duplicate stock item name (case-insensitive) is rejected.")
+
+    # a sell item linked to a shared stock item is rejected
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {"name": "Veg Biryani", "selling_price": "150.00", "main_stock_item": rice_id},
+                {"name": "Bad Link", "selling_price": "10.00", "main_stock_item": oil_id},
+            ]
+        },
+        token=owner_access,
+    )
+    if status not in (400, 422) or not body.get("row_errors"):
+        fail(f"sell item linked to a shared item: expected a row error, got {status} ({body})")
+    if not any(
+        e["row"] == 2 and e["field"] == "main_stock_item" for e in body["row_errors"]
+    ):
+        fail(f"sell item linked to a shared item: expected the error on row 2, got {body['row_errors']}")
+    print("OK — a sell item linked to a shared stock item is rejected.")
+
+    # the same call, minus the bad row, succeeds
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {"items": [{"name": "Veg Biryani", "selling_price": "150.00", "main_stock_item": rice_id}]},
+        token=owner_access,
+    )
+    if status != 201 or len(body) != 1:
+        fail(f"sell item bulk create: expected 201 with 1 item, got {status} ({body})")
+    print("OK — bulk sell items created with a valid stock-item link.")
+
+    # skip is rejected on step 2 (only steps 3-6 are skippable)
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/onboarding/2/", {"status": "skipped"}, token=owner_access
+    )
+    if status not in (400, 422):
+        fail(f"onboarding skip step 2: expected rejection, got {status} ({body})")
+    print("OK — skipping step 2 (not skippable) is rejected.")
+
+    # skip is allowed on step 3
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/onboarding/3/", {"status": "skipped"}, token=owner_access
+    )
+    if status != 200 or body.get("status") != "skipped":
+        fail(f"onboarding skip step 3: expected 200 skipped, got {status} ({body})")
+    print("OK — skipping step 3 is accepted.")
+
+    # a second, unrelated user gets 403/404 on both endpoints
+    _, other_access, _ = signup_and_login("Stock Intruder")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=other_access
+    )
+    if status not in (403, 404):
+        fail(f"stock isolation: expected 403/404, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {"items": [{"name": "Hijack", "selling_price": "1.00"}]},
+        token=other_access,
+    )
+    if status not in (403, 404):
+        fail(f"sell item isolation: expected 403/404, got {status} ({body})")
+    print("OK — a second user gets 403/404 on both the stock-items and sell-items endpoints.")
+
+
 def check_auth_flow() -> None:
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
     name = "Smoke Test"
@@ -317,6 +446,7 @@ def main() -> None:
     check_health()
     check_auth_flow()
     check_business_flow()
+    check_stock_flow()
     print("\nAll smoke checks passed.")
 
 

@@ -11,3 +11,4 @@ export { Screen } from './Screen';
 export { StepHeader } from './StepHeader';
 export { Body, Heading, Muted, Small } from './Text';
 export { TextField, type TextFieldProps } from './TextField';
+export { Toggle } from './Toggle';

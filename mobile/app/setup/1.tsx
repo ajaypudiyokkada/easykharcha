@@ -97,6 +97,10 @@ export default function SetupStepOne() {
           body: { onboarding_step: 2 },
         });
       }
+      await authedFetch(`/businesses/${business.id}/onboarding/1/`, {
+        method: 'PATCH',
+        body: { status: 'done' },
+      });
       await refreshMe();
       return business;
     } catch (err) {

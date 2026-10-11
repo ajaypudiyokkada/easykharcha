@@ -133,6 +133,10 @@ export default function SetupStepTwo() {
         method: 'PATCH',
         body: { primary_colour: colour, onboarding_step: nextStep },
       });
+      await authedFetch(`/businesses/${business.id}/onboarding/2/`, {
+        method: 'PATCH',
+        body: { status: 'done' },
+      });
       await refreshMe();
       return true;
     } catch (err) {
@@ -144,7 +148,7 @@ export default function SetupStepTwo() {
   }
 
   async function handleNext() {
-    if (await save(3)) router.push('/setup/saved');
+    if (await save(3)) router.push('/setup/3');
   }
 
   async function handleSaveForLater() {

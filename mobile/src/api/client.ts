@@ -10,17 +10,29 @@ export const API_URL: string = process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_UR
 
 export type ApiErrorKind = 'network' | 'timeout' | 'server';
 
+export type RowError = { row: number; field: string; message: string };
+
 export class ApiError extends Error {
   kind: ApiErrorKind;
   status?: number;
   code?: string;
+  /** Present only for bulk-save endpoints that rejected specific rows — see stock/exceptions.py's
+   * BulkValidationError. */
+  rowErrors?: RowError[];
 
-  constructor(kind: ApiErrorKind, message: string, status?: number, code?: string) {
+  constructor(
+    kind: ApiErrorKind,
+    message: string,
+    status?: number,
+    code?: string,
+    rowErrors?: RowError[],
+  ) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
     this.status = status;
     this.code = code;
+    this.rowErrors = rowErrors;
   }
 }
 
@@ -81,9 +93,12 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
   }
 
   if (!response.ok) {
-    const shaped = body as { error?: { code?: string; message?: string } } | null;
+    const shaped = body as {
+      error?: { code?: string; message?: string };
+      row_errors?: RowError[];
+    } | null;
     const message = shaped?.error?.message ?? `The server returned an error (${response.status}).`;
-    throw new ApiError('server', message, response.status, shaped?.error?.code);
+    throw new ApiError('server', message, response.status, shaped?.error?.code, shaped?.row_errors);
   }
 
   return body as T;

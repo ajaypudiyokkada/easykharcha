@@ -1,10 +1,15 @@
 import type { Business } from '../api/business';
 
-/** The wizard route to land on right after signing in. Only steps 1-2 exist — a business whose
- * onboarding_step has already passed that (or is complete) just goes home. */
+/** Only steps 1-4 exist so far — a business whose onboarding_step has already passed step 4 (or is
+ * complete) just goes home, same as it would once the real step 5 exists. */
+const LAST_BUILT_STEP = 4;
+
+/** The wizard route to land on right after signing in. */
 export function nextRouteAfterAuth(businesses: Business[]): string {
   if (businesses.length === 0) return '/setup/1';
-  const resuming = businesses.find((b) => !b.onboarding_completed_at && b.onboarding_step < 3);
+  const resuming = businesses.find(
+    (b) => !b.onboarding_completed_at && b.onboarding_step <= LAST_BUILT_STEP,
+  );
   if (resuming) return `/setup/${resuming.onboarding_step}`;
   return '/home';
 }
