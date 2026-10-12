@@ -1,12 +1,26 @@
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
+  BarChart3,
   Check,
+  ChevronRight,
+  Clock,
   Info,
+  MoreHorizontal,
+  Package,
   Pencil,
+  Plus,
+  Receipt,
+  Search,
+  Settings as SettingsIcon,
+  ShoppingCart,
   Trash2,
+  Users,
+  X,
   type LucideIcon,
 } from 'lucide-react-native';
+import { Home as HomeIcon } from 'lucide-react-native';
 import React from 'react';
 
 import { colours, type } from '../theme/tokens';
@@ -24,6 +38,21 @@ const REGISTRY = {
   info: Info,
   edit: Pencil,
   delete: Trash2,
+  home: HomeIcon,
+  stock: Package,
+  buy: ShoppingCart,
+  reports: BarChart3,
+  sales: Receipt,
+  wastage: Trash2,
+  alert: AlertTriangle,
+  team: Users,
+  settings: SettingsIcon,
+  more: MoreHorizontal,
+  search: Search,
+  plus: Plus,
+  close: X,
+  chevronRight: ChevronRight,
+  clock: Clock,
 } as const;
 
 export type IconName = keyof typeof REGISTRY;

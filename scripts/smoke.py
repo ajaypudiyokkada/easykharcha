@@ -24,6 +24,14 @@ it -> that Helper gets 403 on the team and settings endpoints -> adding an exist
 Access, their own credential still works and the team-add secret does not -> an out-of-range
 settings value is rejected -> an unrelated user gets 403/404 -> the onboarding-complete endpoint
 only sets the completed date once the actual rules are met.
+
+Then the Step 9 purchase flow: a purchase with 2 lines is created -> the list shows it and the
+summary (bought today, last 7 days) adds up -> a line total that doesn't match quantity x price is
+rejected -> a Manager can create a purchase but gets 403 on edit and delete -> a Helper gets 403 on
+every purchases endpoint -> the Owner edits a purchase (new total recalculated) and deletes one (it's
+gone from both the list and its own detail endpoint — soft-deleted, so the row itself stays in the
+database, just never served again) -> a user from another business gets 403/404 -> /me returns the
+exact permission set for each role.
 """
 
 import binascii
@@ -72,7 +80,8 @@ def request(
     except urllib.error.URLError as exc:
         fail(f"could not reach {BASE_URL}{path} — is the backend running? ({exc})")
         return None, None, None
-    payload = json.loads(response.read())
+    raw = response.read()
+    payload = json.loads(raw) if raw else {}
     return response.status, payload, response.headers
 
 
@@ -589,12 +598,259 @@ def check_auth_flow() -> None:
     print("OK — refresh token no longer works after logout.")
 
 
+def check_purchase_flow() -> None:
+    owner_mobile, owner_access, _ = signup_and_login("Purchase Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Purchase Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"purchase flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Milk", "unit": "L", "usual_price": "60.00"},
+                {"name": "Flour", "unit": "kg"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"purchase flow: stock bulk create expected 201, got {status} ({body})")
+    milk_id = next(i["id"] for i in body if i["name"] == "Milk")
+    flour_id = next(i["id"] for i in body if i["name"] == "Flour")
+
+    # create a purchase with 2 lines
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Sunrise Supplies",
+            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "lines": [
+                {"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"},
+                {"stock_item": flour_id, "quantity": "15", "unit_price": "48", "line_total": "720"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201 or len(body.get("lines", [])) != 2:
+        fail(f"purchase create: expected 201 with 2 lines, got {status} ({body})")
+    purchase_id = body["id"]
+    if body.get("total_amount") != "2000.00":
+        fail(f"purchase create: expected total 2000.00, got {body.get('total_amount')}")
+    print(f"OK — purchase {purchase_id} created with 2 lines, total {body['total_amount']}.")
+
+    # list shows it and the summary adds up
+    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=owner_access)
+    if status != 200:
+        fail(f"purchase list: expected 200, got {status} ({body})")
+    ids = [p["id"] for p in body.get("results", [])]
+    if purchase_id not in ids:
+        fail(f"purchase list: expected purchase {purchase_id} in results, got {ids}")
+    summary = body.get("summary", {})
+    if float(summary.get("bought_today", 0)) < 2000 or float(summary.get("last_7_days", 0)) < 2000:
+        fail(f"purchase list: summary doesn't add up, got {summary}")
+    print("OK — the purchase list shows the new purchase and the summary adds up.")
+
+    # a line total that doesn't match quantity x price is rejected
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Bad Math Co",
+            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "lines": [
+                {"stock_item": milk_id, "quantity": "10", "unit_price": "60", "line_total": "999"}
+            ],
+        },
+        token=owner_access,
+    )
+    if status not in (400, 422) or not body.get("row_errors"):
+        fail(f"purchase create bad line total: expected row_errors, got {status} ({body})")
+    print("OK — a line total that doesn't match quantity x price is rejected.")
+
+    # a Manager can create but gets 403 on edit and delete
+    manager_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    manager_password = f"Kharcha{random.randint(1000, 9999)}!"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {
+            "name": "Manager One",
+            "mobile": manager_mobile,
+            "role": "manager",
+            "secret": manager_password,
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"add manager: expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": manager_mobile, "secret": manager_password}
+    )
+    if status != 200:
+        fail(f"manager login: expected 200, got {status} ({body})")
+    manager_access = body["access"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Manager's Supplier",
+            "purchase_date_time": "2026-10-12T11:00:00+05:30",
+            "lines": [
+                {"stock_item": milk_id, "quantity": "5", "unit_price": "60", "line_total": "300"}
+            ],
+        },
+        token=manager_access,
+    )
+    if status != 201:
+        fail(f"manager create purchase: expected 201, got {status} ({body})")
+    manager_purchase_id = body["id"]
+
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/purchases/{purchase_id}/",
+        {
+            "supplier_name": "x",
+            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "lines": [{"stock_item": milk_id, "quantity": "1", "unit_price": "1", "line_total": "1"}],
+        },
+        token=manager_access,
+    )
+    if status != 403:
+        fail(f"manager edit purchase: expected 403, got {status} ({body})")
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/purchases/{purchase_id}/", token=manager_access
+    )
+    if status != 403:
+        fail(f"manager delete purchase: expected 403, got {status} ({body})")
+    print("OK — a Manager can create a purchase but gets 403 on edit and delete.")
+
+    # a Helper gets 403 on every purchases endpoint
+    helper_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    helper_pin = "7392"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {"name": "Helper One", "mobile": helper_mobile, "role": "helper", "secret": helper_pin},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"add helper: expected 201, got {status} ({body})")
+    status, body, _ = request("POST", "/auth/login/", {"mobile": helper_mobile, "secret": helper_pin})
+    if status != 200:
+        fail(f"helper login: expected 200, got {status} ({body})")
+    helper_access = body["access"]
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=helper_access)
+    if status != 403:
+        fail(f"helper purchases list: expected 403, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "x",
+            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "lines": [{"stock_item": milk_id, "quantity": "1", "unit_price": "1", "line_total": "1"}],
+        },
+        token=helper_access,
+    )
+    if status != 403:
+        fail(f"helper purchase create: expected 403, got {status} ({body})")
+    print("OK — a Helper gets 403 on every purchases endpoint.")
+
+    # Owner edits (new total recalculated) and deletes (gone from list and detail, stays in the DB)
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/purchases/{purchase_id}/",
+        {
+            "supplier_name": "Sunrise Supplies",
+            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "note": "Edited by owner",
+            "lines": [
+                {"stock_item": milk_id, "quantity": "25", "unit_price": "64", "line_total": "1600"}
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 200 or body.get("total_amount") != "1600.00":
+        fail(f"owner edit purchase: expected 200 with recalculated total, got {status} ({body})")
+    print("OK — the Owner edits a purchase and the total is recalculated.")
+
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/purchases/{purchase_id}/", token=owner_access
+    )
+    if status != 204:
+        fail(f"owner delete purchase: expected 204, got {status} ({body})")
+    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=owner_access)
+    ids = [p["id"] for p in body.get("results", [])]
+    if purchase_id in ids:
+        fail(f"deleted purchase still in the list: {ids}")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/purchases/{purchase_id}/", token=owner_access
+    )
+    if status != 404:
+        fail(f"deleted purchase detail: expected 404, got {status} ({body})")
+    print("OK — the Owner deletes a purchase; it disappears from the list and its own detail.")
+
+    # another business's user gets 403/404
+    other_mobile, other_access, _ = signup_and_login("Unrelated Purchase User")
+    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=other_access)
+    if status not in (403, 404):
+        fail(f"isolation: unrelated user on purchase list, expected 403/404, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/purchases/{manager_purchase_id}/", token=other_access
+    )
+    if status not in (403, 404):
+        fail(f"isolation: unrelated user on purchase detail, expected 403/404, got {status} ({body})")
+    print("OK — a user from another business gets 403/404 on these purchases.")
+
+    # /me returns the exact permission set for each role
+    status, body, _ = request("GET", "/me/", token=owner_access)
+    owner_business = next(b for b in body["businesses"] if b["id"] == business_id)
+    expected_owner = {
+        "purchases.view",
+        "purchases.create",
+        "purchases.edit",
+        "purchases.delete",
+        "stock.view",
+        "team.manage",
+        "settings.manage",
+    }
+    if set(owner_business.get("permissions", [])) != expected_owner:
+        fail(f"/me owner permissions: expected {expected_owner}, got {owner_business.get('permissions')}")
+
+    status, body, _ = request("GET", "/me/", token=manager_access)
+    manager_business = next(b for b in body["businesses"] if b["id"] == business_id)
+    expected_manager = {"purchases.view", "purchases.create", "stock.view"}
+    if set(manager_business.get("permissions", [])) != expected_manager:
+        fail(
+            f"/me manager permissions: expected {expected_manager}, "
+            f"got {manager_business.get('permissions')}"
+        )
+
+    status, body, _ = request("GET", "/me/", token=helper_access)
+    helper_business = next(b for b in body["businesses"] if b["id"] == business_id)
+    if helper_business.get("permissions"):
+        fail(f"/me helper permissions: expected none, got {helper_business.get('permissions')}")
+    print("OK — /me returns the correct permissions per role.")
+
+
 def main() -> None:
     check_health()
     check_auth_flow()
     check_business_flow()
     check_stock_flow()
     check_team_flow()
+    check_purchase_flow()
     print("\nAll smoke checks passed.")
 
 

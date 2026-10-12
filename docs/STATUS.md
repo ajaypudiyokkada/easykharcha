@@ -54,6 +54,36 @@ not built yet.
   team lists go two columns at 900px+. `npm run dev` now also prints this machine's LAN address (the
   backend binds `0.0.0.0`; the app's API base URL and the backend's dev CORS config both key off the
   requesting origin, nothing hardcoded) for testing on a real phone. New `npm run responsive` check.
+- **Step 9 — Inner app shell, permissions, Stock and Buy (purchases).** A real permission system
+  (`backend/businesses/permissions.py` — see "Permission table" below) replacing the old Owner-only
+  checks for the endpoints this step touches. New: `Supplier`, `Purchase`, `PurchaseLine` models,
+  soft-deleted purchases, audit-logged before/after on every edit. New screens: the app shell (bottom
+  nav on phones, side menu from 840px), Home's real "Bought today"/"Last 7 days" cards, Buy (the
+  purchase list + record-purchase sheet), Stock (list with last price paid), Stock item detail (price
+  history chart + last 5 purchases). Counts, wastage, sales, reports and alerts are not built yet —
+  see "Not built yet". Head chef and Helper get a placeholder Home; nothing else is built for them.
+
+## Permission table
+
+`backend/businesses/permissions.py` is the one place roles map to permission strings — every
+business-scoped endpoint checks a permission, never a role name directly. **This is a starting
+table, not a final design — it's a decision for the product owner to review**, not something decided
+unilaterally:
+
+| Permission | Owner | Manager | Head chef | Helper |
+|---|---|---|---|---|
+| `purchases.view` | yes | yes | no | no |
+| `purchases.create` | yes | yes | no | no |
+| `purchases.edit` | yes | no | no | no |
+| `purchases.delete` | yes | no | no | no |
+| `stock.view` | yes | yes | no | no |
+| `team.manage` | yes | no | no | no |
+| `settings.manage` | yes | no | no | no |
+
+Head chef and Helper have no permissions yet on purpose — their actual jobs (counting stock,
+recording wastage) aren't built as features yet, so there's nothing to grant access to. Once those
+exist, this table needs new permissions (e.g. `counts.create`, `wastage.create`) and both roles need
+rows filled in, not left empty.
 
 ## Route map
 

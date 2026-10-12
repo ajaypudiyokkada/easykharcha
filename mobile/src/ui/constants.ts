@@ -25,6 +25,8 @@ export const BREAKPOINT_TABLET = 600;
 export const BREAKPOINT_DESKTOP = 900;
 export const BREAKPOINT_WIDE = 1200;
 export const WIZARD_ASIDE_BREAKPOINT = 1024;
+/** Step 9: the app shell's own breakpoint — a side menu from here up, a bottom tab bar below it. */
+export const NAV_SIDE_BREAKPOINT = 840;
 
 /** Step 8d: per-context content widths — replacing one flat cap for every screen with the widths the
  * spec actually asks for. */

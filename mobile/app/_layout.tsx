@@ -50,6 +50,16 @@ export default function RootLayout() {
             <Stack.Screen name="signup" options={{ title: 'Create account' }} />
             <Stack.Screen name="login" options={{ title: 'Log in' }} />
             <Stack.Screen name="home" options={{ title: 'Home' }} />
+            <Stack.Screen name="stock/index" options={{ title: 'Stock' }} />
+            <Stack.Screen name="stock/[id]" options={{ title: 'Stock item' }} />
+            <Stack.Screen name="buy/index" options={{ title: 'Purchases' }} />
+            <Stack.Screen name="buy/[id]" options={{ title: 'Purchase detail' }} />
+            <Stack.Screen name="reports" options={{ title: 'Reports' }} />
+            <Stack.Screen name="sales" options={{ title: 'Sales' }} />
+            <Stack.Screen name="wastage" options={{ title: 'Wastage' }} />
+            <Stack.Screen name="alerts" options={{ title: 'Alerts' }} />
+            <Stack.Screen name="team" options={{ title: 'Team' }} />
+            <Stack.Screen name="settings" options={{ title: 'Settings' }} />
             <Stack.Screen name="setup/1" options={{ title: 'Your business' }} />
             <Stack.Screen name="setup/2" options={{ title: 'Your brand' }} />
             <Stack.Screen name="setup/3" options={{ title: 'What you buy' }} />

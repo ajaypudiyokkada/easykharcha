@@ -9,6 +9,14 @@ export type StockItem = {
   shelf_life_days: number | null;
   active: boolean;
   created_at: string;
+  /** From this item's purchase history — null until it's been bought at least once. */
+  last_unit_price: string | null;
+  last_purchased_at: string | null;
+};
+
+export type PricePoint = {
+  date: string;
+  unit_price: string;
 };
 
 export type SellItem = {

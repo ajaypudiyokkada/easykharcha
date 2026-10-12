@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -8,6 +9,9 @@ from rest_framework.views import APIView
 from audit.log import log_action
 from businesses.access import owner_access_or_403
 from businesses.models import Business
+from businesses.permissions import require_permission
+from purchases.models import Purchase, PurchaseLine
+from purchases.serializers import PurchaseSerializer
 
 from .exceptions import BulkValidationError, TooManyRows
 from .models import SellItem, StockItem
@@ -19,6 +23,20 @@ from .serializers import (
 )
 
 MAX_BULK_ROWS = 100
+PRICE_HISTORY_POINTS = 12
+RECENT_PURCHASES = 5
+
+
+def _with_last_purchase_info(queryset):
+    """Annotates each stock item with its latest (most recent, not-deleted) purchase line's unit
+    price and purchase date — None for an item that's never been bought."""
+    latest_line = PurchaseLine.objects.filter(
+        stock_item=OuterRef("pk"), purchase__is_deleted=False
+    ).order_by("-purchase__purchase_date_time", "-id")
+    return queryset.annotate(
+        last_unit_price=Subquery(latest_line.values("unit_price")[:1]),
+        last_purchased_at=Subquery(latest_line.values("purchase__purchase_date_time")[:1]),
+    )
 
 
 def _row_errors_from(row_number: int, errors: dict) -> list[dict]:
@@ -43,9 +61,47 @@ class StockItemListView(APIView):
 
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        owner_access_or_403(business, request.user)
-        items = business.stock_items.filter(active=True)
+        require_permission(business, request.user, "stock.view")
+        items = _with_last_purchase_info(business.stock_items.filter(active=True))
         return Response(StockItemSerializer(items, many=True).data)
+
+
+class StockItemDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id, item_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "stock.view")
+        item = get_object_or_404(
+            _with_last_purchase_info(business.stock_items.filter(active=True)), id=item_id
+        )
+
+        price_points = list(
+            PurchaseLine.objects.filter(stock_item=item, purchase__is_deleted=False)
+            .order_by("-purchase__purchase_date_time", "-id")[:PRICE_HISTORY_POINTS]
+            .values("purchase__purchase_date_time", "unit_price")
+        )
+        price_points.reverse()  # oldest first, for charting left-to-right
+
+        recent_purchases = (
+            Purchase.objects.filter(lines__stock_item=item, is_deleted=False)
+            .distinct()
+            .order_by("-purchase_date_time")[:RECENT_PURCHASES]
+        )
+
+        return Response(
+            {
+                **StockItemSerializer(item).data,
+                "price_points": [
+                    {
+                        "date": point["purchase__purchase_date_time"],
+                        "unit_price": point["unit_price"],
+                    }
+                    for point in price_points
+                ],
+                "recent_purchases": PurchaseSerializer(recent_purchases, many=True).data,
+            }
+        )
 
 
 class StockItemBulkCreateView(APIView):

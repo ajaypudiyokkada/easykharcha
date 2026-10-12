@@ -22,6 +22,10 @@ export type Business = {
   /** The signed-in user's own role on this business — not always Owner, now that team members can
    * log in too. Null only if the serializer had no request context (never happens via authedFetch). */
   role: string | null;
+  /** What the signed-in user is allowed to do on this business — e.g. `"purchases.edit"`. Empty for
+   * a role nothing's been built for yet (Head chef, Helper). See `can()` in `src/auth/permissions.ts`
+   * and `backend/businesses/permissions.py`, the one place these strings are defined. */
+  permissions: string[];
   checklist_dismissed_at: string | null;
   created_at: string;
 };

@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "businesses",
     "audit",
     "stock",
+    "purchases",
 ]
 
 MIDDLEWARE = [

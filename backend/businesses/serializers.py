@@ -10,6 +10,7 @@ from .models import (
     OnboardingStepStatus,
     hex_colour_validator,
 )
+from .permissions import permissions_for
 
 
 def validate_brand_colour(value: str) -> str:
@@ -74,6 +75,7 @@ class BusinessSerializer(serializers.ModelSerializer):
     onboarding = serializers.SerializerMethodField()
     skipped_steps = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
@@ -92,6 +94,7 @@ class BusinessSerializer(serializers.ModelSerializer):
             "onboarding",
             "skipped_steps",
             "role",
+            "permissions",
             "checklist_dismissed_at",
             "created_at",
         )
@@ -120,3 +123,12 @@ class BusinessSerializer(serializers.ModelSerializer):
             return None
         access = obj.access.filter(user=request.user).first()
         return access.role if access else None
+
+    def get_permissions(self, obj: Business) -> list[str]:
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+            return []
+        access = obj.access.filter(user=request.user).first()
+        if not access:
+            return []
+        return sorted(permissions_for(access.role))

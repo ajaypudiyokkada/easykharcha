@@ -357,11 +357,33 @@ async function buildOwnerSession(page) {
   await clickButton(page, 'Go to Home');
   await waitForPath(page, '/home');
 
+  // Step 9: record one purchase, so /buy/[id] and /stock/[id] have a real page to check too.
+  await page.goto(`${APP_URL}/buy`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Purchases');
+  await clickButton(page, 'Record purchase');
+  await waitForText(page, 'What did you buy?');
+  await typeInto(page, 'Supplier', 'Sunrise Supplies');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
+  await typeInto(page, 'Quantity', '2');
+  await typeInto(page, 'Price per unit', '40');
+  await clickButton(page, 'Save purchase');
+  await waitForText(page, 'Purchase saved');
+  await waitForText(page, 'Sunrise Supplies');
+  await (await findVisible(page, '[aria-label="Sunrise Supplies"]')).click();
+  await waitForText(page, 'Purchase detail');
+  const purchasePath = await page.evaluate(() => location.pathname);
+
+  await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Rice');
+  await (await findVisible(page, '[aria-label="Rice"]')).click();
+  await waitForText(page, 'Price trend');
+  const stockItemPath = await page.evaluate(() => location.pathname);
+
   const tokens = await page.evaluate(() => ({
     access: localStorage.getItem('easykharcha.access'),
     refresh: localStorage.getItem('easykharcha.refresh'),
   }));
-  return { tokens, helperMobile, helperPin };
+  return { tokens, helperMobile, helperPin, purchasePath, stockItemPath };
 }
 
 async function buildHelperSession(browser, helperMobile, helperPin) {
@@ -455,7 +477,13 @@ async function main() {
     // flow.mjs, which hit the same thing first).
     await setupPage.setViewport({ width: 390, height: 3000 });
     console.log('Setting up an Owner session with real wizard data...');
-    const { tokens: ownerTokens, helperMobile, helperPin } = await buildOwnerSession(setupPage);
+    const {
+      tokens: ownerTokens,
+      helperMobile,
+      helperPin,
+      purchasePath,
+      stockItemPath,
+    } = await buildOwnerSession(setupPage);
     await setupPage.close();
     console.log('Setting up a Helper session...');
     const helperTokens = await buildHelperSession(browser, helperMobile, helperPin);
@@ -477,6 +505,17 @@ async function main() {
       { name: 'setup-6', url: `${APP_URL}/setup/6` },
       { name: 'setup-done', url: `${APP_URL}/setup/done` },
       { name: 'home-owner', url: `${APP_URL}/home` },
+      // Step 9
+      { name: 'buy', url: `${APP_URL}/buy` },
+      { name: 'buy-detail', url: `${APP_URL}${purchasePath}` },
+      { name: 'stock', url: `${APP_URL}/stock` },
+      { name: 'stock-detail', url: `${APP_URL}${stockItemPath}` },
+      { name: 'reports', url: `${APP_URL}/reports` },
+      { name: 'sales', url: `${APP_URL}/sales` },
+      { name: 'wastage', url: `${APP_URL}/wastage` },
+      { name: 'alerts', url: `${APP_URL}/alerts` },
+      { name: 'team', url: `${APP_URL}/team` },
+      { name: 'settings', url: `${APP_URL}/settings` },
     ];
     const helperRoutes = [{ name: 'home-helper', url: `${APP_URL}/home` }];
 

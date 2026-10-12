@@ -36,6 +36,14 @@ class StockItemRowSerializer(serializers.Serializer):
 
 
 class StockItemSerializer(serializers.ModelSerializer):
+    # Populated via annotation (see StockItemListView/StockItemDetailView) from this item's purchase
+    # history — plain declared fields here just expose whatever the queryset already computed, same
+    # as any other read-only field. None for an item that's never been bought yet.
+    last_unit_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True, default=None
+    )
+    last_purchased_at = serializers.DateTimeField(read_only=True, default=None)
+
     class Meta:
         model = StockItem
         fields = (
@@ -49,6 +57,8 @@ class StockItemSerializer(serializers.ModelSerializer):
             "shelf_life_days",
             "active",
             "created_at",
+            "last_unit_price",
+            "last_purchased_at",
         )
 
 

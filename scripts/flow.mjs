@@ -39,6 +39,7 @@ const APP_URL = 'http://localhost:8081';
 const LANDING_URL = 'http://localhost:8082';
 const TIMEOUT = 15_000;
 const SCREEN_DIR = 'docs/screens/step8c';
+const STEP9_SCREEN_DIR = 'docs/screens/step9';
 
 function findChrome() {
   const candidates = [
@@ -118,7 +119,7 @@ async function findVisible(page, selector, { last = false, minCount = 1 } = {}) 
   return last ? matches[matches.length - 1] : matches[0];
 }
 
-async function findVisibleByText(page, role, text) {
+async function findVisibleByText(page, role, text, { last = false } = {}) {
   const matches = await retryUntil(async () => {
     const handles = await page.$$(`[role="${role}"]`);
     const visible = [];
@@ -132,11 +133,11 @@ async function findVisibleByText(page, role, text) {
     }
     return visible.length > 0 ? visible : null;
   });
-  return matches[0];
+  return last ? matches[matches.length - 1] : matches[0];
 }
 
-async function clickButton(page, label) {
-  const element = await findVisibleByText(page, 'button', label);
+async function clickButton(page, label, { last = false } = {}) {
+  const element = await findVisibleByText(page, 'button', label, { last });
   await element.click();
 }
 
@@ -257,6 +258,107 @@ async function checkRootSignedOutToLanding(page) {
   await (await findVisible(page, '#heroSignupLink')).click();
   await retryUntil(async () => (await page.evaluate(() => location.href)).includes('/signup'));
   console.log('OK — the landing page\'s hero "Start free" button opens /signup.');
+}
+
+// Required screenshots at 390px and 1280px of Home, Buy, Record purchase, Purchase detail, Stock,
+// and Stock item detail. Runs while the purchase created in checkPurchaseFlow still exists, since
+// the detail routes need something real to show. "Record purchase" isn't its own route (it's a
+// sheet), so it's recomposed fresh — filled in but never saved — purely for the screenshot.
+async function captureStep9Screens(page, { purchasePath, stockItemPath }) {
+  await mkdir(STEP9_SCREEN_DIR, { recursive: true });
+  const routeShots = [
+    { name: 'home', url: `${APP_URL}/home` },
+    { name: 'buy', url: `${APP_URL}/buy` },
+    { name: 'purchase-detail', url: `${APP_URL}${purchasePath}` },
+    { name: 'stock', url: `${APP_URL}/stock` },
+    { name: 'stock-item-detail', url: `${APP_URL}${stockItemPath}` },
+  ];
+
+  for (const width of [390, 1280]) {
+    await page.setViewport({ width, height: 900 });
+
+    for (const shot of routeShots) {
+      await page.goto(shot.url, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await page.screenshot({ path: `${STEP9_SCREEN_DIR}/${shot.name}-${width}.png` });
+    }
+
+    await page.goto(`${APP_URL}/buy`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Purchases');
+    await clickButton(page, 'Record purchase');
+    await waitForText(page, 'What did you buy?');
+    await typeInto(page, 'Supplier', 'Sunrise Supplies');
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
+    await typeInto(page, 'Quantity', '2');
+    await typeInto(page, 'Price per unit', '40');
+    await page.screenshot({ path: `${STEP9_SCREEN_DIR}/record-purchase-${width}.png` });
+  }
+
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — saved Step 9 screenshots at 390px and 1280px to ${STEP9_SCREEN_DIR}/.`);
+}
+
+// Step 9: the signed-in Owner (already on /home, business fully set up with Rice/Cooking
+// oil/Fresh Paneer from the wizard) records a two-line purchase, sees it in the Buy list, opens
+// its detail, confirms the new price shows up on Stock item detail for one of the lines, then
+// deletes the purchase via the confirmation dialog.
+async function checkPurchaseFlow(page) {
+  await page.goto(`${APP_URL}/buy`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Purchases');
+  console.log('OK — /buy shows the Purchases screen.');
+
+  await clickButton(page, 'Record purchase');
+  await waitForText(page, 'What did you buy?');
+
+  await typeInto(page, 'Supplier', 'Sunrise Supplies');
+
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
+  await typeInto(page, 'Quantity', '2');
+  await typeInto(page, 'Price per unit', '40');
+
+  await clickButton(page, 'Add another item');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Cooking oil', { last: true }));
+  await typeInto(page, 'Quantity', '1', { last: true });
+  await typeInto(page, 'Price per unit', '60', { last: true });
+
+  await clickButton(page, 'Save purchase');
+  await waitForText(page, 'Purchase saved');
+  console.log('OK — recorded a purchase with 2 lines; toast confirms the save.');
+
+  await waitForText(page, 'Sunrise Supplies');
+  console.log('OK — the new purchase appears in the Buy list.');
+
+  await (await findVisible(page, '[aria-label="Sunrise Supplies"]')).click();
+  await waitForText(page, 'Purchase detail');
+  await waitForText(page, 'Rice');
+  await waitForText(page, 'Cooking oil');
+  console.log('OK — opened the purchase detail; both lines are shown.');
+  const purchasePath = await page.evaluate(() => location.pathname);
+
+  await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Rice');
+  await (await findVisible(page, '[aria-label="Rice"]')).click();
+  await waitForText(page, 'Price trend');
+  await waitForText(page, '₹40');
+  console.log('OK — Stock item detail for Rice shows the new price point (last paid ₹40).');
+  const stockItemPath = await page.evaluate(() => location.pathname);
+
+  // Required screenshots, before the purchase above is deleted below.
+  await captureStep9Screens(page, { purchasePath, stockItemPath });
+
+  await page.goto(`${APP_URL}${purchasePath}`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Purchase detail');
+  await clickButton(page, 'Delete purchase');
+  await waitForText(page, 'Delete purchase?');
+  await clickButton(page, 'Delete purchase', { last: true });
+  await waitForPath(page, '/buy');
+  const afterDeleteText = await page.evaluate(() => document.body.innerText);
+  if (afterDeleteText.includes('Sunrise Supplies')) {
+    fail('a deleted purchase should not still appear in the Buy list');
+  }
+  console.log(
+    'OK — deleted the purchase via the confirmation dialog; it no longer appears in the list.',
+  );
 }
 
 async function main() {
@@ -387,6 +489,9 @@ async function main() {
     await waitForPath(page, '/home');
     console.log('OK — opening "/" again while signed in and onboarded lands on /home.');
 
+    // === Step 9: Owner records, views, and deletes a purchase; Stock reflects the new price ===
+    await checkPurchaseFlow(page);
+
     await logoutFromAnywhere(page);
     console.log('OK — logging out lands on /login.');
 
@@ -451,7 +556,7 @@ async function main() {
 
     await logoutFromAnywhere(page);
 
-    // === Scenario 4: the Helper (from User 1) logs in with their PIN, sees no setup links ===
+    // === Scenario 4: the Helper (from User 1) logs in with their PIN, sees the placeholder Home ===
     await login(page, helperMobile, helperPin);
     await waitForPath(page, '/home');
     const helperHomeText = await page.evaluate(() => document.body.innerText);
@@ -459,6 +564,10 @@ async function main() {
       fail('a Helper should never see the "Finish setting up" checklist card');
     }
     console.log('OK — the Helper logs in with their PIN and /home has no setup links.');
+
+    await waitForText(page, 'Hello, Helper One');
+    await waitForText(page, "Your tasks aren't set up yet");
+    console.log('OK — the Helper sees the placeholder Home ("Hello, name" + a coming-soon message).');
 
     console.log('\nAll flow checks passed.');
   } catch (err) {
