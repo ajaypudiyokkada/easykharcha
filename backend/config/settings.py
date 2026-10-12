@@ -32,6 +32,8 @@ INSTALLED_APPS = [
     "audit",
     "stock",
     "purchases",
+    "counts",
+    "wastage",
 ]
 
 MIDDLEWARE = [
@@ -130,12 +132,14 @@ RATE_LIMITS = {
 # normal day-to-day variation.
 BUSINESS_SETTINGS_DEFAULTS = {
     "count_deadline_hour": 11,
+    "closing_count_hour": 20,
     "target_cost_pct": 30,
     "wastage_alert_pct": 5,
     "rate_creep_pct": 10,
 }
 BUSINESS_SETTINGS_RANGES = {
     "count_deadline_hour": (0, 23),
+    "closing_count_hour": (0, 23),
     "target_cost_pct": (1, 100),
     "wastage_alert_pct": (0, 100),
     "rate_creep_pct": (0, 100),

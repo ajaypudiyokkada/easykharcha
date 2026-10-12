@@ -23,6 +23,10 @@ def mask_mobile(mobile: str) -> str:
 def serialize_team_member(access: Access) -> dict:
     return {
         "id": access.id,
+        # Step 10: the Count review screen's "Remind <name>" needs this to call
+        # POST counts/remind/ {type, user_id} for a team member who hasn't counted yet at all (so
+        # there's no StockCount row — and no counted_by — to get it from instead).
+        "user_id": access.user_id,
         "name": access.user.name,
         "mobile": mask_mobile(access.user.mobile),
         "role": access.role,

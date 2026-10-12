@@ -15,10 +15,12 @@ import {
   Body,
   Button,
   Card,
+  EmptyState,
   Heading,
+  NoAccess,
   ReadError,
   Screen,
-  Skeleton,
+  SkeletonList,
   Small,
   TextField,
   Toast,
@@ -66,7 +68,13 @@ export default function Buy() {
     return <Redirect href="/login" />;
   }
   if (!can(permissions, 'purchases.view')) {
-    return <Redirect href="/home" />;
+    return (
+      <AppShell active="buy">
+        <Screen maxWidth={HOME_CONTENT_WIDTH}>
+          <NoAccess />
+        </Screen>
+      </AppShell>
+    );
   }
 
   const canRecord = can(permissions, 'purchases.create');
@@ -114,11 +122,7 @@ export default function Buy() {
         {failed ? (
           <ReadError onRetry={load} loading={loading} />
         ) : loading ? (
-          <View style={styles.list}>
-            <Skeleton height={76} />
-            <Skeleton height={76} />
-            <Skeleton height={76} />
-          </View>
+          <SkeletonList count={3} height={76} />
         ) : data && data.results.length > 0 ? (
           <View style={styles.list}>
             <Small style={styles.sectionLabel}>{s.recentPurchases}</Small>
@@ -131,17 +135,15 @@ export default function Buy() {
               />
             ))}
           </View>
+        ) : canRecord ? (
+          <EmptyState
+            icon="buy"
+            title={s.empty.message}
+            buttonLabel={s.empty.button}
+            onPress={() => setSheetVisible(true)}
+          />
         ) : (
-          <View style={styles.empty}>
-            <Body style={styles.emptyMessage}>{s.empty.message}</Body>
-            {canRecord ? (
-              <Button
-                label={s.empty.button}
-                variant="secondary"
-                onPress={() => setSheetVisible(true)}
-              />
-            ) : null}
-          </View>
+          <Body style={styles.subtitle}>{s.empty.message}</Body>
         )}
       </Screen>
 
@@ -239,13 +241,5 @@ const styles = StyleSheet.create({
   rowAmount: {
     fontFamily: fonts.bodyExtraBold,
     fontSize: type.md,
-  },
-  empty: {
-    alignItems: 'flex-start',
-    gap: spacing.md,
-    paddingVertical: spacing.xl,
-  },
-  emptyMessage: {
-    color: colours.muted,
   },
 });

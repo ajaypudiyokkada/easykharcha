@@ -40,6 +40,7 @@ const LANDING_URL = 'http://localhost:8082';
 const TIMEOUT = 15_000;
 const SCREEN_DIR = 'docs/screens/step8c';
 const STEP9_SCREEN_DIR = 'docs/screens/step9';
+const STEP10_SCREEN_DIR = 'docs/screens/step10';
 
 function findChrome() {
   const candidates = [
@@ -361,6 +362,238 @@ async function checkPurchaseFlow(page) {
   );
 }
 
+// Step 10: the signed-in Owner submits the opening stock count with plain values (no history yet,
+// so no unusual-value guard is possible) — establishes the baseline the Helper's closing count
+// below compares against.
+async function checkOwnerOpeningCount(page) {
+  await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Count stock');
+  await typeInto(page, 'Rice quantity', '5');
+  await typeInto(page, 'Cooking oil quantity', '5');
+  await typeInto(page, 'Fresh Paneer quantity', '5');
+  await clickButton(page, 'Save count');
+  await waitForText(page, 'Count saved. Thank you.');
+  console.log('OK — the Owner submits the opening stock count.');
+
+  await clickButton(page, 'Back to Today');
+  await waitForPath(page, '/home');
+  await waitForText(page, 'Stock count');
+  console.log('OK — Home shows the stock count state card.');
+}
+
+const FORBIDDEN_WORDS = ['₹', 'expected', 'gap', 'price'];
+
+// Step 10: a Helper/Head chef page must never leak a rupee sign, "expected", "gap", or "price" —
+// and never "usual" either, except inside the unusual-value guard dialog's own sentence.
+async function assertNoForbiddenText(page, { allowUsual = false } = {}) {
+  const text = (await page.evaluate(() => document.body.innerText)).toLowerCase();
+  for (const word of FORBIDDEN_WORDS) {
+    if (text.includes(word.toLowerCase())) {
+      fail(`forbidden text "${word}" found on a Helper/Head chef page (${page.url()})`);
+    }
+  }
+  if (!allowUsual && text.includes('usual')) {
+    fail(`forbidden text "usual" found outside the guard dialog (${page.url()})`);
+  }
+}
+
+// Step 10: the Helper signs in, sees the Today screen, submits the closing stock count (one value
+// deliberately unusual against the Owner's opening baseline, exercising the confirm-guard), then
+// records wastage and sees it under "My entries today".
+async function checkHelperTodayFlow(page, helperMobile, helperPin) {
+  await login(page, helperMobile, helperPin);
+  await waitForPath(page, '/home');
+  await waitForText(page, 'Good evening,');
+  await assertNoForbiddenText(page);
+  console.log('OK — the Helper signs in and sees the Today screen.');
+
+  await (await findVisible(page, '[aria-label="Count stock"]')).click();
+  await waitForPath(page, '/count');
+  await waitForText(page, 'Count stock');
+  await assertNoForbiddenText(page);
+
+  // Rice: 50 is more than 3x the Owner's opening value of 5 -> needs_confirmation.
+  await typeInto(page, 'Rice quantity', '50');
+  await typeInto(page, 'Cooking oil quantity', '5');
+  await typeInto(page, 'Fresh Paneer quantity', '5');
+  await clickButton(page, 'Save count');
+  await waitForText(page, 'That looks very different from usual.');
+  await waitForText(page, 'Is 50 kg right?');
+  await assertNoForbiddenText(page, { allowUsual: true });
+  console.log('OK — count every item, then confirm one unusual value via the guard dialog.');
+
+  await clickButton(page, 'Yes, 50 kg is right');
+  await waitForText(page, 'Count saved. Thank you.');
+  await assertNoForbiddenText(page);
+  console.log('OK — confirming the unusual value saves the count; the Saved screen has no numbers.');
+
+  await clickButton(page, 'Back to Today');
+  await waitForPath(page, '/home');
+
+  await (await findVisible(page, '[aria-label="Record wastage"]')).click();
+  await waitForText(page, 'What was lost?');
+  await assertNoForbiddenText(page);
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
+  await typeInto(page, 'How much', '1');
+  await clickButton(page, 'Save wastage');
+  await waitForText(page, 'My entries today');
+  await waitForText(page, 'Rice');
+  await assertNoForbiddenText(page);
+  console.log('OK — the Helper records wastage and sees it under "My entries today".');
+}
+
+// Step 10: the Head chef signs in and sees the team-wide Today screen — no counts/wastage numbers
+// leak that a Helper or Head chef shouldn't see.
+async function checkHeadChefTodayFlow(page, headChefMobile, headChefPin) {
+  await login(page, headChefMobile, headChefPin);
+  await waitForPath(page, '/home');
+  await waitForText(page, 'Good evening,');
+  await waitForText(page, 'Entries today');
+  await assertNoForbiddenText(page);
+  console.log('OK — the Head chef signs in and sees the team Today screen.');
+}
+
+// Step 10: back as Owner — count review lists both counts with a late/on-time chip, the closing
+// count's detail shows the used-since-last-count numbers with the flagged item first, and the
+// Wastage screen shows the Helper's entry with its rupee value before the Owner deletes it.
+async function checkCountReviewAndWastageFlow(page, ownerMobile, ownerPassword) {
+  await login(page, ownerMobile, ownerPassword);
+  await waitForPath(page, '/home');
+
+  await page.goto(`${APP_URL}/counts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, "Today's counts");
+  await waitForText(page, 'Opening count');
+  await waitForText(page, 'Closing count');
+  const reviewText = await page.evaluate(() => document.body.innerText);
+  if (!reviewText.includes('On time') && !reviewText.includes('Late by')) {
+    fail('count review: expected an On time or Late chip on each count');
+  }
+  console.log('OK — count review lists the opening and closing counts with a late/on-time chip.');
+
+  await (await findVisible(page, '[aria-label="Closing count · Helper One"]')).click();
+  await waitForText(page, 'Used since last count');
+  await waitForText(page, 'Rice');
+  console.log("OK — the closing count's detail shows the used-since-last-count numbers.");
+
+  await page.goto(`${APP_URL}/wastage`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Wastage');
+  await waitForText(page, 'Rice');
+  const wastageText = await page.evaluate(() => document.body.innerText);
+  if (!wastageText.includes('₹')) {
+    fail('wastage: expected the Owner to see a rupee value on the entry');
+  }
+  console.log("OK — the Wastage screen shows the Helper's entry with its rupee value.");
+
+  await clickButton(page, 'Delete entry');
+  await waitForText(page, 'Delete this entry?');
+  await clickButton(page, 'Delete entry', { last: true });
+  await waitForText(page, 'No wastage recorded yet.');
+  console.log('OK — the Owner deletes the entry via the confirmation dialog.');
+}
+
+// Required screenshots at 390px and 1280px of: Helper Today, Blind count, Saved, Record wastage,
+// Owner Home, Count review (list and detail), Wastage, Stock. Opening/closing counts and team
+// roles are one-per-business-per-day, so this runs its own fresh business once per width rather
+// than reusing the main flow's — the screens it needs to revisit mid-interaction (an open Record
+// wastage sheet, a fresh Blind count form) can't be replayed afterwards on a business that's
+// already used up today's two count slots.
+async function captureStep10Screens(page) {
+  await mkdir(STEP10_SCREEN_DIR, { recursive: true });
+
+  for (const width of [390, 1280]) {
+    await page.setViewport({ width, height: width === 390 ? 3000 : 1000 });
+
+    const name = 'Shots Ten';
+    const mobile = randomMobile();
+    const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+    await signup(page, name, mobile, password);
+    await login(page, mobile, password);
+    await waitForPath(page, '/setup/1');
+    await fillStepOne(page, "Shots Ten's Kitchen", 'Pune', 'Cloud kitchen');
+    await clickButton(page, 'Next');
+    await waitForPath(page, '/setup/2');
+    await clickButton(page, 'Next');
+    await waitForPath(page, '/setup/3');
+    await waitForText(page, 'Rice');
+    await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
+    await clickButton(page, 'Next');
+    await waitForPath(page, '/setup/4');
+    await clickButton(page, 'Skip for now');
+    await waitForPath(page, '/setup/5');
+
+    const helperMobile = randomMobile();
+    const helperPin = '7392';
+    await typeInto(page, 'Name', 'Shots Helper');
+    await typeInto(page, 'Mobile number', helperMobile);
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Helper'));
+    await typeInto(page, 'PIN', helperPin);
+    await clickButton(page, 'Add person');
+    await waitForText(page, 'Shots Helper');
+    await clickButton(page, 'Next');
+    await waitForPath(page, '/setup/6');
+    await clickButton(page, 'Use recommended settings');
+    await waitForPath(page, '/setup/done');
+    await clickButton(page, 'Go to Home');
+    await waitForPath(page, '/home');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/owner-home-${width}.png` });
+
+    await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Count stock');
+    await typeInto(page, 'Rice quantity', '5');
+    await clickButton(page, 'Save count');
+    await waitForText(page, 'Count saved. Thank you.');
+    await clickButton(page, 'Back to Today');
+    await waitForPath(page, '/home');
+
+    await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Stock');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/stock-${width}.png` });
+
+    await page.goto(`${APP_URL}/wastage`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Wastage');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/wastage-${width}.png` });
+
+    await page.goto(`${APP_URL}/counts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, "Today's counts");
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/count-review-list-${width}.png` });
+    await (await findVisible(page, '[aria-label="Opening count · Shots Ten"]')).click();
+    await waitForText(page, 'Count detail');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/count-review-detail-${width}.png` });
+
+    await logoutFromAnywhere(page);
+    await login(page, helperMobile, helperPin);
+    await waitForPath(page, '/home');
+    await waitForText(page, 'Good evening,');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/helper-today-${width}.png` });
+
+    await (await findVisible(page, '[aria-label="Count stock"]')).click();
+    await waitForPath(page, '/count');
+    await waitForText(page, 'Count stock');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/blind-count-${width}.png` });
+    await typeInto(page, 'Rice quantity', '6');
+    await clickButton(page, 'Save count');
+    await waitForText(page, 'Count saved. Thank you.');
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/saved-${width}.png` });
+    await clickButton(page, 'Back to Today');
+    await waitForPath(page, '/home');
+
+    await (await findVisible(page, '[aria-label="Record wastage"]')).click();
+    await waitForText(page, 'What was lost?');
+    // The sheet fades in (Modal animationType="fade") — the text exists in the DOM the instant it
+    // mounts, well before the fade finishes, so a screenshot taken right on waitForText's heels
+    // catches it mid-transition, semi-transparent over the page underneath.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await page.screenshot({ path: `${STEP10_SCREEN_DIR}/record-wastage-${width}.png` });
+    await (await findVisible(page, '[aria-label="Close"]')).click();
+
+    await logoutFromAnywhere(page);
+  }
+
+  // Back to the main flow's own tall-mobile viewport.
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — saved Step 10 screenshots at 390px and 1280px to ${STEP10_SCREEN_DIR}/.`);
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
@@ -456,9 +689,22 @@ async function main() {
     await typeInto(page, 'PIN', helperPin);
     await clickButton(page, 'Add person');
     await waitForText(page, 'Helper One');
+    console.log('OK — added a Helper with a PIN.');
+
+    // Step 10: also add a Head chef, for the counts.status Today-screen scenario below.
+    const headChefMobile = randomMobile();
+    const headChefPin = '8417';
+    await typeInto(page, 'Name', 'Chef Rahul', { last: true });
+    await typeInto(page, 'Mobile number', headChefMobile, { last: true });
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Head chef'));
+    await typeInto(page, 'PIN', headChefPin, { last: true });
+    await clickButton(page, 'Add person');
+    await waitForText(page, 'Chef Rahul');
+    console.log('OK — added a Head chef with a PIN.');
+
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/6');
-    console.log('OK — added a Helper with a PIN, step 5 saved, moved to /setup/6.');
+    console.log('OK — step 5 saved, moved to /setup/6.');
 
     await clickButton(page, 'Use recommended settings');
     await waitForPath(page, '/setup/done');
@@ -491,6 +737,10 @@ async function main() {
 
     // === Step 9: Owner records, views, and deletes a purchase; Stock reflects the new price ===
     await checkPurchaseFlow(page);
+
+    // === Step 10: Owner submits the opening stock count (baseline for the Helper's closing count
+    // further down, once the wizard-created Helper/Head chef accounts below exist) ===
+    await checkOwnerOpeningCount(page);
 
     await logoutFromAnywhere(page);
     console.log('OK — logging out lands on /login.');
@@ -556,18 +806,17 @@ async function main() {
 
     await logoutFromAnywhere(page);
 
-    // === Scenario 4: the Helper (from User 1) logs in with their PIN, sees the placeholder Home ===
-    await login(page, helperMobile, helperPin);
-    await waitForPath(page, '/home');
-    const helperHomeText = await page.evaluate(() => document.body.innerText);
-    if (helperHomeText.includes('Finish setting up')) {
-      fail('a Helper should never see the "Finish setting up" checklist card');
-    }
-    console.log('OK — the Helper logs in with their PIN and /home has no setup links.');
+    // === Step 10: the Helper (from User 1) counts stock, confirms an unusual value, and records
+    // wastage; the Head chef (also from User 1) sees the team Today screen; the Owner reviews both
+    // counts and the Helper's wastage entry, then deletes it ===
+    await checkHelperTodayFlow(page, helperMobile, helperPin);
+    await logoutFromAnywhere(page);
+    await checkHeadChefTodayFlow(page, headChefMobile, headChefPin);
+    await logoutFromAnywhere(page);
+    await checkCountReviewAndWastageFlow(page, mobile, password);
+    await logoutFromAnywhere(page);
 
-    await waitForText(page, 'Hello, Helper One');
-    await waitForText(page, "Your tasks aren't set up yet");
-    console.log('OK — the Helper sees the placeholder Home ("Hello, name" + a coming-soon message).');
+    await captureStep10Screens(page);
 
     console.log('\nAll flow checks passed.');
   } catch (err) {

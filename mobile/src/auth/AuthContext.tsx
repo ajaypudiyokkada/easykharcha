@@ -37,6 +37,10 @@ type AuthContextValue = {
   refreshMe: () => Promise<MeResponse>;
   /** Re-attempts the startup /me check — what the `status === 'offline'` retry screen calls. */
   retryBootstrap: () => Promise<void>;
+  /** True only when a token refresh failed mid-session (not on an ordinary logout, and not when the
+   * startup bootstrap itself never had a session to lose) — drives the session-expired dialog. */
+  sessionExpired: boolean;
+  dismissSessionExpired: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -49,14 +53,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // must never see a stale closure, and reading them should never itself trigger a re-render.
   const accessRef = useRef<string | null>(null);
   const refreshRef = useRef<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
-  const signOutLocally = useCallback(async () => {
+  const signOutLocally = useCallback(async (options: { expired?: boolean } = {}) => {
     accessRef.current = null;
     refreshRef.current = null;
     await tokenStorage.clear();
     setUser(null);
     setBusinesses([]);
     setStatus('signedOut');
+    if (options.expired) setSessionExpired(true);
   }, []);
 
   // Attaches the current access token, retries exactly once after a refresh on a 401, and signs the
@@ -78,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await tokenStorage.save(pair.access, pair.refresh);
             return await api<T>(path, { ...options, token: accessRef.current });
           } catch (refreshErr) {
-            await signOutLocally();
+            await signOutLocally({ expired: true });
             throw refreshErr;
           }
         }
@@ -113,6 +119,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setStatus('offline');
       } else {
         await signOutLocally();
+        // A stale/invalid token found at app launch isn't a "mid-session" surprise — nothing was
+        // interrupted, so no dialog, even though authedFetch's own refresh-failure path above
+        // always flips sessionExpired on its way out.
+        setSessionExpired(false);
       }
     }
   }, [refreshMe, signOutLocally]);
@@ -151,6 +161,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOutLocally();
   }, [signOutLocally]);
 
+  const dismissSessionExpired = useCallback(() => setSessionExpired(false), []);
+
   const value = useMemo(
     () => ({
       status,
@@ -161,8 +173,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authedFetch,
       refreshMe,
       retryBootstrap: bootstrap,
+      sessionExpired,
+      dismissSessionExpired,
     }),
-    [status, user, businesses, login, logout, authedFetch, refreshMe, bootstrap],
+    [
+      status,
+      user,
+      businesses,
+      login,
+      logout,
+      authedFetch,
+      refreshMe,
+      bootstrap,
+      sessionExpired,
+      dismissSessionExpired,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

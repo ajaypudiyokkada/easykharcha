@@ -349,6 +349,17 @@ async function buildOwnerSession(page) {
   await typeInto(page, 'PIN', helperPin);
   await clickButton(page, 'Add person');
   await waitForText(page, 'Helper One');
+
+  // Step 10
+  const headChefMobile = randomMobile();
+  const headChefPin = '8417';
+  await typeInto(page, 'Name', 'Chef Rahul', { last: true });
+  await typeInto(page, 'Mobile number', headChefMobile, { last: true });
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Head chef'));
+  await typeInto(page, 'PIN', headChefPin, { last: true });
+  await clickButton(page, 'Add person');
+  await waitForText(page, 'Chef Rahul');
+
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/6');
 
@@ -379,11 +390,36 @@ async function buildOwnerSession(page) {
   await waitForText(page, 'Price trend');
   const stockItemPath = await page.evaluate(() => location.pathname);
 
+  // Step 10: the opening stock count, so /counts and /counts/[id] have a real page to check too.
+  await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Count stock');
+  await typeInto(page, 'Rice quantity', '5');
+  await typeInto(page, 'Fresh Paneer quantity', '5');
+  await clickButton(page, 'Save count');
+  await waitForText(page, 'Count saved. Thank you.');
+  await clickButton(page, 'Back to Today');
+  await waitForPath(page, '/home');
+
+  await page.goto(`${APP_URL}/counts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, "Today's counts");
+  await (await findVisible(page, '[aria-label="Opening count · Responsive Check"]')).click();
+  await waitForText(page, 'Count detail');
+  const countDetailPath = await page.evaluate(() => location.pathname);
+
   const tokens = await page.evaluate(() => ({
     access: localStorage.getItem('easykharcha.access'),
     refresh: localStorage.getItem('easykharcha.refresh'),
   }));
-  return { tokens, helperMobile, helperPin, purchasePath, stockItemPath };
+  return {
+    tokens,
+    helperMobile,
+    helperPin,
+    headChefMobile,
+    headChefPin,
+    purchasePath,
+    stockItemPath,
+    countDetailPath,
+  };
 }
 
 async function buildHelperSession(browser, helperMobile, helperPin) {
@@ -394,6 +430,20 @@ async function buildHelperSession(browser, helperMobile, helperPin) {
   await page.evaluateOnNewDocument(() => localStorage.clear());
   await page.goto(`${APP_URL}/login`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await login(page, helperMobile, helperPin);
+  await waitForPath(page, '/home');
+  const tokens = await page.evaluate(() => ({
+    access: localStorage.getItem('easykharcha.access'),
+    refresh: localStorage.getItem('easykharcha.refresh'),
+  }));
+  await page.close();
+  return tokens;
+}
+
+async function buildHeadChefSession(browser, headChefMobile, headChefPin) {
+  const page = await browser.newPage();
+  await page.evaluateOnNewDocument(() => localStorage.clear());
+  await page.goto(`${APP_URL}/login`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await login(page, headChefMobile, headChefPin);
   await waitForPath(page, '/home');
   const tokens = await page.evaluate(() => ({
     access: localStorage.getItem('easykharcha.access'),
@@ -481,12 +531,17 @@ async function main() {
       tokens: ownerTokens,
       helperMobile,
       helperPin,
+      headChefMobile,
+      headChefPin,
       purchasePath,
       stockItemPath,
+      countDetailPath,
     } = await buildOwnerSession(setupPage);
     await setupPage.close();
     console.log('Setting up a Helper session...');
     const helperTokens = await buildHelperSession(browser, helperMobile, helperPin);
+    console.log('Setting up a Head chef session...');
+    const headChefTokens = await buildHeadChefSession(browser, headChefMobile, headChefPin);
     console.log('Sessions ready. Checking every route at every width...\n');
 
     const noAuthRoutes = [
@@ -516,8 +571,16 @@ async function main() {
       { name: 'alerts', url: `${APP_URL}/alerts` },
       { name: 'team', url: `${APP_URL}/team` },
       { name: 'settings', url: `${APP_URL}/settings` },
+      // Step 10
+      { name: 'count', url: `${APP_URL}/count` },
+      { name: 'counts', url: `${APP_URL}/counts` },
+      { name: 'counts-detail', url: `${APP_URL}${countDetailPath}` },
     ];
-    const helperRoutes = [{ name: 'home-helper', url: `${APP_URL}/home` }];
+    const helperRoutes = [
+      { name: 'home-helper', url: `${APP_URL}/home` },
+      { name: 'wastage-helper', url: `${APP_URL}/wastage` },
+    ];
+    const headChefRoutes = [{ name: 'home-headchef', url: `${APP_URL}/home` }];
 
     const noAuthPage = await browser.newPage();
     // All pages in this browser share the same profile/localStorage per origin — without this, the
@@ -551,6 +614,16 @@ async function main() {
       }
     }
     await helperPage.close();
+
+    const headChefPage = await browser.newPage();
+    await injectTokens(headChefPage, headChefTokens);
+    for (const route of headChefRoutes) {
+      for (const width of WIDTHS) {
+        console.log(`  ${route.name.padEnd(14)} ${width}px`);
+        await checkRouteAtWidth(headChefPage, route, width, failures);
+      }
+    }
+    await headChefPage.close();
 
     console.log('');
     if (failures.length === 0) {

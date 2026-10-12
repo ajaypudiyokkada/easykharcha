@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthContext';
-import { can } from '../auth/permissions';
+import { can, isLimitedRole } from '../auth/permissions';
 import { useMinWidth } from '../hooks/useMinWidth';
 import { strings } from '../strings';
 import { colours, fonts, radii, spacing, type } from '../theme/tokens';
@@ -26,7 +26,25 @@ type NavItem = {
   permission?: string;
 };
 
-function navItems(s: typeof strings.nav): { primary: NavItem[]; more: NavItem[] } {
+function navItems(
+  s: typeof strings.nav,
+  limited: boolean,
+): { primary: NavItem[]; more: NavItem[] } {
+  if (limited) {
+    return {
+      primary: [
+        { key: 'home', label: s.today, icon: 'home', href: '/home' },
+        {
+          key: 'wastage',
+          label: s.wastage,
+          icon: 'wastage',
+          href: '/wastage',
+          permission: 'wastage.create',
+        },
+      ],
+      more: [],
+    };
+  }
   return {
     primary: [
       { key: 'home', label: s.home, icon: 'home', href: '/home' },
@@ -36,7 +54,13 @@ function navItems(s: typeof strings.nav): { primary: NavItem[]; more: NavItem[] 
     ],
     more: [
       { key: 'sales', label: s.sales, icon: 'sales', href: '/sales' },
-      { key: 'wastage', label: s.wastage, icon: 'wastage', href: '/wastage' },
+      {
+        key: 'wastage',
+        label: s.wastage,
+        icon: 'wastage',
+        href: '/wastage',
+        permission: 'wastage.view_all',
+      },
       { key: 'alerts', label: s.alerts, icon: 'alert', href: '/alerts' },
       { key: 'team', label: s.team, icon: 'team', href: '/team', permission: 'team.manage' },
       {
@@ -71,7 +95,7 @@ export function AppShell({ active, children }: Props) {
 
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
-  const { primary, more } = navItems(strings.nav);
+  const { primary, more } = navItems(strings.nav, isLimitedRole(permissions));
   const visiblePrimary = primary.filter(
     (item) => !item.permission || can(permissions, item.permission),
   );

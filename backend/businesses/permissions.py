@@ -2,10 +2,9 @@
 never a role name directly — so a new role, or a role gaining/losing a permission, is a one-line change
 in this table, not a hunt through every view.
 
-This is the starting table for Step 9 (purchases + stock viewing only). Head chef and Helper have no
-permissions yet on purpose — their jobs (counting stock, recording wastage) don't exist as features
-yet, so there's nothing to grant them access to. See docs/STATUS.md: this table is a first draft for
-the product owner to review, not a final design.
+Step 9 drafted purchases + stock viewing. Step 10 adds counts and wastage: Head chef and Helper now
+have real jobs (blind stock counts, recording wastage) instead of an empty placeholder Home. See
+docs/STATUS.md for the full table and the reasoning behind each role's set.
 """
 
 from rest_framework.exceptions import PermissionDenied
@@ -22,11 +21,39 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "stock.view",
             "team.manage",
             "settings.manage",
+            "counts.create",
+            "counts.review",
+            "wastage.create",
+            "wastage.view_all",
+            "wastage.view_value",
+            "wastage.delete",
         }
     ),
-    AccessRole.MANAGER: frozenset({"purchases.view", "purchases.create", "stock.view"}),
-    AccessRole.HEAD_CHEF: frozenset(),
-    AccessRole.HELPER: frozenset(),
+    AccessRole.MANAGER: frozenset(
+        {
+            "purchases.view",
+            "purchases.create",
+            "stock.view",
+            "counts.review",
+            "wastage.view_all",
+            "wastage.view_value",
+        }
+    ),
+    AccessRole.HEAD_CHEF: frozenset(
+        {
+            "counts.create",
+            "wastage.create",
+            "wastage.view_all",
+            "counts.status",
+        }
+    ),
+    AccessRole.HELPER: frozenset(
+        {
+            "counts.create",
+            "wastage.create",
+            "wastage.view_own",
+        }
+    ),
 }
 
 

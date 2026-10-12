@@ -23,6 +23,9 @@ def exception_handler(exc, context):
     row_errors = getattr(exc, "row_errors", None)
     if row_errors is not None:
         body["row_errors"] = row_errors
+    item_ids = getattr(exc, "item_ids", None)
+    if item_ids is not None:
+        body["item_ids"] = item_ids
 
     return Response(body, status=response.status_code)
 

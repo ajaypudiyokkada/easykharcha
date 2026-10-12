@@ -14,7 +14,7 @@ import { AuthProvider, useAuth } from '../src/auth/AuthContext';
 import { useOnlineStatus } from '../src/hooks/useOnlineStatus';
 import { registerServiceWorker } from '../src/pwa/registerServiceWorker';
 import { strings } from '../src/strings';
-import { Banner, OfflineRetry } from '../src/ui';
+import { Banner, OfflineRetry, SessionExpiredDialog } from '../src/ui';
 import { colours } from '../src/theme/tokens';
 
 const s = strings.app;
@@ -57,6 +57,9 @@ export default function RootLayout() {
             <Stack.Screen name="reports" options={{ title: 'Reports' }} />
             <Stack.Screen name="sales" options={{ title: 'Sales' }} />
             <Stack.Screen name="wastage" options={{ title: 'Wastage' }} />
+            <Stack.Screen name="count" options={{ title: 'Count stock' }} />
+            <Stack.Screen name="counts/index" options={{ title: "Today's counts" }} />
+            <Stack.Screen name="counts/[id]" options={{ title: 'Count detail' }} />
             <Stack.Screen name="alerts" options={{ title: 'Alerts' }} />
             <Stack.Screen name="team" options={{ title: 'Team' }} />
             <Stack.Screen name="settings" options={{ title: 'Settings' }} />
@@ -81,7 +84,7 @@ export default function RootLayout() {
  * `status === 'offline'` — a full gate screen in place of the Stack entirely, since no screen below
  * it has valid `user`/`businesses` data to render with yet. */
 function RootShell({ children }: { children: React.ReactNode }) {
-  const { status, retryBootstrap } = useAuth();
+  const { status, retryBootstrap, sessionExpired, dismissSessionExpired } = useAuth();
   const online = useOnlineStatus();
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
@@ -114,6 +117,7 @@ function RootShell({ children }: { children: React.ReactNode }) {
         </Pressable>
       ) : null}
       {children}
+      <SessionExpiredDialog visible={sessionExpired} onLogin={dismissSessionExpired} />
     </View>
   );
 }

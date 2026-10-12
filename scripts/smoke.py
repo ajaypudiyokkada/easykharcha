@@ -32,6 +32,17 @@ every purchases endpoint -> the Owner edits a purchase (new total recalculated) 
 gone from both the list and its own detail endpoint — soft-deleted, so the row itself stays in the
 database, just never served again) -> a user from another business gets 403/404 -> /me returns the
 exact permission set for each role.
+
+Then the Step 10 counts/wastage flow: the blind count form returns only id/name/unit (nothing else,
+for any role) -> a Helper gets 403 on purchases, stock detail, and count review, and sees no rupee
+value on their own wastage entries -> a Helper submits an opening count (201), a second opening count
+for the same date is rejected -> an unusually high closing-count value is rejected with
+needs_confirmation and no numbers, and succeeds once re-sent with confirm_ids -> with
+closing_count_hour set to 0, that closing count is late -> count review lists both counts with the
+right late flag, and the detail's used_since_last_count math checks out for a known case, with no
+expected/gap field anywhere -> wastage: a Helper sees only their own entries, a Head chef sees every
+entry with no values, a Manager sees values but gets 403 on create/delete, and the Owner soft-deletes
+one -> another business's users get 403/404 on every new endpoint.
 """
 
 import binascii
@@ -42,6 +53,8 @@ import sys
 import urllib.error
 import urllib.request
 import zlib
+from datetime import datetime, timezone as dt_timezone
+from decimal import Decimal
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 ORIGIN = "http://localhost:8081"
@@ -51,6 +64,10 @@ EXPECTED_HEALTH_KEYS = {"status", "version", "database"}
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
     sys.exit(1)
+
+
+def _now_iso() -> str:
+    return datetime.now(dt_timezone.utc).isoformat()
 
 
 def request(
@@ -632,7 +649,7 @@ def check_purchase_flow() -> None:
         f"/businesses/{business_id}/purchases/",
         {
             "supplier_name": "Sunrise Supplies",
-            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "purchase_date_time": _now_iso(),
             "lines": [
                 {"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"},
                 {"stock_item": flour_id, "quantity": "15", "unit_price": "48", "line_total": "720"},
@@ -665,7 +682,7 @@ def check_purchase_flow() -> None:
         f"/businesses/{business_id}/purchases/",
         {
             "supplier_name": "Bad Math Co",
-            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "purchase_date_time": _now_iso(),
             "lines": [
                 {"stock_item": milk_id, "quantity": "10", "unit_price": "60", "line_total": "999"}
             ],
@@ -704,7 +721,7 @@ def check_purchase_flow() -> None:
         f"/businesses/{business_id}/purchases/",
         {
             "supplier_name": "Manager's Supplier",
-            "purchase_date_time": "2026-10-12T11:00:00+05:30",
+            "purchase_date_time": _now_iso(),
             "lines": [
                 {"stock_item": milk_id, "quantity": "5", "unit_price": "60", "line_total": "300"}
             ],
@@ -720,7 +737,7 @@ def check_purchase_flow() -> None:
         f"/businesses/{business_id}/purchases/{purchase_id}/",
         {
             "supplier_name": "x",
-            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "purchase_date_time": _now_iso(),
             "lines": [{"stock_item": milk_id, "quantity": "1", "unit_price": "1", "line_total": "1"}],
         },
         token=manager_access,
@@ -758,7 +775,7 @@ def check_purchase_flow() -> None:
         f"/businesses/{business_id}/purchases/",
         {
             "supplier_name": "x",
-            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "purchase_date_time": _now_iso(),
             "lines": [{"stock_item": milk_id, "quantity": "1", "unit_price": "1", "line_total": "1"}],
         },
         token=helper_access,
@@ -773,7 +790,7 @@ def check_purchase_flow() -> None:
         f"/businesses/{business_id}/purchases/{purchase_id}/",
         {
             "supplier_name": "Sunrise Supplies",
-            "purchase_date_time": "2026-10-12T10:00:00+05:30",
+            "purchase_date_time": _now_iso(),
             "note": "Edited by owner",
             "lines": [
                 {"stock_item": milk_id, "quantity": "25", "unit_price": "64", "line_total": "1600"}
@@ -813,7 +830,8 @@ def check_purchase_flow() -> None:
         fail(f"isolation: unrelated user on purchase detail, expected 403/404, got {status} ({body})")
     print("OK — a user from another business gets 403/404 on these purchases.")
 
-    # /me returns the exact permission set for each role
+    # /me returns the exact permission set for each role (Step 9 subset only — the full table,
+    # including counts/wastage, is asserted in check_count_and_wastage_flow)
     status, body, _ = request("GET", "/me/", token=owner_access)
     owner_business = next(b for b in body["businesses"] if b["id"] == business_id)
     expected_owner = {
@@ -824,13 +842,26 @@ def check_purchase_flow() -> None:
         "stock.view",
         "team.manage",
         "settings.manage",
+        "counts.create",
+        "counts.review",
+        "wastage.create",
+        "wastage.view_all",
+        "wastage.view_value",
+        "wastage.delete",
     }
     if set(owner_business.get("permissions", [])) != expected_owner:
         fail(f"/me owner permissions: expected {expected_owner}, got {owner_business.get('permissions')}")
 
     status, body, _ = request("GET", "/me/", token=manager_access)
     manager_business = next(b for b in body["businesses"] if b["id"] == business_id)
-    expected_manager = {"purchases.view", "purchases.create", "stock.view"}
+    expected_manager = {
+        "purchases.view",
+        "purchases.create",
+        "stock.view",
+        "counts.review",
+        "wastage.view_all",
+        "wastage.view_value",
+    }
     if set(manager_business.get("permissions", [])) != expected_manager:
         fail(
             f"/me manager permissions: expected {expected_manager}, "
@@ -839,9 +870,387 @@ def check_purchase_flow() -> None:
 
     status, body, _ = request("GET", "/me/", token=helper_access)
     helper_business = next(b for b in body["businesses"] if b["id"] == business_id)
-    if helper_business.get("permissions"):
-        fail(f"/me helper permissions: expected none, got {helper_business.get('permissions')}")
+    expected_helper = {"counts.create", "wastage.create", "wastage.view_own"}
+    if set(helper_business.get("permissions", [])) != expected_helper:
+        fail(
+            f"/me helper permissions: expected {expected_helper}, "
+            f"got {helper_business.get('permissions')}"
+        )
     print("OK — /me returns the correct permissions per role.")
+
+
+def _add_team_member(business_id: str, owner_access: str, name: str, role: str) -> tuple[str, str, int]:
+    """Returns (mobile, access, user_id)."""
+    mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    secret = "7392" if role in ("head_chef", "helper") else f"Kharcha{random.randint(1000, 9999)}!"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {"name": name, "mobile": mobile, "role": role, "secret": secret},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"add {role} ({name}): expected 201, got {status} ({body})")
+    status, login_body, _ = request("POST", "/auth/login/", {"mobile": mobile, "secret": secret})
+    if status != 200:
+        fail(f"{role} login ({name}): expected 200, got {status} ({login_body})")
+    return mobile, login_body["access"], body["user_id"]
+
+
+def check_count_and_wastage_flow() -> None:
+    _, owner_access, _ = signup_and_login("Count Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Count Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"count flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Milk", "unit": "L", "usual_price": "60.00"},
+                {"name": "Flour", "unit": "kg", "usual_price": "48.00"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"count flow: stock bulk create expected 201, got {status} ({body})")
+    milk_id = next(i["id"] for i in body if i["name"] == "Milk")
+    flour_id = next(i["id"] for i in body if i["name"] == "Flour")
+
+    _, helper_access, helper_user_id = _add_team_member(business_id, owner_access, "Count Helper", "helper")
+    _, headchef_access, _ = _add_team_member(business_id, owner_access, "Count Head Chef", "head_chef")
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Count Manager", "manager")
+
+    # the blind form returns only id/name/unit — no last count, no expected, no prices, no usual
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/form/?type=opening", token=helper_access
+    )
+    if status != 200:
+        fail(f"counts form: expected 200, got {status} ({body})")
+    items = body.get("items", [])
+    if len(items) != 2:
+        fail(f"counts form: expected 2 items, got {items}")
+    for item in items:
+        if set(item.keys()) != {"id", "name", "unit"}:
+            fail(f"counts form: expected only id/name/unit, got keys {set(item.keys())}")
+    print("OK — the blind count form returns only id, name and unit.")
+
+    # a Helper gets 403 on purchases and stock detail
+    status, _, _ = request("GET", f"/businesses/{business_id}/purchases/", token=helper_access)
+    if status != 403:
+        fail(f"helper purchases: expected 403, got {status}")
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/{milk_id}/", token=helper_access
+    )
+    if status != 403:
+        fail(f"helper stock detail: expected 403, got {status}")
+    print("OK — a Helper gets 403 on purchases and stock detail.")
+
+    # opening count (Helper): normal values
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [
+                {"stock_item": milk_id, "state": "counted", "counted_qty": "10"},
+                {"stock_item": flour_id, "state": "counted", "counted_qty": "5"},
+            ],
+        },
+        token=helper_access,
+    )
+    if status != 201:
+        fail(f"opening count: expected 201, got {status} ({body})")
+    opening_count_id = body["id"]
+    business_date = body["business_date"]
+    print("OK — a Helper submits an opening count.")
+
+    # a second opening count for the same date is rejected
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [
+                {"stock_item": milk_id, "state": "counted", "counted_qty": "11"},
+                {"stock_item": flour_id, "state": "counted", "counted_qty": "6"},
+            ],
+        },
+        token=helper_access,
+    )
+    if status != 409:
+        fail(f"duplicate opening count: expected 409, got {status} ({body})")
+    print("OK — a second opening count for the same date is rejected.")
+
+    # a Helper gets 403 on count review
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{opening_count_id}/", token=helper_access
+    )
+    if status != 403:
+        fail(f"helper count review: expected 403, got {status}")
+    print("OK — a Helper gets 403 on count review.")
+
+    # a purchase, then a wastage entry, between the two counts — the known case for
+    # used_since_last_count below (previous 10, bought 5, wasted 2, counted 35 -> -22)
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Between Counts Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": milk_id, "quantity": "5", "unit_price": "60", "line_total": "300"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"count flow: purchase between counts expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/wastage/",
+        {"stock_item": milk_id, "quantity": "2", "reason": "spillage"},
+        token=helper_access,
+    )
+    if status != 201:
+        fail(f"helper wastage create: expected 201, got {status} ({body})")
+    helper_wastage_id = body["id"]
+    if "value" in body:
+        fail(f"helper wastage create: value should be omitted for Helper, got {body}")
+    print("OK — a Helper records a wastage entry; no rupee value is shown to them.")
+
+    # closing_count_hour -> 0, so the closing count about to be submitted is late
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/settings/", {"closing_count_hour": 0}, token=owner_access
+    )
+    if status != 200:
+        fail(f"set closing_count_hour: expected 200, got {status} ({body})")
+
+    # closing count: Milk is far above 3x its only earlier count (10) -> needs_confirmation
+    closing_lines = [
+        {"stock_item": milk_id, "state": "counted", "counted_qty": "35"},
+        {"stock_item": flour_id, "state": "counted", "counted_qty": "4"},
+    ]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": closing_lines},
+        token=helper_access,
+    )
+    if status != 409 or body.get("error", {}).get("code") != "needs_confirmation":
+        fail(f"unusual closing count: expected 409 needs_confirmation, got {status} ({body})")
+    if body.get("item_ids") != [milk_id]:
+        fail(f"unusual closing count: expected item_ids [{milk_id}], got {body.get('item_ids')}")
+    if set(body.keys()) - {"error", "item_ids"}:
+        fail(f"unusual closing count: response should carry no numbers, got extra keys {body}")
+    print("OK — a very high value returns 409 needs_confirmation with item ids and no numbers.")
+
+    # re-sent with confirm_ids -> succeeds, and is late
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "confirm_ids": [milk_id], "lines": closing_lines},
+        token=helper_access,
+    )
+    if status != 201:
+        fail(f"confirmed closing count: expected 201, got {status} ({body})")
+    closing_count_id = body["id"]
+    if not body.get("is_late") or not body.get("minutes_late", 0) > 0:
+        fail(f"confirmed closing count: expected is_late/minutes_late set, got {body}")
+    print("OK — re-sending with confirm_ids succeeds, and the late deadline is recorded.")
+
+    # count review (Owner): list for the date
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/?date={business_date}", token=owner_access
+    )
+    if status != 200:
+        fail(f"count review list: expected 200, got {status} ({body})")
+    ids = {c["id"] for c in body}
+    if {opening_count_id, closing_count_id} - ids:
+        fail(f"count review list: missing counts, got {body}")
+    closing_entry = next(c for c in body if c["id"] == closing_count_id)
+    if not closing_entry["is_late"] or closing_entry["minutes_late"] <= 0:
+        fail(f"count review list: expected the closing count marked late, got {closing_entry}")
+    print("OK — count review lists both counts with who, when, late/on-time and item counts.")
+
+    # count review (Owner): detail — the known used_since_last_count case, flagged item first
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+    )
+    if status != 200:
+        fail(f"count review detail: expected 200, got {status} ({body})")
+    if "expected" in json.dumps(body) or "gap" in json.dumps(body):
+        fail(f"count review detail: should never have an expected/gap field, got {body}")
+    if body["lines"][0]["stock_item"] != milk_id:
+        fail(f"count review detail: expected the flagged item (Milk) first, got {body['lines'][0]}")
+    milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
+    if Decimal(milk_line["previous_counted_qty"]) != Decimal("10"):
+        fail(f"count review detail: expected previous_counted_qty 10, got {milk_line}")
+    if Decimal(milk_line["quantity_bought_since"]) != Decimal("5"):
+        fail(f"count review detail: expected quantity_bought_since 5, got {milk_line}")
+    if Decimal(milk_line["quantity_wasted_since"]) != Decimal("2"):
+        fail(f"count review detail: expected quantity_wasted_since 2, got {milk_line}")
+    if Decimal(milk_line["used_since_last_count"]) != Decimal("-22"):
+        fail(f"count review detail: expected used_since_last_count -22, got {milk_line}")
+    print("OK — count review detail's used_since_last_count is correct for a known case.")
+
+    # Manager also has count review access
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=manager_access
+    )
+    if status != 200:
+        fail(f"manager count review: expected 200, got {status}")
+
+    # a second wastage entry, from the Head chef
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/wastage/",
+        {"stock_item": flour_id, "quantity": "1", "reason": "spoiled"},
+        token=headchef_access,
+    )
+    if status != 201:
+        fail(f"head chef wastage create: expected 201, got {status} ({body})")
+    headchef_wastage_id = body["id"]
+    if "value" in body:
+        fail(f"head chef wastage create: value should be omitted, got {body}")
+
+    # Helper sees only their own entry
+    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=helper_access)
+    if status != 200:
+        fail(f"helper wastage list: expected 200, got {status} ({body})")
+    result_ids = {e["id"] for e in body["results"]}
+    if result_ids != {helper_wastage_id}:
+        fail(f"helper wastage list: expected only their own entry, got {result_ids}")
+    if any("value" in e for e in body["results"]) or "summary" in body:
+        fail(f"helper wastage list: value/summary should never appear, got {body}")
+    print("OK — a Helper sees only their own wastage entries, with no values or summary.")
+
+    # Head chef sees every entry, without values
+    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=headchef_access)
+    if status != 200:
+        fail(f"head chef wastage list: expected 200, got {status} ({body})")
+    result_ids = {e["id"] for e in body["results"]}
+    if {helper_wastage_id, headchef_wastage_id} - result_ids:
+        fail(f"head chef wastage list: expected to see every entry, got {result_ids}")
+    if any("value" in e for e in body["results"]):
+        fail(f"head chef wastage list: value should never appear, got {body}")
+    print("OK — a Head chef sees every entry today, with no values.")
+
+    # Manager sees values and a summary, but gets 403 on create and delete
+    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=manager_access)
+    if status != 200:
+        fail(f"manager wastage list: expected 200, got {status} ({body})")
+    if not body["results"] or not all("value" in e for e in body["results"]):
+        fail(f"manager wastage list: expected a value on every entry, got {body['results']}")
+    if "summary" not in body:
+        fail(f"manager wastage list: expected a summary, got {body}")
+    status, _, _ = request(
+        "POST",
+        f"/businesses/{business_id}/wastage/",
+        {"stock_item": milk_id, "quantity": "1", "reason": "other"},
+        token=manager_access,
+    )
+    if status != 403:
+        fail(f"manager wastage create: expected 403, got {status}")
+    status, _, _ = request(
+        "DELETE", f"/businesses/{business_id}/wastage/{helper_wastage_id}/", token=manager_access
+    )
+    if status != 403:
+        fail(f"manager wastage delete: expected 403, got {status}")
+    print("OK — a Manager sees values but gets 403 on create and delete.")
+
+    # today/: both counts already submitted, so both show "done" (is_late is a separate, historical
+    # fact recorded on the StockCount itself, checked above via count review) -> team_progress only
+    # for Head chef
+    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=owner_access)
+    if status != 200:
+        fail(f"today (owner): expected 200, got {status} ({body})")
+    if body["opening"]["state"] != "done" or body["closing"]["state"] != "done":
+        fail(f"today (owner): expected both counts done, got {body}")
+    if body.get("wastage_entries_today") != 2:
+        fail(f"today (owner): expected 2 wastage entries today, got {body}")
+    if "team_progress" in body:
+        fail(f"today (owner): team_progress should not appear for Owner, got {body}")
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=headchef_access)
+    if status != 200:
+        fail(f"today (head chef): expected 200, got {status} ({body})")
+    if body.get("team_progress", {}).get("total") != 2:
+        fail(f"today (head chef): expected team_progress for 2 items, got {body}")
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=helper_access)
+    if status != 200:
+        fail(f"today (helper): expected 200, got {status} ({body})")
+    if "team_progress" in body:
+        fail(f"today (helper): team_progress should not appear for Helper, got {body}")
+    print("OK — today/ reflects count state per role, with team progress only for Head chef.")
+
+    # late-count reminder: Owner only
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/remind/",
+        {"type": "closing", "user_id": helper_user_id},
+        token=owner_access,
+    )
+    if status != 200 or "wa_link" not in body or "wa.me" not in body["wa_link"]:
+        fail(f"remind: expected 200 with a wa.me link, got {status} ({body})")
+    if "mobile" in body:
+        fail(f"remind: the mobile number should not be returned separately, got {body}")
+    status, _, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/remind/",
+        {"type": "closing", "user_id": helper_user_id},
+        token=manager_access,
+    )
+    if status != 403:
+        fail(f"manager remind: expected 403, got {status}")
+    print("OK — the late-count reminder (Owner only) returns a prepared wa.me link.")
+
+    # Owner soft-deletes a wastage entry — it leaves the list
+    status, _, _ = request(
+        "DELETE", f"/businesses/{business_id}/wastage/{helper_wastage_id}/", token=owner_access
+    )
+    if status != 204:
+        fail(f"owner wastage delete: expected 204, got {status}")
+    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=owner_access)
+    result_ids = {e["id"] for e in body["results"]}
+    if helper_wastage_id in result_ids:
+        fail(f"deleted wastage entry still in the list: {result_ids}")
+    print("OK — the Owner deletes a wastage entry; it disappears from the list.")
+
+    # another business's users get 403/404 on every new endpoint
+    _, stranger_access, _ = signup_and_login("Count Stranger")
+    probes = [
+        ("GET", f"/businesses/{business_id}/counts/form/?type=opening", None),
+        ("GET", f"/businesses/{business_id}/counts/?date={business_date}", None),
+        ("POST", f"/businesses/{business_id}/counts/", {"type": "opening", "lines": []}),
+        ("GET", f"/businesses/{business_id}/counts/{opening_count_id}/", None),
+        (
+            "POST",
+            f"/businesses/{business_id}/counts/remind/",
+            {"type": "closing", "user_id": helper_user_id},
+        ),
+        ("GET", f"/businesses/{business_id}/wastage/", None),
+        (
+            "POST",
+            f"/businesses/{business_id}/wastage/",
+            {"stock_item": milk_id, "quantity": "1", "reason": "other"},
+        ),
+        ("DELETE", f"/businesses/{business_id}/wastage/{headchef_wastage_id}/", None),
+        ("GET", f"/businesses/{business_id}/today/", None),
+    ]
+    for method, path, probe_body in probes:
+        status, resp_body, _ = request(method, path, probe_body, token=stranger_access)
+        if status not in (403, 404):
+            fail(f"isolation: {method} {path} expected 403/404, got {status} ({resp_body})")
+    print("OK — another business's users get 403/404 on every new endpoint.")
 
 
 def main() -> None:
@@ -851,6 +1260,7 @@ def main() -> None:
     check_stock_flow()
     check_team_flow()
     check_purchase_flow()
+    check_count_and_wastage_flow()
     print("\nAll smoke checks passed.")
 
 

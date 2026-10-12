@@ -11,11 +11,12 @@ import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
   AppShell,
   Body,
+  EmptyState,
   Heading,
-  Muted,
+  NoAccess,
   ReadError,
   Screen,
-  Skeleton,
+  SkeletonList,
   Small,
   TextField,
 } from '../../src/ui';
@@ -59,7 +60,13 @@ export default function Stock() {
     return <Redirect href="/login" />;
   }
   if (!can(permissions, 'stock.view')) {
-    return <Redirect href="/home" />;
+    return (
+      <AppShell active="stock">
+        <Screen maxWidth={HOME_CONTENT_WIDTH}>
+          <NoAccess />
+        </Screen>
+      </AppShell>
+    );
   }
 
   const filtered = (items ?? []).filter((item) =>
@@ -75,8 +82,6 @@ export default function Stock() {
           <Body style={styles.subtitle}>{s.subtitle}</Body>
         </View>
 
-        <Muted size="sm">{s.countsNote}</Muted>
-
         <TextField
           label={s.searchPlaceholder}
           value={search}
@@ -87,11 +92,7 @@ export default function Stock() {
         {failed ? (
           <ReadError onRetry={load} loading={loading} />
         ) : loading ? (
-          <View style={styles.list}>
-            <Skeleton height={72} />
-            <Skeleton height={72} />
-            <Skeleton height={72} />
-          </View>
+          <SkeletonList count={3} height={72} />
         ) : filtered.length > 0 ? (
           <View style={styles.list}>
             <Small style={styles.sectionLabel}>{s.stockItems}</Small>
@@ -107,6 +108,11 @@ export default function Stock() {
                   <Body style={styles.rowName}>{item.name}</Body>
                   <Small style={styles.rowMeta}>
                     {item.usual_price ? s.usualPrice(formatRupees(item.usual_price)) : null}
+                  </Small>
+                  <Small style={styles.rowMeta}>
+                    {item.last_counted_qty
+                      ? s.lastCounted(`${item.last_counted_qty} ${item.unit}`)
+                      : s.neverCounted}
                   </Small>
                 </View>
                 <View style={styles.rowSide}>
@@ -127,9 +133,12 @@ export default function Stock() {
             ))}
           </View>
         ) : (
-          <View style={styles.empty}>
-            <Body style={styles.emptyMessage}>{s.empty}</Body>
-          </View>
+          <EmptyState
+            icon="stock"
+            title={s.empty}
+            buttonLabel={strings.comingSoon.goHome}
+            onPress={() => router.replace('/home')}
+          />
         )}
       </Screen>
     </AppShell>
@@ -180,12 +189,5 @@ const styles = StyleSheet.create({
   },
   rowPrice: {
     fontFamily: fonts.bodyExtraBold,
-  },
-  empty: {
-    alignItems: 'flex-start',
-    paddingVertical: spacing.xl,
-  },
-  emptyMessage: {
-    color: colours.muted,
   },
 });

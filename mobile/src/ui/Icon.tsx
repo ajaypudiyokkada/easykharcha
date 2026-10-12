@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Clock,
   Info,
+  Lock,
+  Minus,
   MoreHorizontal,
   Package,
   Pencil,
@@ -53,6 +55,8 @@ const REGISTRY = {
   close: X,
   chevronRight: ChevronRight,
   clock: Clock,
+  lock: Lock,
+  minus: Minus,
 } as const;
 
 export type IconName = keyof typeof REGISTRY;

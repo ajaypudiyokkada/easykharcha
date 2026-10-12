@@ -16,9 +16,10 @@ import {
   Card,
   ConfirmDialog,
   Heading,
+  NoAccess,
   ReadError,
   Screen,
-  Skeleton,
+  SkeletonList,
   Small,
   Toast,
 } from '../../src/ui';
@@ -66,7 +67,13 @@ export default function PurchaseDetail() {
     return <Redirect href="/login" />;
   }
   if (!can(permissions, 'purchases.view')) {
-    return <Redirect href="/home" />;
+    return (
+      <AppShell active="buy">
+        <Screen maxWidth={HOME_CONTENT_WIDTH}>
+          <NoAccess />
+        </Screen>
+      </AppShell>
+    );
   }
 
   const canEdit = can(permissions, 'purchases.edit');
@@ -96,10 +103,7 @@ export default function PurchaseDetail() {
         {failed ? (
           <ReadError onRetry={load} loading={loading} />
         ) : loading || !purchase ? (
-          <View style={styles.list}>
-            <Skeleton height={100} />
-            <Skeleton height={160} />
-          </View>
+          <SkeletonList count={2} height={130} />
         ) : (
           <>
             <Card style={styles.summaryCard}>

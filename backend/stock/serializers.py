@@ -43,6 +43,12 @@ class StockItemSerializer(serializers.ModelSerializer):
         max_digits=10, decimal_places=2, read_only=True, default=None
     )
     last_purchased_at = serializers.DateTimeField(read_only=True, default=None)
+    # Step 10: populated via annotation too (see _with_last_count_info). Deliberately no "on hand"
+    # or gap field — that needs usage math this step doesn't build yet.
+    last_counted_qty = serializers.DecimalField(
+        max_digits=10, decimal_places=3, read_only=True, default=None
+    )
+    last_counted_at = serializers.DateTimeField(read_only=True, default=None)
 
     class Meta:
         model = StockItem
@@ -59,6 +65,8 @@ class StockItemSerializer(serializers.ModelSerializer):
             "created_at",
             "last_unit_price",
             "last_purchased_at",
+            "last_counted_qty",
+            "last_counted_at",
         )
 
 

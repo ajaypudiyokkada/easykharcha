@@ -117,8 +117,10 @@ class BusinessSettings(models.Model):
     report and the validation share one source of truth."""
 
     business = models.OneToOneField(Business, on_delete=models.CASCADE, related_name="settings")
-    # How late in the day (hour, 0-23) a daily stock count can still be logged.
+    # How late in the day (hour, 0-23) the opening stock count can still be logged.
     count_deadline_hour = models.PositiveSmallIntegerField()
+    # Same, for the closing stock count (default 20, meaning 8 PM).
+    closing_count_hour = models.PositiveSmallIntegerField()
     target_cost_pct = models.DecimalField(max_digits=5, decimal_places=2)
     wastage_alert_pct = models.DecimalField(max_digits=5, decimal_places=2)
     rate_creep_pct = models.DecimalField(max_digits=5, decimal_places=2)

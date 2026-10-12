@@ -10,6 +10,7 @@ from audit.log import log_action
 from businesses.access import owner_access_or_403
 from businesses.models import Business
 from businesses.permissions import require_permission
+from counts.models import CountLine, CountLineState
 from purchases.models import Purchase, PurchaseLine
 from purchases.serializers import PurchaseSerializer
 
@@ -39,6 +40,19 @@ def _with_last_purchase_info(queryset):
     )
 
 
+def _with_last_count_info(queryset):
+    """Annotates each stock item with its latest *counted* (not skipped) line's quantity and the
+    count's submission time — None for an item that's never been counted. Deliberately no "on hand"
+    estimate here — that needs usage math this step doesn't build yet."""
+    latest_line = CountLine.objects.filter(
+        stock_item=OuterRef("pk"), state=CountLineState.COUNTED
+    ).order_by("-count__submitted_at", "-id")
+    return queryset.annotate(
+        last_counted_qty=Subquery(latest_line.values("counted_qty")[:1]),
+        last_counted_at=Subquery(latest_line.values("count__submitted_at")[:1]),
+    )
+
+
 def _row_errors_from(row_number: int, errors: dict) -> list[dict]:
     flattened = []
     for field, messages in errors.items():
@@ -62,7 +76,9 @@ class StockItemListView(APIView):
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
         require_permission(business, request.user, "stock.view")
-        items = _with_last_purchase_info(business.stock_items.filter(active=True))
+        items = _with_last_count_info(
+            _with_last_purchase_info(business.stock_items.filter(active=True))
+        )
         return Response(StockItemSerializer(items, many=True).data)
 
 
@@ -73,7 +89,10 @@ class StockItemDetailView(APIView):
         business = get_object_or_404(Business, id=business_id)
         require_permission(business, request.user, "stock.view")
         item = get_object_or_404(
-            _with_last_purchase_info(business.stock_items.filter(active=True)), id=item_id
+            _with_last_count_info(
+                _with_last_purchase_info(business.stock_items.filter(active=True))
+            ),
+            id=item_id,
         )
 
         price_points = list(

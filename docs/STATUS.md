@@ -62,12 +62,28 @@ not built yet.
   purchase list + record-purchase sheet), Stock (list with last price paid), Stock item detail (price
   history chart + last 5 purchases). Counts, wastage, sales, reports and alerts are not built yet —
   see "Not built yet". Head chef and Helper get a placeholder Home; nothing else is built for them.
+- **Step 10 — Stock counts (blind) and wastage.** Head chef and Helper now have real jobs instead of
+  a placeholder Home: a Today screen (two big actions, the next deadline, today's entries), a blind
+  stock count (`StockCount`/`CountLine` — id/name/unit only, no last count, no expected, no prices;
+  the server never sends those fields, rather than the client hiding them), and wastage
+  (`WastageEntry`, soft-deleted, audit-logged). An unusually high count value (more than 3x the
+  item's recent history or last week's purchases, and only once there's at least one earlier count)
+  needs a plain confirm-or-fix dialog before it saves — never showing a number the person didn't type
+  themselves. Owner/Manager get Count review (who counted, late or on time, and — once there's an
+  earlier count to compare against — bought/wasted/used since then; still no "expected" or "gap"
+  field) and a real Wastage screen (today/7-day totals, Owner-only delete). `BusinessSettings` gained
+  `closing_count_hour` (default 20) alongside the existing `count_deadline_hour` (default 11, now the
+  *opening* deadline). Stock gained "last counted". New shared screen states used everywhere:
+  `EmptyState`, `ReadError` (the Step 9 "couldn't load this" component, same thing), `SkeletonList`,
+  `NoAccess` (a route guard now shows this instead of silently redirecting), and a session-expired
+  dialog on a failed token refresh. Sales, reports and alerts are still not built — see "Not built
+  yet".
 
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every
-business-scoped endpoint checks a permission, never a role name directly. **This is a starting
-table, not a final design — it's a decision for the product owner to review**, not something decided
+business-scoped endpoint checks a permission, never a role name directly. **This is still a draft,
+not a final design — it's a decision for the product owner to review**, not something decided
 unilaterally:
 
 | Permission | Owner | Manager | Head chef | Helper |
@@ -79,11 +95,29 @@ unilaterally:
 | `stock.view` | yes | yes | no | no |
 | `team.manage` | yes | no | no | no |
 | `settings.manage` | yes | no | no | no |
+| `counts.create` | yes | no | yes | yes |
+| `counts.review` | yes | yes | no | no |
+| `counts.status` | no | no | yes | no |
+| `wastage.create` | yes | no | yes | yes |
+| `wastage.view_all` | yes | yes | yes | no |
+| `wastage.view_own` | no | no | no | yes |
+| `wastage.view_value` | yes | yes | no | no |
+| `wastage.delete` | yes | no | no | no |
 
-Head chef and Helper have no permissions yet on purpose — their actual jobs (counting stock,
-recording wastage) aren't built as features yet, so there's nothing to grant access to. Once those
-exist, this table needs new permissions (e.g. `counts.create`, `wastage.create`) and both roles need
-rows filled in, not left empty.
+Notes for the product owner, not decided unilaterally:
+- **Manager has `counts.review` but not `counts.create`, and `wastage.view_all`/`wastage.view_value`
+  but not `wastage.create`** — matches the design (Manager oversees, doesn't do the daily physical
+  jobs). Worth confirming that's actually the intended split and not just what the design happened to
+  show.
+- **`counts.status` (team-wide "X of Y items counted today") is Head-chef-only** — Helper's Today
+  screen only ever shows their own task, never team-wide numbers. This is a real, deliberate
+  distinction from `counts.create` (which both roles have), not an oversight.
+- **The late-count reminder (`POST counts/remind/`) is hardcoded Owner-only on the server** — there's
+  no permission string for it, the same way `team.manage`/`settings.manage` writes already were
+  before this table existed. Worth deciding if that should become a real permission instead.
+- **Settings** gained `closing_count_hour` (default 20, i.e. 8 PM) alongside the existing
+  `count_deadline_hour` (default 11 AM, now specifically the *opening* count's deadline) — both still
+  Owner-only to view or change.
 
 ## Route map
 
@@ -126,6 +160,6 @@ both say so in the UI.
 - **A legacy/ code reuse plan** — `legacy/` (the earlier multi-tenant restaurant SaaS build) is kept
   intact and untouched; nothing in the current app reads from or depends on it, and no decision has
   been made about reusing any of its code. Do not delete it.
-- **Stock, sales and costing features** — the setup wizard records starter/custom stock and sell items,
-  but there is no screen yet to record daily purchases, sales, wastage, or to see costing/margin
-  reports. That's the next phase of the product, not part of these 8 steps.
+- **Sales, reports, alerts and costing features** — purchases, stock counts and wastage are now built
+  (Steps 9–10); there's still no screen to record daily sales, or to see reports/alerts/costing-margin
+  numbers. That's the next phase of the product, not part of these 8 steps.

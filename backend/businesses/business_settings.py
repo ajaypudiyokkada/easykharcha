@@ -12,7 +12,13 @@ from audit.log import log_action
 from .access import owner_access_or_403
 from .models import Business, BusinessSettings
 
-FIELDS = ("count_deadline_hour", "target_cost_pct", "wastage_alert_pct", "rate_creep_pct")
+FIELDS = (
+    "count_deadline_hour",
+    "closing_count_hour",
+    "target_cost_pct",
+    "wastage_alert_pct",
+    "rate_creep_pct",
+)
 
 
 def defaults_for_new_business() -> dict:
@@ -30,6 +36,9 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
     # and defaults_for_new_business() use, rather than being hardcoded a second time here.
     count_deadline_hour = serializers.IntegerField(
         min_value=_range("count_deadline_hour")[0], max_value=_range("count_deadline_hour")[1]
+    )
+    closing_count_hour = serializers.IntegerField(
+        min_value=_range("closing_count_hour")[0], max_value=_range("closing_count_hour")[1]
     )
     target_cost_pct = serializers.DecimalField(
         max_digits=5,

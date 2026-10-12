@@ -29,6 +29,9 @@ export class ApiError extends Error {
   /** Present only for bulk-save endpoints that rejected specific rows — see stock/exceptions.py's
    * BulkValidationError. */
   rowErrors?: RowError[];
+  /** Present only for counts/'s needs_confirmation (409) — the stock item ids whose typed value
+   * looks unusual. Never a number, by design — see counts/exceptions.py's NeedsConfirmation. */
+  itemIds?: number[];
 
   constructor(
     kind: ApiErrorKind,
@@ -36,6 +39,7 @@ export class ApiError extends Error {
     status?: number,
     code?: string,
     rowErrors?: RowError[],
+    itemIds?: number[],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -43,6 +47,7 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
     this.rowErrors = rowErrors;
+    this.itemIds = itemIds;
   }
 }
 
@@ -120,9 +125,17 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
     const shaped = body as {
       error?: { code?: string; message?: string };
       row_errors?: RowError[];
+      item_ids?: number[];
     } | null;
     const message = shaped?.error?.message ?? `The server returned an error (${response.status}).`;
-    throw new ApiError('server', message, response.status, shaped?.error?.code, shaped?.row_errors);
+    throw new ApiError(
+      'server',
+      message,
+      response.status,
+      shaped?.error?.code,
+      shaped?.row_errors,
+      shaped?.item_ids,
+    );
   }
 
   return body as T;

@@ -15,10 +15,11 @@ import {
   Button,
   Card,
   Heading,
+  NoAccess,
   PriceChart,
   ReadError,
   Screen,
-  Skeleton,
+  SkeletonList,
   Small,
   Toast,
   type ChartPoint,
@@ -85,7 +86,13 @@ export default function StockItemDetailScreen() {
     return <Redirect href="/login" />;
   }
   if (!can(permissions, 'stock.view')) {
-    return <Redirect href="/home" />;
+    return (
+      <AppShell active="stock">
+        <Screen maxWidth={HOME_CONTENT_WIDTH}>
+          <NoAccess />
+        </Screen>
+      </AppShell>
+    );
   }
 
   const timezone = business?.timezone ?? 'Asia/Kolkata';
@@ -106,10 +113,7 @@ export default function StockItemDetailScreen() {
         {failed ? (
           <ReadError onRetry={load} loading={loading} />
         ) : loading || !item ? (
-          <View style={styles.list}>
-            <Skeleton height={90} />
-            <Skeleton height={180} />
-          </View>
+          <SkeletonList count={2} height={130} />
         ) : (
           <>
             <Card style={styles.factsCard}>
@@ -126,6 +130,16 @@ export default function StockItemDetailScreen() {
                 <Small style={styles.factLabel}>{s.lastPurchased}</Small>
                 <Body>
                   {item.last_purchased_at ? formatDate(item.last_purchased_at, timezone) : '—'}
+                </Body>
+              </View>
+              <View style={styles.factRow}>
+                <Small style={styles.factLabel}>{s.lastCounted}</Small>
+                <Body>
+                  {item.last_counted_qty
+                    ? `${item.last_counted_qty} ${item.unit} · ${
+                        item.last_counted_at ? formatDate(item.last_counted_at, timezone) : ''
+                      }`
+                    : '—'}
                 </Body>
               </View>
             </Card>
