@@ -19,7 +19,10 @@ import {
 import { api, ApiError, type RequestOptions } from '../api/client';
 import { tokenStorage } from './storage';
 
-export type AuthStatus = 'bootstrapping' | 'signedOut' | 'signedIn';
+// 'offline' is distinct from 'signedOut': stored tokens exist and are presumed still good, but the
+// startup /me call couldn't be attempted or completed over the network. Treating that as signed-out
+// would silently clear a perfectly valid session just because the app happened to open offline.
+export type AuthStatus = 'bootstrapping' | 'signedOut' | 'signedIn' | 'offline';
 
 type AuthContextValue = {
   status: AuthStatus;
@@ -32,6 +35,8 @@ type AuthContextValue = {
   /** Re-fetches /me and updates `user`/`businesses` — used after the wizard writes a business, so
    * the rest of the app sees the change without needing a fresh login. */
   refreshMe: () => Promise<MeResponse>;
+  /** Re-attempts the startup /me check — what the `status === 'offline'` retry screen calls. */
+  retryBootstrap: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -90,22 +95,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return response;
   }, [authedFetch]);
 
-  useEffect(() => {
-    (async () => {
-      const stored = await tokenStorage.load();
-      if (!stored.access || !stored.refresh) {
-        setStatus('signedOut');
-        return;
-      }
-      accessRef.current = stored.access;
-      refreshRef.current = stored.refresh;
-      try {
-        await refreshMe();
-        setStatus('signedIn');
-      } catch {
+  const bootstrap = useCallback(async () => {
+    setStatus('bootstrapping');
+    const stored = await tokenStorage.load();
+    if (!stored.access || !stored.refresh) {
+      setStatus('signedOut');
+      return;
+    }
+    accessRef.current = stored.access;
+    refreshRef.current = stored.refresh;
+    try {
+      await refreshMe();
+      setStatus('signedIn');
+    } catch (err) {
+      if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
+        // Stored tokens are left alone — this isn't "signed out", just "couldn't check right now".
+        setStatus('offline');
+      } else {
         await signOutLocally();
       }
-    })();
+    }
+  }, [refreshMe, signOutLocally]);
+
+  useEffect(() => {
+    bootstrap();
     // Runs once, at app start, regardless of later identity changes of the callbacks below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -139,8 +152,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [signOutLocally]);
 
   const value = useMemo(
-    () => ({ status, user, businesses, login, logout, authedFetch, refreshMe }),
-    [status, user, businesses, login, logout, authedFetch, refreshMe],
+    () => ({
+      status,
+      user,
+      businesses,
+      login,
+      logout,
+      authedFetch,
+      refreshMe,
+      retryBootstrap: bootstrap,
+    }),
+    [status, user, businesses, login, logout, authedFetch, refreshMe, bootstrap],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

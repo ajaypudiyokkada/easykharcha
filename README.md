@@ -2,8 +2,8 @@
 
 A simple app for single-owner small businesses in India to track what they buy, use and sell.
 
-This is **Step 1 of 8** — foundation and wiring only. One backend health endpoint, one frontend screen
-that proves it can reach the backend. Everything else is later steps.
+All 8 build steps are done. See [`docs/STATUS.md`](docs/STATUS.md) for exactly what's built and what's
+explicitly not (OTP, forgot-password, stock/sales/costing features, and more).
 
 Working rules and the design tokens live in [`CLAUDE.md`](CLAUDE.md).
 
@@ -15,7 +15,8 @@ point `DATABASE_URL` at it in `backend/.env` when that's actually wanted — see
 
 ## Prerequisites
 
-Python 3.12+, Node 20+, npm. All commands below are PowerShell, run from the repo root unless noted.
+Python 3.12+, Node 20+, npm, and a Chromium-based browser (Chrome or Edge) for the flow and pwa-check
+scripts. All commands below are PowerShell, run from the repo root unless noted.
 
 ## Backend
 
@@ -42,9 +43,8 @@ npm install
 npm run start
 ```
 
-Opens `http://localhost:8081`. You should see the EasyKharcha wordmark and a green "Connected to the
-server" banner — that needs the backend running too (previous section). Stop the backend and press
-"Try again" to see the red banner instead.
+Opens `http://localhost:8081`. This is the Expo dev server — no service worker is registered here (see
+"Production build" below for that).
 
 `mobile/.env.example` is optional for local dev — the app already defaults to the URL above.
 
@@ -62,14 +62,48 @@ check + type check. Each half can also be run on its own: `npm run check:backend
 
 ## Smoke test
 
-With **both** the backend and the mobile dev server running (previous two sections):
+With **just the backend** running:
 
 ```powershell
 npm run smoke
 ```
 
-Calls the health endpoint with the mobile app's origin and fails if the response isn't exactly right,
-or if the CORS header the browser needs is missing.
+Drives the API directly (signup, login, business setup, stock/sell items, team, settings — the full
+backend surface) and fails on the first wrong response shape, status code, or missing CORS header.
+
+## Flow test
+
+With **both** the backend and the mobile dev server (`npm run start`, port 8081) running:
+
+```powershell
+npm run flow
+```
+
+Drives a real headless browser against the running app: signup → login → all six setup wizard steps →
+home, plus a second user who stops mid-wizard and resumes, a third who skips steps, and a team member
+logging in with a PIN. Proves the frontend and backend are wired together end to end.
+
+## Production build and PWA / offline check
+
+EasyKharcha installs as a PWA on web: an app manifest, a service worker that caches the app shell for
+offline use, and an offline banner that blocks writes while disconnected. None of this runs under the
+Expo dev server — it only activates in a production build.
+
+```powershell
+npm run build:web   # exports the static web app to mobile/dist
+npm run serve:web   # serves mobile/dist at http://127.0.0.1:8082 (localhost only)
+```
+
+With that server and the backend both running:
+
+```powershell
+npm run pwa-check
+```
+
+Headless browser checks against the production build: the manifest loads with the right fields and
+icon sizes, the service worker registers and activates, the app shell still opens after a reload while
+offline, the offline banner appears and blocks a login attempt with no request sent, and everything
+recovers once back online. Screenshots land in `docs/screens/step8/`.
 
 ## Landing page
 

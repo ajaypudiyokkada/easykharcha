@@ -8,7 +8,7 @@ const TIMEOUT_MS = 10_000;
 
 export const API_URL: string = process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL;
 
-export type ApiErrorKind = 'network' | 'timeout' | 'server';
+export type ApiErrorKind = 'network' | 'timeout' | 'server' | 'offline';
 
 export type RowError = { row: number; field: string; message: string };
 
@@ -54,6 +54,20 @@ export type RequestOptions = {
  * {"error": {"code", "message"}} shape when present).
  */
 export async function api<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
+  const method = options.method ?? 'GET';
+  // Writes are blocked before a request is even attempted while offline — reads are still allowed
+  // through (and fail, if they fail, the ordinary network/timeout way below) so a screen backed by
+  // already-cached data can keep working. `navigator.onLine` is web-only; it's simply absent on
+  // native, so this never fires there.
+  if (
+    method !== 'GET' &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.onLine === 'boolean' &&
+    !navigator.onLine
+  ) {
+    throw new ApiError('offline', "You're offline. Try again when you're back online.");
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -62,7 +76,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
-      method: options.method ?? 'GET',
+      method,
       headers: {
         Accept: 'application/json',
         ...(isFormData ? null : { 'Content-Type': 'application/json' }),

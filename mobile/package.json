@@ -9,7 +9,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run lint && npm run format:check && npm run typecheck"
+    "check": "npm run lint && npm run format:check && npm run typecheck",
+    "build:web": "expo export -p web"
   },
   "dependencies": {
     "@expo-google-fonts/nunito-sans": "^0.2.3",

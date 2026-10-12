@@ -1,5 +1,19 @@
 /** All user-facing text in one place — screens import from here, nothing is inline. */
 export const strings = {
+  app: {
+    offlineBanner: "You're offline. Changes can't be saved right now.",
+    updateBanner: 'A new version is ready. Refresh.',
+    offlineGate: {
+      title: "Can't check your sign-in",
+      body: "You're offline, so EasyKharcha can't confirm it's really you yet.",
+      retry: 'Retry',
+    },
+    notFound: {
+      title: 'Page not found',
+      body: "That page doesn't exist, or may have moved.",
+      goHome: 'Go to Home',
+    },
+  },
   signup: {
     title: 'Create your EasyKharcha account',
     nameLabel: 'Your name',

@@ -12,8 +12,9 @@ web first. Development is on Windows with PowerShell — every command and scrip
   with a named command — `npm run check`, `python scripts/smoke.py`, a `manage.py` subcommand. Never
   `node -e`, never a PowerShell here-string, never an inline throwaway script.
 - **Light checking only.** No test suites. The only checks are: lint, type check, formatting, Django's
-  own `check` and `makemigrations --check`, and the one smoke script that proves the frontend can reach
-  the backend. Keep it fast.
+  own `check` and `makemigrations --check`, the smoke script (backend API) and flow script (browser
+  end-to-end) that prove the frontend and backend work together, and the pwa-check script that proves
+  the offline/service-worker behaviour. Keep it fast.
 - **Don't add scope.** Build exactly what the current step asks for, nothing it doesn't mention. Flag
   gaps and open questions instead of guessing past them.
 - **Don't push to git.** Local commits are fine when asked for; nothing leaves this machine on its own.
@@ -34,7 +35,9 @@ mobile/     Expo app — app/ (screens), src/theme/ (tokens), src/api/ (the fetc
 landing/    static landing page, copied in unmodified
 docs/       specs and design files, written as steps add them
 legacy/     a previous, larger multi-tenant build of a different EasyKharcha product — see below
-scripts/    smoke.py (backend<->frontend proof) and check_backend.ps1 (backend lint/format/check)
+scripts/    smoke.py (backend API proof), flow.mjs (browser end-to-end), check_backend.ps1 (backend
+            lint/format/check), generate_icons.mjs (PWA icons), serve_web.mjs (serves the production
+            web export locally), pwa_check.mjs (offline/service-worker proof)
 ```
 
 ## `legacy/`

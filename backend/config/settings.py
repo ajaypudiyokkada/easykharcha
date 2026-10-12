@@ -140,9 +140,15 @@ BUSINESS_SETTINGS_RANGES = {
     "rate_creep_pct": (0, 100),
 }
 
-# Dev default matches the Expo web dev server exactly (see mobile/package.json's `start` script).
+# Dev default matches the Expo web dev server (mobile/package.json's `start` script, :8081) and the
+# production web export served locally for service-worker testing (scripts/serve_web.mjs, :8082).
 # Override with a comma-separated CORS_ALLOWED_ORIGINS in .env for anything else.
 CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:8081", "http://127.0.0.1:8081"],
+    default=[
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "http://localhost:8082",
+        "http://127.0.0.1:8082",
+    ],
 )

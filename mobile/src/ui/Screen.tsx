@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colours, spacing } from '../theme/tokens';
 import { MAX_CONTENT_WIDTH } from './constants';
@@ -18,6 +19,7 @@ type Props = {
  */
 export function Screen({ children, bottomBar }: Props) {
   const [barHeight, setBarHeight] = useState(0);
+  const insets = useSafeAreaInsets();
 
   const onBarLayout = (event: LayoutChangeEvent) => {
     setBarHeight(event.nativeEvent.layout.height);
@@ -29,7 +31,13 @@ export function Screen({ children, bottomBar }: Props) {
         style={styles.scroll}
         contentContainerStyle={[
           styles.content,
-          bottomBar ? { paddingBottom: barHeight + spacing.xl } : null,
+          { paddingTop: spacing.xl + insets.top },
+          // BottomActionBar already adds its own bottom inset when it's the thing sitting at the
+          // edge; a screen with no bottom bar still needs the content itself clear of the home
+          // indicator / gesture bar area.
+          bottomBar
+            ? { paddingBottom: barHeight + spacing.xl }
+            : { paddingBottom: spacing.xl + insets.bottom },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -57,7 +65,6 @@ const styles = StyleSheet.create({
     maxWidth: MAX_CONTENT_WIDTH,
     alignSelf: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xl,
     gap: spacing.xl,
   },
   barWrap: {
