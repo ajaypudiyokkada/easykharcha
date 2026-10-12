@@ -45,7 +45,9 @@ export default function RootLayout() {
         <Stack.Screen name="setup/2" options={{ title: 'Your brand' }} />
         <Stack.Screen name="setup/3" options={{ title: 'What you buy' }} />
         <Stack.Screen name="setup/4" options={{ title: 'What you sell' }} />
-        <Stack.Screen name="setup/saved" options={{ title: 'Setup saved' }} />
+        <Stack.Screen name="setup/5" options={{ title: 'Your team' }} />
+        <Stack.Screen name="setup/6" options={{ title: 'Alerts and rules' }} />
+        <Stack.Screen name="setup/done" options={{ title: "You're all set" }} />
         <Stack.Screen name="dev/kit" options={{ title: 'Component kit' }} />
       </Stack>
     </AuthProvider>

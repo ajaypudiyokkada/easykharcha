@@ -3,20 +3,23 @@
  * Drives a real browser against the actual running app (not direct API calls, unlike smoke.py) to
  * prove the frontend and backend are wired together end to end.
  *
- * Three scenarios:
- *  1. A fresh user: signup -> login -> /setup/1 -> /setup/2 (colour preview updates live) ->
- *     /setup/3 (tick two starter items, add one own item with "Goes off" + shelf life) ->
- *     /setup/4 (tick one starter item, add one own item linked to a stock item) -> "Setup saved" ->
- *     log out -> log in again -> lands on /home (onboarding is done).
+ * Four scenarios:
+ *  1. A fresh user: signup -> login -> all six wizard steps (step 2's colour preview checked live;
+ *     step 5 adds a Helper with a PIN; step 6 uses the recommended settings) -> /setup/done (no
+ *     "Still to do") -> /home (no "Finish setting up" card, onboarding is fully done) -> log out ->
+ *     log in again -> lands on /home.
  *  2. A second, independent user who stops after step 1, logs out mid-wizard, and logs back in to
  *     confirm they resume at /setup/2.
- *  3. A third, independent user who fills steps 1-2 then skips both 3 and 4, and confirms "Setup
- *     saved" lists both as skipped.
+ *  3. A third, independent user who fills steps 1-2 then skips 3, 4, 5 and 6 — confirms /setup/done
+ *     lists all four as "Still to do", /home's checklist card lists them too, and clicking Continue
+ *     on one resumes that exact step.
+ *  4. Logs in as the Helper created in scenario 1, using their PIN, and confirms /home has no
+ *     checklist card and no setup links at all.
  *
  * Run with:  npm run flow
  *
  * Requires both dev servers already running — backend on :8000, Expo web on :8081 — and leaves them
- * running afterwards. Localhost only.
+ * running afterwards. Localhost only. Never prints a PIN or password — only pass/fail.
  */
 
 import { existsSync } from 'node:fs';
@@ -81,7 +84,7 @@ async function waitForText(page, text) {
 // unmounting them on navigation, so a plain selector/textContent match can silently hit a stale
 // duplicate left over from an earlier screen. Everything below filters to elements that actually
 // have layout (width/height > 0). Deliberately avoids page.waitForFunction returning a DOM node —
-// that pattern hung intermittently on screens with many interactive elements; $$()  plus a
+// that pattern hung intermittently on screens with many interactive elements; $$() plus a
 // per-handle .evaluate() (returning only primitives) is the reliable version of the same idea.
 async function findVisible(page, selector, { last = false, minCount = 1 } = {}) {
   const matches = await retryUntil(async () => {
@@ -125,6 +128,17 @@ async function clickButton(page, label) {
   await element.click();
 }
 
+// A plain .click() resolves once the mouse events are dispatched, not once React has actually
+// committed the resulting state update — moving straight on to the next action (e.g. clicking
+// "Next" right after ticking a checkbox) can then race ahead of a selection that looks instant to a
+// human but isn't synchronous here. react-native-web also doesn't reflect Pressable's
+// accessibilityState.checked as a real aria-checked attribute in this version, so there's nothing
+// in the DOM to poll for instead — a short fixed settle delay is the simple, reliable option.
+async function clickAndSettle(handle) {
+  await handle.click();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}
+
 async function typeInto(page, label, text, { last = false, minCount = 1 } = {}) {
   const element = await findVisible(page, `[aria-label="${label}"]`, { last, minCount });
   await element.click({ clickCount: 3 });
@@ -141,23 +155,21 @@ async function signup(page, name, mobile, password) {
   await typeInto(page, 'Your name', name);
   await typeInto(page, 'Mobile number', mobile);
   await typeInto(page, 'Password', password);
-  const consent = await findVisible(page, '[role="checkbox"]');
-  await consent.click();
+  await clickAndSettle(await findVisible(page, '[role="checkbox"]'));
   await clickButton(page, 'Create account');
   await waitForPath(page, '/login');
 }
 
-async function login(page, mobile, password) {
+async function login(page, mobile, secret) {
   await typeInto(page, 'Mobile number', mobile);
-  await typeInto(page, 'Password', password);
+  await typeInto(page, 'Password', secret);
   await clickButton(page, 'Log in');
 }
 
 async function fillStepOne(page, businessName, city, typeLabel) {
   await typeInto(page, 'Business name', businessName);
   await typeInto(page, 'City', city);
-  const typeOption = await findVisibleByText(page, 'radio', typeLabel);
-  await typeOption.click();
+  await clickAndSettle(await findVisibleByText(page, 'radio', typeLabel));
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/2');
 }
@@ -186,6 +198,21 @@ async function waitForPreviewColour(page, businessName, expectedHex) {
   );
 }
 
+// Signs the current user out via /home (the only screen with a Log out button) regardless of which
+// screen they're actually on — needed between scenarios, since /login bounces a signed-in user
+// straight to /home.
+async function logoutFromAnywhere(page) {
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await clickButton(page, 'Log out');
+  await waitForPath(page, '/login');
+}
+
+async function skipStep(page, fromStep, toPath) {
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, toPath);
+  console.log(`OK — skipped step ${fromStep}.`);
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
 
@@ -197,7 +224,7 @@ async function main() {
     // and the sticky BottomActionBar occluding whatever sits directly above it.
     await page.setViewport({ width: 390, height: 3000 });
 
-    // === User 1: full flow through all four wizard steps built so far ===
+    // === User 1: full flow through all six wizard steps ===
     const name = 'Flow Test';
     const mobile = randomMobile();
     const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
@@ -219,8 +246,7 @@ async function main() {
     await fillStepOne(page, "Anita's Kitchen", 'Pune', 'Cloud kitchen');
     console.log('OK — step 1 saved, moved to /setup/2.');
 
-    const swatch = await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]');
-    await swatch.click();
+    await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
     await waitForPreviewColour(page, "Anita's Kitchen", '#8E3B6E');
     console.log('OK — picking a colour updates the live preview.');
 
@@ -229,13 +255,13 @@ async function main() {
     console.log('OK — step 2 saved, moved to /setup/3.');
 
     await waitForText(page, 'Rice');
-    (await findVisible(page, '[aria-label="Rice. kg"]')).click();
-    (await findVisible(page, '[aria-label="Cooking oil. L"]')).click();
+    await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
+    await clickAndSettle(await findVisible(page, '[aria-label="Cooking oil. L"]'));
     console.log('OK — ticked two starter stock items.');
 
     await typeInto(page, 'Name', 'Fresh Paneer');
-    (await findVisibleByText(page, 'radio', 'kg')).click();
-    (await findVisible(page, '[aria-label="Goes off"]')).click();
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
+    await clickAndSettle(await findVisible(page, '[aria-label="Goes off"]'));
     await typeInto(page, 'Shelf life in days', '3');
     await clickButton(page, 'Add item');
     await waitForText(page, 'Fresh Paneer');
@@ -246,7 +272,7 @@ async function main() {
     console.log('OK — step 3 saved, moved to /setup/4.');
 
     await waitForText(page, 'Add your own');
-    (await findVisible(page, '[aria-label="Veg biryani"]')).click();
+    await clickAndSettle(await findVisible(page, '[aria-label="Veg biryani"]'));
     // minCount: 2 — the starter item's inline price box only mounts once the tick above is
     // reflected in a render; without waiting for both fields to exist, this can resolve to the
     // "add your own" form's price field instead (the only one present in the first instant).
@@ -255,28 +281,53 @@ async function main() {
 
     await typeInto(page, 'Name', 'Paneer Tikka', { last: true });
     await typeInto(page, 'Selling price', '180', { last: true });
-    (await findVisibleByText(page, 'radio', 'Fresh Paneer')).click();
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Fresh Paneer'));
     await clickButton(page, 'Add item');
     await waitForText(page, 'Paneer Tikka');
     console.log('OK — added one own sell item linked to a stock item.');
 
     await clickButton(page, 'Next');
-    await waitForPath(page, '/setup/saved');
-    await waitForText(page, 'Setup saved');
-    console.log('OK — step 4 saved, "Setup saved" shown.');
+    await waitForPath(page, '/setup/5');
+    console.log('OK — step 4 saved, moved to /setup/5.');
+
+    const helperMobile = randomMobile();
+    const helperPin = '7392';
+    await typeInto(page, 'Name', 'Helper One');
+    await typeInto(page, 'Mobile number', helperMobile);
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Helper'));
+    await typeInto(page, 'PIN', helperPin);
+    await clickButton(page, 'Add person');
+    await waitForText(page, 'Helper One');
+    await clickButton(page, 'Next');
+    await waitForPath(page, '/setup/6');
+    console.log('OK — added a Helper with a PIN, step 5 saved, moved to /setup/6.');
+
+    await clickButton(page, 'Use recommended settings');
+    await waitForPath(page, '/setup/done');
+    console.log('OK — used recommended settings, step 6 saved, moved to /setup/done.');
+
+    await waitForText(page, "You're all set");
+    const doneBodyText = await page.evaluate(() => document.body.innerText);
+    if (doneBodyText.includes('Still to do')) {
+      fail('a fully-completed wizard should not list anything as "Still to do"');
+    }
+    console.log('OK — /setup/done shows the summary with nothing "Still to do".');
 
     await clickButton(page, 'Go to Home');
     await waitForPath(page, '/home');
+    const homeBodyText = await page.evaluate(() => document.body.innerText);
+    if (homeBodyText.includes('Finish setting up')) {
+      fail('a fully-completed Owner should not see the "Finish setting up" card');
+    }
+    console.log('OK — /home shows no "Finish setting up" card once nothing is left.');
+
     await clickButton(page, 'Log out');
     await waitForPath(page, '/login');
     await login(page, mobile, password);
     await waitForPath(page, '/home');
-    console.log('OK — after finishing all four steps, logging back in lands on /home.');
+    console.log('OK — after finishing all six steps, logging back in lands on /home.');
 
-    // /login redirects a signed-in user straight to /home, so each user must be signed out before
-    // the next one can even reach the signup/login forms.
-    await clickButton(page, 'Log out');
-    await waitForPath(page, '/login');
+    await logoutFromAnywhere(page);
 
     // === User 2: stop after step 1, confirm resume at /setup/2 ===
     const name2 = 'Resume Test';
@@ -291,18 +342,14 @@ async function main() {
     // /setup/2 itself has no logout button (only the wizard controls) — go to /home, which does,
     // to log out. Resuming depends only on the business's saved onboarding_step, not on which
     // screen happened to be open, so this is still a faithful "left mid-wizard" scenario.
-    await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-    await clickButton(page, 'Log out');
-    await waitForPath(page, '/login');
+    await logoutFromAnywhere(page);
     await login(page, mobile2, password2);
     await waitForPath(page, '/setup/2');
     console.log('OK — leaving mid-wizard after step 1 and logging back in resumes at /setup/2.');
 
-    await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-    await clickButton(page, 'Log out');
-    await waitForPath(page, '/login');
+    await logoutFromAnywhere(page);
 
-    // === User 3: fill steps 1-2, skip both 3 and 4, confirm the skipped list ===
+    // === User 3: fill steps 1-2, skip 3, 4, 5 and 6, confirm the "Still to do" / checklist / resume ===
     const name3 = 'Skip Test';
     const mobile3 = randomMobile();
     const password3 = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
@@ -314,24 +361,49 @@ async function main() {
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/3');
 
-    await clickButton(page, 'Skip for now');
-    await waitForPath(page, '/setup/4');
-    console.log('OK — skipped step 3.');
+    await skipStep(page, 3, '/setup/4');
+    await skipStep(page, 4, '/setup/5');
+    await skipStep(page, 5, '/setup/6');
+    await skipStep(page, 6, '/setup/done');
 
-    await clickButton(page, 'Skip for now');
-    await waitForPath(page, '/setup/saved');
-    console.log('OK — skipped step 4.');
+    await waitForText(page, "You're all set");
+    await waitForText(page, 'Still to do');
+    for (const title of ['What you buy', 'What you sell', 'Your team', 'Alerts and rules']) {
+      await waitForText(page, title);
+    }
+    console.log('OK — /setup/done lists all four skipped steps as "Still to do".');
 
-    await waitForText(page, 'Skipped for now');
-    await waitForText(page, 'What you buy');
-    await waitForText(page, 'What you sell');
-    console.log('OK — "Setup saved" lists both skipped steps.');
+    await clickButton(page, 'Go to Home');
+    await waitForPath(page, '/home');
+    await waitForText(page, 'Finish setting up');
+    for (const title of ['What you buy', 'What you sell', 'Your team', 'Alerts and rules']) {
+      await waitForText(page, title);
+    }
+    console.log('OK — /home\'s "Finish setting up" card lists all four skipped steps.');
+
+    // Four "Continue" links exist (one per skipped step); the backend lists them step-ascending and
+    // the card renders in that order, so the first visible one is "What you buy" (step 3).
+    const continueLink = await findVisibleByText(page, 'button', 'Continue');
+    await continueLink.click();
+    await waitForPath(page, '/setup/3');
+    console.log('OK — clicking Continue on "What you buy" resumes at /setup/3.');
+
+    await logoutFromAnywhere(page);
+
+    // === Scenario 4: the Helper (from User 1) logs in with their PIN, sees no setup links ===
+    await login(page, helperMobile, helperPin);
+    await waitForPath(page, '/home');
+    const helperHomeText = await page.evaluate(() => document.body.innerText);
+    if (helperHomeText.includes('Finish setting up')) {
+      fail('a Helper should never see the "Finish setting up" checklist card');
+    }
+    console.log('OK — the Helper logs in with their PIN and /home has no setup links.');
 
     console.log('\nAll flow checks passed.');
   } catch (err) {
     const page = (await browser.pages()).at(-1);
     if (page) {
-      await page.screenshot({ path: 'docs/screens/step6/_flow_failure.png' }).catch(() => {});
+      await page.screenshot({ path: 'docs/screens/step7/_flow_failure.png' }).catch(() => {});
       console.error('URL at failure:', page.url());
     }
     throw err;

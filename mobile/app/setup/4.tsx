@@ -219,7 +219,7 @@ export default function SetupStepFour() {
   }
 
   async function handleNext() {
-    if (await save()) router.push('/setup/saved');
+    if (await save()) router.push('/setup/5');
   }
 
   async function handleSaveForLater() {
@@ -239,7 +239,7 @@ export default function SetupStepFour() {
         body: { onboarding_step: 5 },
       });
       await refreshMe();
-      router.push('/setup/saved');
+      router.push('/setup/5');
     } catch (err) {
       mapSubmitError(err, 0);
     } finally {

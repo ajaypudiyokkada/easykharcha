@@ -18,6 +18,12 @@ Then the Step 6 stock flow: bulk stock items -> a bad row in a bulk save returns
 saves nothing -> a duplicate name is rejected -> a sell item linked to a shared stock item is
 rejected -> skipping a non-skippable onboarding step is rejected, a skippable one is accepted -> a
 second user gets 403/404 on both endpoints.
+
+Then the Step 7 team flow: weak PINs rejected -> a Helper is added with a PIN and can log in with
+it -> that Helper gets 403 on the team and settings endpoints -> adding an existing mobile only adds
+Access, their own credential still works and the team-add secret does not -> an out-of-range
+settings value is rejected -> an unrelated user gets 403/404 -> the onboarding-complete endpoint
+only sets the completed date once the actual rules are met.
 """
 
 import binascii
@@ -333,6 +339,147 @@ def check_stock_flow() -> None:
     print("OK — a second user gets 403/404 on both the stock-items and sell-items endpoints.")
 
 
+def check_team_flow() -> None:
+    owner_mobile, owner_access, _ = signup_and_login("Team Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Team Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"team flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    # weak PINs rejected (never printed or logged, including here — only pass/fail is reported)
+    for weak_pin in ("1111", "1234"):
+        status, body, _ = request(
+            "POST",
+            f"/businesses/{business_id}/team/",
+            {
+                "name": "Weak Pin",
+                "mobile": random.choice("6789") + "".join(random.choices("0123456789", k=9)),
+                "role": "helper",
+                "secret": weak_pin,
+            },
+            token=owner_access,
+        )
+        if status not in (400, 422):
+            fail(f"weak PIN rejected: expected a validation error, got {status} ({body})")
+    print("OK — weak PINs (1111, 1234) are rejected.")
+
+    # add a Helper with a valid PIN
+    helper_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    helper_pin = "7392"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {"name": "Helper One", "mobile": helper_mobile, "role": "helper", "secret": helper_pin},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"add helper: expected 201, got {status} ({body})")
+    if body.get("mobile") == helper_mobile or not body.get("mobile", "").endswith(helper_mobile[-4:]):
+        fail(f"team member mobile should be masked except the last 4 digits, got {body.get('mobile')}")
+    print(f"OK — added a Helper for {owner_mobile} with a PIN (mobile returned masked).")
+
+    # that person can log in with the PIN
+    status, body, _ = request("POST", "/auth/login/", {"mobile": helper_mobile, "secret": helper_pin})
+    if status != 200 or "access" not in body:
+        fail(f"helper login with PIN: expected HTTP 200, got {status} ({body})")
+    helper_access = body["access"]
+    print("OK — the Helper can log in with their PIN.")
+
+    # a Helper gets 403 on the team and settings endpoints
+    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=helper_access)
+    if status != 403:
+        fail(f"helper team access: expected 403, got {status} ({body})")
+    status, body, _ = request("GET", f"/businesses/{business_id}/settings/", token=helper_access)
+    if status != 403:
+        fail(f"helper settings access: expected 403, got {status} ({body})")
+    print("OK — a Helper gets 403 on the team and settings endpoints.")
+
+    # an existing mobile (its own real account, own real password) gets Access added only —
+    # its credential must never change, confirmed both ways.
+    pre_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    pre_password = f"Kharcha{random.randint(1000, 9999)}!"
+    status, body, _ = request(
+        "POST",
+        "/auth/signup/",
+        {"name": "Pre Existing", "mobile": pre_mobile, "password": pre_password, "consent": True},
+    )
+    if status != 201:
+        fail(f"pre-existing signup: expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {"name": "ignored", "mobile": pre_mobile, "role": "manager", "secret": "TotallyDifferent999!"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"add existing user to team: expected 201, got {status} ({body})")
+    status, body, _ = request("POST", "/auth/login/", {"mobile": pre_mobile, "secret": pre_password})
+    if status != 200:
+        fail(f"existing user's original credential should still work, got {status} ({body})")
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": pre_mobile, "secret": "TotallyDifferent999!"}
+    )
+    if status == 200:
+        fail("existing user's credential should not have been changed by the team-add secret")
+    print("OK — adding an existing mobile to the team only adds Access; their credential is untouched.")
+
+    # settings PATCH with an out-of-range value is rejected
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/settings/", {"target_cost_pct": "150"}, token=owner_access
+    )
+    if status not in (400, 422):
+        fail(f"settings out-of-range: expected a validation error, got {status} ({body})")
+    print("OK — an out-of-range settings value is rejected.")
+
+    # an unrelated user (no access at all) gets 403/404
+    _, stranger_access, _ = signup_and_login("Team Stranger")
+    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=stranger_access)
+    if status not in (403, 404):
+        fail(f"stranger team access: expected 403/404, got {status} ({body})")
+    status, body, _ = request("GET", f"/businesses/{business_id}/settings/", token=stranger_access)
+    if status not in (403, 404):
+        fail(f"stranger settings access: expected 403/404, got {status} ({body})")
+    print("OK — an unrelated user gets 403/404 on the team and settings endpoints.")
+
+    # the complete endpoint only sets onboarding_completed_at once the rules are actually met
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/onboarding/complete/", token=owner_access
+    )
+    if status != 200 or body.get("onboarding_completed_at") is not None:
+        fail(f"onboarding complete (too early): expected no completed_at, got {status} ({body})")
+
+    for step in (1, 2):
+        status, body, _ = request(
+            "PATCH",
+            f"/businesses/{business_id}/onboarding/{step}/",
+            {"status": "done"},
+            token=owner_access,
+        )
+        if status != 200:
+            fail(f"mark step {step} done: expected HTTP 200, got {status} ({body})")
+    for step in (3, 4, 5, 6):
+        status, body, _ = request(
+            "PATCH",
+            f"/businesses/{business_id}/onboarding/{step}/",
+            {"status": "skipped"},
+            token=owner_access,
+        )
+        if status != 200:
+            fail(f"skip step {step}: expected HTTP 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/onboarding/complete/", token=owner_access
+    )
+    if status != 200 or not body.get("onboarding_completed_at"):
+        fail(f"onboarding complete: expected completed_at set, got {status} ({body})")
+    print("OK — the complete endpoint sets onboarding_completed_at once steps 1-2 are done and 3-6 are done or skipped.")
+
+
 def check_auth_flow() -> None:
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
     name = "Smoke Test"
@@ -447,6 +594,7 @@ def main() -> None:
     check_auth_flow()
     check_business_flow()
     check_stock_flow()
+    check_team_flow()
     print("\nAll smoke checks passed.")
 
 

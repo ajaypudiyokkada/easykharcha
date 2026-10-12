@@ -48,6 +48,13 @@ class User(AbstractBaseUser):
     utm_medium = models.CharField(max_length=120, blank=True)
     utm_campaign = models.CharField(max_length=120, blank=True)
 
+    # Team members added by an Owner (Step 7). A Manager's secret is a temporary password — this
+    # just records that it still needs changing; nothing enforces it yet. A Helper/Head chef's
+    # secret is a PIN instead, stored exactly like a password (same hasher, same check_password()),
+    # so login doesn't need to know or care which kind a given user has.
+    must_change_password = models.BooleanField(default=False)
+    uses_pin = models.BooleanField(default=False)
+
     USERNAME_FIELD = "mobile"
     REQUIRED_FIELDS = ["name"]
 

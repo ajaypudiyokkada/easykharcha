@@ -5,7 +5,9 @@ from rest_framework import serializers
 from accounts.models import User, mobile_validator
 
 
-def _validate_password_rules(password: str, mobile: str, name: str) -> None:
+def validate_password_rules(password: str, mobile: str, name: str) -> None:
+    """Shared with businesses/team.py — a Manager's temporary password follows the same policy a
+    sign-up password does."""
     try:
         validate_password(password)
     except DjangoValidationError as exc:
@@ -37,7 +39,7 @@ class SignupSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs: dict) -> dict:
-        _validate_password_rules(attrs["password"], attrs["mobile"], attrs.get("name", ""))
+        validate_password_rules(attrs["password"], attrs["mobile"], attrs.get("name", ""))
         return attrs
 
 

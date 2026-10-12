@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from .colour import white_text_contrast
@@ -34,10 +35,16 @@ class BusinessUpdateSerializer(serializers.Serializer):
     tagline = serializers.CharField(max_length=160, required=False, allow_blank=True)
     primary_colour = serializers.CharField(required=False, validators=[validate_brand_colour])
     onboarding_step = serializers.IntegerField(required=False, min_value=1, max_value=6)
+    # Write-only: true means "set checklist_dismissed_at to now", not a literal model field.
+    dismiss_checklist = serializers.BooleanField(required=False, write_only=True)
 
     def save(self, **kwargs) -> Business:
         business: Business = self.instance
         for field, value in self.validated_data.items():
+            if field == "dismiss_checklist":
+                if value:
+                    business.checklist_dismissed_at = timezone.now()
+                continue
             setattr(business, field, value)
         business.save()
         return business
@@ -65,6 +72,8 @@ class OnboardingUpdateSerializer(serializers.Serializer):
 class BusinessSerializer(serializers.ModelSerializer):
     logo = serializers.SerializerMethodField()
     onboarding = serializers.SerializerMethodField()
+    skipped_steps = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
@@ -81,6 +90,9 @@ class BusinessSerializer(serializers.ModelSerializer):
             "onboarding_step",
             "onboarding_completed_at",
             "onboarding",
+            "skipped_steps",
+            "role",
+            "checklist_dismissed_at",
             "created_at",
         )
 
@@ -92,3 +104,19 @@ class BusinessSerializer(serializers.ModelSerializer):
 
     def get_onboarding(self, obj: Business) -> list:
         return OnboardingStepSerializer(obj.onboarding_progress.all(), many=True).data
+
+    def get_skipped_steps(self, obj: Business) -> list[int]:
+        return [
+            progress.step
+            for progress in obj.onboarding_progress.all()
+            if progress.status == OnboardingStepStatus.SKIPPED
+        ]
+
+    def get_role(self, obj: Business) -> str | None:
+        """The requesting user's own role on this business — not necessarily Owner, now that team
+        members can log in too."""
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+            return None
+        access = obj.access.filter(user=request.user).first()
+        return access.role if access else None

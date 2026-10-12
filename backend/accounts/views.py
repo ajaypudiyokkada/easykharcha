@@ -79,21 +79,34 @@ class LoginView(APIView):
         mobile = serializer.validated_data["mobile"]
         secret = serializer.validated_data["secret"]
 
-        limit, window = settings.RATE_LIMITS["login_per_mobile"]
-        if not hit(f"login:mobile:{mobile}", limit, window):
-            raise RateLimited()
-
         try:
             user = User.objects.get(mobile=mobile)
         except User.DoesNotExist:
+            # Unknown mobile: no uses_pin to key off, so just the default (looser) limit.
+            limit, window = settings.RATE_LIMITS["login_per_mobile"]
+            if not hit(f"login:mobile:{mobile}", limit, window):
+                raise RateLimited() from None
             raise InvalidCredentials() from None
+
+        # A 4-6 digit PIN has far fewer combinations than a password, so both the rate limit and
+        # the lockout threshold are stricter for a PIN account.
+        limit, window = settings.RATE_LIMITS[
+            "login_per_mobile_pin" if user.uses_pin else "login_per_mobile"
+        ]
+        if not hit(f"login:mobile:{mobile}", limit, window):
+            raise RateLimited()
+        lockout_threshold = (
+            settings.PIN_LOGIN_LOCKOUT_THRESHOLD
+            if user.uses_pin
+            else settings.LOGIN_LOCKOUT_THRESHOLD
+        )
 
         # Same generic error whether the account is locked, the password is wrong, or the mobile
         # doesn't exist at all — anything else would let an attacker tell those cases apart.
         if user.is_locked() or not user.check_password(secret):
             if not user.is_locked():
                 user.failed_login_count += 1
-                if user.failed_login_count >= settings.LOGIN_LOCKOUT_THRESHOLD:
+                if user.failed_login_count >= lockout_threshold:
                     user.locked_until = timezone.now() + timezone.timedelta(
                         minutes=settings.LOGIN_LOCKOUT_MINUTES
                     )

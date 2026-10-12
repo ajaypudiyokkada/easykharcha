@@ -32,6 +32,9 @@ class Business(models.Model):
     currency = models.CharField(max_length=8, default="INR")
     onboarding_step = models.PositiveSmallIntegerField(default=1)
     onboarding_completed_at = models.DateTimeField(null=True, blank=True)
+    # The Owner dismissed /home's "Finish setting up" card — recorded here, not on the device, so it
+    # stays dismissed on another phone or after a reinstall too.
+    checklist_dismissed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="businesses_created"
     )
@@ -46,6 +49,13 @@ class Business(models.Model):
 
 class AccessRole(models.TextChoices):
     OWNER = "owner", "Owner"
+    MANAGER = "manager", "Manager"
+    HEAD_CHEF = "head_chef", "Head chef"
+    HELPER = "helper", "Helper"
+
+
+TEAM_ROLES = frozenset({AccessRole.MANAGER, AccessRole.HEAD_CHEF, AccessRole.HELPER})
+PIN_ROLES = frozenset({AccessRole.HEAD_CHEF, AccessRole.HELPER})
 
 
 class Access(models.Model):
@@ -99,3 +109,19 @@ class OnboardingProgress(models.Model):
 
     def __str__(self) -> str:
         return f"{self.business_id} step {self.step}: {self.status}"
+
+
+class BusinessSettings(models.Model):
+    """One row per business, created alongside it. Defaults and valid ranges live in
+    settings.BUSINESS_SETTINGS_DEFAULTS / BUSINESS_SETTINGS_RANGES, not hardcoded here, so the
+    report and the validation share one source of truth."""
+
+    business = models.OneToOneField(Business, on_delete=models.CASCADE, related_name="settings")
+    # How late in the day (hour, 0-23) a daily stock count can still be logged.
+    count_deadline_hour = models.PositiveSmallIntegerField()
+    target_cost_pct = models.DecimalField(max_digits=5, decimal_places=2)
+    wastage_alert_pct = models.DecimalField(max_digits=5, decimal_places=2)
+    rate_creep_pct = models.DecimalField(max_digits=5, decimal_places=2)
+
+    def __str__(self) -> str:
+        return f"Settings for {self.business_id}"

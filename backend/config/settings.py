@@ -105,17 +105,39 @@ CONSENT_VERSION = env.str("CONSENT_VERSION", default="1.0")
 OTP_REQUIRED = env.bool("OTP_REQUIRED", default=False)
 
 LOGIN_LOCKOUT_THRESHOLD = 5
+# A 4-6 digit PIN has far fewer combinations than a password, so a PIN account locks out sooner.
+PIN_LOGIN_LOCKOUT_THRESHOLD = 3
 LOGIN_LOCKOUT_MINUTES = 15
 
 MAX_BUSINESSES_PER_USER = env.int("MAX_BUSINESSES_PER_USER", default=3)
 MAX_LOGO_UPLOAD_BYTES = 2 * 1024 * 1024
+MAX_TEAM_MEMBERS_PER_BUSINESS = env.int("MAX_TEAM_MEMBERS_PER_BUSINESS", default=10)
 
 # (attempts, window in seconds). Dev-only LocMemCache backs this — see accounts/ratelimit.py.
 RATE_LIMITS = {
     "signup_per_mobile": (5, 3600),
     "signup_per_ip": (20, 3600),
     "login_per_mobile": (10, 900),
+    # Stricter than a password login's — same reasoning as PIN_LOGIN_LOCKOUT_THRESHOLD above.
+    "login_per_mobile_pin": (5, 900),
     "login_per_ip": (30, 900),
+}
+
+# Step 7: one BusinessSettings row per business, seeded with these at creation. Chosen for a small
+# Indian F&B/retail business: a late-morning cutoff for logging yesterday's count, a food-cost
+# target in the commonly-cited 28-35% range, and alert thresholds loose enough not to cry wolf on
+# normal day-to-day variation.
+BUSINESS_SETTINGS_DEFAULTS = {
+    "count_deadline_hour": 11,
+    "target_cost_pct": 30,
+    "wastage_alert_pct": 5,
+    "rate_creep_pct": 10,
+}
+BUSINESS_SETTINGS_RANGES = {
+    "count_deadline_hour": (0, 23),
+    "target_cost_pct": (1, 100),
+    "wastage_alert_pct": (0, 100),
+    "rate_creep_pct": (0, 100),
 }
 
 # Dev default matches the Expo web dev server exactly (see mobile/package.json's `start` script).

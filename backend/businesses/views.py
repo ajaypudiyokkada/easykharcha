@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from PIL import Image
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -16,8 +17,18 @@ from rest_framework.views import APIView
 from audit.log import log_action
 
 from .access import owner_access_or_403
+from .business_settings import defaults_for_new_business
 from .exceptions import BusinessLimitReached, InvalidLogoFile
-from .models import ONBOARDING_STEPS, Access, AccessRole, Business, OnboardingProgress
+from .models import (
+    ONBOARDING_STEPS,
+    SKIPPABLE_ONBOARDING_STEPS,
+    Access,
+    AccessRole,
+    Business,
+    BusinessSettings,
+    OnboardingProgress,
+    OnboardingStepStatus,
+)
 from .serializers import (
     BusinessCreateSerializer,
     BusinessSerializer,
@@ -50,6 +61,7 @@ class BusinessCreateView(APIView):
         OnboardingProgress.objects.bulk_create(
             [OnboardingProgress(business=business, step=step) for step in ONBOARDING_STEPS]
         )
+        BusinessSettings.objects.create(business=business, **defaults_for_new_business())
         log_action(
             user=request.user, action="business.create", business=business, name=business.name
         )
@@ -162,3 +174,26 @@ class StarterPackView(APIView):
         if pack is None:
             raise Http404()
         return Response(pack)
+
+
+class OnboardingCompleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id):
+        business = get_object_or_404(Business, id=business_id)
+        owner_access_or_403(business, request.user)
+
+        progress = {p.step: p.status for p in business.onboarding_progress.all()}
+        steps_1_2_done = progress.get(1) == OnboardingStepStatus.DONE and progress.get(2) == (
+            OnboardingStepStatus.DONE
+        )
+        steps_3_6_ok = all(
+            progress.get(step) in (OnboardingStepStatus.DONE, OnboardingStepStatus.SKIPPED)
+            for step in SKIPPABLE_ONBOARDING_STEPS
+        )
+        if steps_1_2_done and steps_3_6_ok and not business.onboarding_completed_at:
+            business.onboarding_completed_at = timezone.now()
+            business.save(update_fields=["onboarding_completed_at"])
+            log_action(user=request.user, action="onboarding.complete", business=business)
+
+        return Response(BusinessSerializer(business, context={"request": request}).data)
