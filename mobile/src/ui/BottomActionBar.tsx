@@ -17,8 +17,8 @@ type Props = {
 /**
  * `.action-bar` in the kit: sticky at the bottom, primary action first, an optional "Skip for now"
  * link second — the kit's own markup uses `.btn.btn-link` for Skip, so it's a full `Button`, not a
- * small text link like `StepHeader`'s save-for-later. Expects a positioned (non-static) parent —
- * `Screen` provides one when `bottomBar` is passed to it.
+ * small text link like `StepHeader`'s save-for-later. A plain (non-absolute) block — `Screen`'s own
+ * `barWrap` is the thing pinned to the viewport edge and centred at up to 480px; this just fills it.
  */
 export function BottomActionBar({
   primaryLabel,
@@ -45,10 +45,6 @@ export function BottomActionBar({
 
 const styles = StyleSheet.create({
   bar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     backgroundColor: colours.card,
     borderTopWidth: 2,
     borderTopColor: colours.mint,

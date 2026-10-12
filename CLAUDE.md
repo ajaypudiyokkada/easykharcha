@@ -35,9 +35,10 @@ mobile/     Expo app — app/ (screens), src/theme/ (tokens), src/api/ (the fetc
 landing/    static landing page, copied in unmodified
 docs/       specs and design files, written as steps add them
 legacy/     a previous, larger multi-tenant build of a different EasyKharcha product — see below
-scripts/    smoke.py (backend API proof), flow.mjs (browser end-to-end), check_backend.ps1 (backend
-            lint/format/check), generate_icons.mjs (PWA icons), serve_web.mjs (serves the production
-            web export locally), pwa_check.mjs (offline/service-worker proof)
+scripts/    dev.mjs (backend + app + landing page together), smoke.py (backend API proof), flow.mjs
+            (browser end-to-end), check_backend.ps1 (backend lint/format/check), generate_icons.mjs
+            (PWA icons), serve_web.mjs (serves the production web export locally), pwa_check.mjs
+            (offline/service-worker proof)
 ```
 
 ## `legacy/`

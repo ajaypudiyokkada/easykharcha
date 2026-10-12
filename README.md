@@ -7,6 +7,19 @@ explicitly not (OTP, forgot-password, stock/sales/costing features, and more).
 
 Working rules and the design tokens live in [`CLAUDE.md`](CLAUDE.md).
 
+## Quick start
+
+Once the one-time setup in "Backend" and "Mobile" below is done (venv + `migrate`, `npm install` in
+`mobile/`):
+
+```powershell
+npm run dev
+```
+
+Starts the backend (`http://127.0.0.1:8000`), the app (`http://localhost:8081`) and the landing page
+(`http://127.0.0.1:8082`) together, in one terminal, and prints all three URLs. Ctrl+C stops all three.
+See `scripts/dev.mjs`.
+
 ## Database
 
 **SQLite by default** — `backend/db.sqlite3`, created automatically on first `migrate`. Nothing extra
@@ -107,4 +120,10 @@ recovers once back online. Screenshots land in `docs/screens/step8/`.
 
 ## Landing page
 
-`landing/index.html` is a static file — open it directly in a browser, no build step.
+`landing/index.html` is a static file — open it directly in a browser, no build step, or serve it at
+`http://127.0.0.1:8082` via `npm run dev` (above). Its "Start free" buttons (hero, nav, sticky mobile
+bar) and the nav's "Log in" link point at the running app — `SIGNUP_URL` / `LOGIN_URL` constants at the
+top of its own `<script>`. The lead-capture form further down the page is separate and unchanged.
+
+Note: `npm run serve:web` (the production PWA build server, above) also defaults to port 8082 — it's a
+separate one-off command for `pwa-check`, not meant to run at the same time as `npm run dev`.

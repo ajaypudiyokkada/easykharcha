@@ -59,6 +59,7 @@ export default function RootLayout() {
             <Stack.Screen name="setup/6" options={{ title: 'Alerts and rules' }} />
             <Stack.Screen name="setup/done" options={{ title: "You're all set" }} />
             <Stack.Screen name="dev/kit" options={{ title: 'Component kit' }} />
+            <Stack.Screen name="dev/health" options={{ title: 'Health check' }} />
             <Stack.Screen name="+not-found" options={{ title: 'Not found' }} />
           </Stack>
         </RootShell>

@@ -44,8 +44,10 @@ export function Screen({ children, bottomBar }: Props) {
         {children}
       </ScrollView>
       {bottomBar ? (
-        <View style={styles.barWrap} onLayout={onBarLayout}>
-          {bottomBar}
+        <View style={styles.barWrap}>
+          <View style={styles.barInner} onLayout={onBarLayout}>
+            {bottomBar}
+          </View>
         </View>
       ) : null}
     </View>
@@ -68,10 +70,18 @@ const styles = StyleSheet.create({
     gap: spacing.xl,
   },
   barWrap: {
+    // Pinned to the viewport edges — the thing that makes the bar sticky. Deliberately no
+    // width/maxWidth here: combined with an explicit `left`/`right`, either would make the box
+    // over-constrained and resolve flush against the left edge instead of centred (confirmed by
+    // screenshot at desktop widths before this was split into two layers). `barInner` below is a
+    // plain, non-absolute child instead, so ordinary centring rules apply without that conflict —
+    // and because it's a normal in-flow child, its height still correctly reaches `onBarLayout`.
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  barInner: {
     width: '100%',
     maxWidth: MAX_CONTENT_WIDTH,
     alignSelf: 'center',

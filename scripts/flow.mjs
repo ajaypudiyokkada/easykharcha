@@ -3,11 +3,13 @@
  * Drives a real browser against the actual running app (not direct API calls, unlike smoke.py) to
  * prove the frontend and backend are wired together end to end.
  *
- * Four scenarios:
+ * Starts with the landing page and the root route, then four scenarios:
+ *  0. The landing page's hero "Start free" button opens /signup; opening "/" signed out lands on
+ *     /login.
  *  1. A fresh user: signup -> login -> all six wizard steps (step 2's colour preview checked live;
  *     step 5 adds a Helper with a PIN; step 6 uses the recommended settings) -> /setup/done (no
  *     "Still to do") -> /home (no "Finish setting up" card, onboarding is fully done) -> log out ->
- *     log in again -> lands on /home.
+ *     log in again -> lands on /home -> opening "/" again lands on /home too.
  *  2. A second, independent user who stops after step 1, logs out mid-wizard, and logs back in to
  *     confirm they resume at /setup/2.
  *  3. A third, independent user who fills steps 1-2 then skips 3, 4, 5 and 6 — confirms /setup/done
@@ -23,10 +25,12 @@
  */
 
 import { existsSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
 
 const APP_URL = 'http://localhost:8081';
 const TIMEOUT = 15_000;
+const SCREEN_DIR = 'docs/screens/step8b';
 
 function findChrome() {
   const candidates = [
@@ -213,16 +217,57 @@ async function skipStep(page, fromStep, toPath) {
   console.log(`OK — skipped step ${fromStep}.`);
 }
 
+// Step 8b's route-map proof: the landing page and "/" (signed out, ending on /login), at a desktop
+// and a phone width.
+async function captureLandingAndRootScreens(page) {
+  const landingUrl = new URL('../landing/index.html', import.meta.url).href;
+  for (const { width, height, suffix } of [
+    { width: 1280, height: 900, suffix: '1280' },
+    { width: 390, height: 844, suffix: '390' },
+  ]) {
+    await page.setViewport({ width, height });
+
+    await page.goto(landingUrl, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await page.screenshot({ path: `${SCREEN_DIR}/landing-${suffix}.png` });
+
+    await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForPath(page, '/login');
+    await page.screenshot({ path: `${SCREEN_DIR}/root-login-${suffix}.png` });
+  }
+  console.log(`OK — saved landing page and "/" screenshots at 1280px and 390px to ${SCREEN_DIR}/.`);
+}
+
+// Opened as a file:// page, not served — its "Start free" buttons point at an absolute URL
+// (SIGNUP_URL in landing/index.html's own script), so this works the same regardless of how the
+// landing page itself happens to be hosted.
+async function checkLandingHeroSignup(page) {
+  const landingUrl = new URL('../landing/index.html', import.meta.url).href;
+  await page.goto(landingUrl, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await (await findVisible(page, '#heroSignupLink')).click();
+  await retryUntil(async () => (await page.evaluate(() => location.href)).includes('/signup'));
+  console.log('OK — the landing page\'s hero "Start free" button opens /signup.');
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
+  await mkdir(SCREEN_DIR, { recursive: true });
 
   try {
     const page = await browser.newPage();
     page.on('pageerror', (err) => fail(`a JS error occurred in the page: ${err}`));
+
+    await captureLandingAndRootScreens(page);
+
     // Tall enough that every field on every wizard screen fits without scrolling — sidesteps both
     // react-native-web's internally-scrolling ScrollView (native scrollIntoView is a no-op for it)
     // and the sticky BottomActionBar occluding whatever sits directly above it.
     await page.setViewport({ width: 390, height: 3000 });
+
+    await checkLandingHeroSignup(page);
+
+    await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForPath(page, '/login');
+    console.log('OK — opening "/" signed out lands on /login.');
 
     // === User 1: full flow through all six wizard steps ===
     const name = 'Flow Test';
@@ -327,6 +372,10 @@ async function main() {
     await waitForPath(page, '/home');
     console.log('OK — after finishing all six steps, logging back in lands on /home.');
 
+    await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForPath(page, '/home');
+    console.log('OK — opening "/" again while signed in and onboarded lands on /home.');
+
     await logoutFromAnywhere(page);
 
     // === User 2: stop after step 1, confirm resume at /setup/2 ===
@@ -403,7 +452,7 @@ async function main() {
   } catch (err) {
     const page = (await browser.pages()).at(-1);
     if (page) {
-      await page.screenshot({ path: 'docs/screens/step7/_flow_failure.png' }).catch(() => {});
+      await page.screenshot({ path: `${SCREEN_DIR}/_flow_failure.png` }).catch(() => {});
       console.error('URL at failure:', page.url());
     }
     throw err;

@@ -103,6 +103,7 @@
     summary::-webkit-details-marker{display:none}summary:after{content:"+";color:var(--primary);font:700 1.45rem "Poppins"}details[open] summary:after{content:"–"}details p{padding:0 0 18px;margin-top:0}
     footer{background:var(--text);color:var(--card);padding:48px 0 100px}.footer-grid{display:grid;gap:22px}.footer-word{font:700 1.45rem "Poppins"}.footer-tag{font-weight:800;margin-top:6px}.footer-meta{display:grid;gap:8px}footer a{color:var(--card)}
     .sticky{position:fixed;z-index:60;left:0;right:0;bottom:0;background:var(--card);padding:10px 16px;border-top:2px solid var(--mint)}.sticky .btn{width:100%}
+    .nav-actions{display:flex;align-items:center;gap:18px}.nav-login{font-weight:800;color:var(--text);text-decoration:none}
     @media(min-width:760px){
       .topbar{display:block}.hero{padding:72px 0 88px}.hero-grid{grid-template-columns:1.05fr .95fr;gap:52px}.section{padding:96px 0}
       .steps{grid-template-columns:repeat(3,1fr);gap:22px}.steps:before{content:"";position:absolute;top:48px;left:15%;right:15%;height:4px;background:var(--highlight)}
@@ -117,7 +118,10 @@
   <header class="topbar">
     <div class="container inner">
       <a class="wordmark" href="#top">EasyKharcha</a>
-      <a class="btn" href="#signup">Start free</a>
+      <div class="nav-actions">
+        <a class="nav-login" id="navLoginLink" href="#signup">Log in</a>
+        <a class="btn" id="navSignupLink" href="#signup">Start free</a>
+      </div>
     </div>
   </header>
 
@@ -129,7 +133,7 @@
           <h1 id="hero-title">Know where your money goes.</h1>
           <p>EasyKharcha helps you track what you buy, what gets used, what gets sold, and where stock or money may be slipping away.</p>
           <div class="hero-actions">
-            <a class="btn" href="#signup">Start free</a>
+            <a class="btn" id="heroSignupLink" href="#signup">Start free</a>
             <p class="hero-note">Takes about 2 minutes a day.</p>
           </div>
         </div>
@@ -325,9 +329,19 @@
     </div>
   </footer>
 
-  <div class="sticky"><a class="btn" href="#signup">Start free</a></div>
+  <div class="sticky"><a class="btn" id="stickySignupLink" href="#signup">Start free</a></div>
 
   <script>
+    // Where the "Start free" / "Log in" buttons send people — the real app, not this page's own
+    // lead-capture form (left untouched below).
+    const SIGNUP_URL = "http://localhost:8081/signup";
+    const LOGIN_URL = "http://localhost:8081/login";
+
+    document.getElementById("navSignupLink").href = SIGNUP_URL;
+    document.getElementById("navLoginLink").href = LOGIN_URL;
+    document.getElementById("heroSignupLink").href = SIGNUP_URL;
+    document.getElementById("stickySignupLink").href = SIGNUP_URL;
+
     const FORM_ENDPOINT = "";
 
     const form = document.getElementById("signupForm");
