@@ -11,57 +11,22 @@
  */
 
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { extname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { startLandingServer } from './lib/landing_server.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const BACKEND_DIR = join(ROOT, 'backend');
 const MOBILE_DIR = join(ROOT, 'mobile');
-const LANDING_DIR = join(ROOT, 'landing');
 const LANDING_PORT = 8082;
 
 const VENV_PYTHON = join(ROOT, '.venv', 'Scripts', 'python.exe');
 
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-};
-
 function fail(message) {
   console.error(`FAIL: ${message}`);
   process.exit(1);
-}
-
-// A single static file (landing/index.html today) — no SPA fallback needed, there's nothing to
-// route client-side.
-function serveLanding() {
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const requested = url.pathname === '/' ? '/index.html' : url.pathname;
-    const filePath = join(LANDING_DIR, requested);
-
-    try {
-      const stats = await stat(filePath);
-      if (!stats.isFile()) throw new Error('not a file');
-      res.writeHead(200, {
-        'Content-Type': MIME_TYPES[extname(filePath)] ?? 'application/octet-stream',
-        'Cache-Control': 'no-cache',
-      });
-      createReadStream(filePath).pipe(res);
-    } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not found');
-    }
-  });
-  server.listen(LANDING_PORT, '127.0.0.1');
-  return server;
 }
 
 function prefixedPipe(child, label) {
@@ -85,9 +50,9 @@ async function main() {
   }
 
   console.log('Starting EasyKharcha:');
-  console.log('  Backend:  http://127.0.0.1:8000/api/v1/');
+  console.log('  Landing:  http://127.0.0.1:8082/   <- Open this one: http://localhost:8082');
   console.log('  App:      http://localhost:8081/');
-  console.log('  Landing:  http://127.0.0.1:8082/');
+  console.log('  Backend:  http://127.0.0.1:8000/api/v1/');
   console.log('');
 
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -108,7 +73,7 @@ async function main() {
   });
   prefixedPipe(mobile, 'app');
 
-  const landing = serveLanding();
+  const landing = startLandingServer(LANDING_PORT);
 
   const children = [backend, mobile];
   let shuttingDown = false;

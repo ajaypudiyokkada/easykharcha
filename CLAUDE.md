@@ -32,13 +32,14 @@ render correctly with no network access at all.
 ```
 backend/    Django project — config/ (settings, urls) + accounts/ (the User model only, so far)
 mobile/     Expo app — app/ (screens), src/theme/ (tokens), src/api/ (the fetch wrapper)
-landing/    static landing page, copied in unmodified
+landing/    static landing page — the public front door; copied in unmodified at Step 1, since Step
+            8b wired its sign-up/login buttons at the running app (only those, see docs/STATUS.md)
 docs/       specs and design files, written as steps add them
 legacy/     a previous, larger multi-tenant build of a different EasyKharcha product — see below
 scripts/    dev.mjs (backend + app + landing page together), smoke.py (backend API proof), flow.mjs
             (browser end-to-end), check_backend.ps1 (backend lint/format/check), generate_icons.mjs
             (PWA icons), serve_web.mjs (serves the production web export locally), pwa_check.mjs
-            (offline/service-worker proof)
+            (offline/service-worker proof), lib/landing_server.mjs (shared by dev.mjs and flow.mjs)
 ```
 
 ## `legacy/`

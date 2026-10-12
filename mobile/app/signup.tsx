@@ -7,6 +7,7 @@ import { ApiError } from '../src/api/client';
 import { links } from '../src/config';
 import { strings } from '../src/strings';
 import {
+  BackToWebsiteLink,
   BottomActionBar,
   Checkbox,
   Heading,
@@ -180,6 +181,8 @@ export default function Signup() {
       </View>
 
       <InlineLink label={s.haveAccount} onPress={() => router.push('/login')} />
+
+      <BackToWebsiteLink />
 
       {/* Honeypot: invisible and unreachable by tab or screen reader. A real person never fills this
           in; a bot filling every field in the form (including this one) does. */}

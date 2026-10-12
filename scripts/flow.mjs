@@ -3,13 +3,14 @@
  * Drives a real browser against the actual running app (not direct API calls, unlike smoke.py) to
  * prove the frontend and backend are wired together end to end.
  *
- * Starts with the landing page and the root route, then four scenarios:
- *  0. The landing page's hero "Start free" button opens /signup; opening "/" signed out lands on
- *     /login.
+ * Starts with the root route, then four scenarios:
+ *  0. Opening the app root ("/") signed out ends on the landing page (a real cross-origin
+ *     navigation, not a route inside the app); its hero "Start free" button opens /signup.
  *  1. A fresh user: signup -> login -> all six wizard steps (step 2's colour preview checked live;
  *     step 5 adds a Helper with a PIN; step 6 uses the recommended settings) -> /setup/done (no
  *     "Still to do") -> /home (no "Finish setting up" card, onboarding is fully done) -> log out ->
- *     log in again -> lands on /home -> opening "/" again lands on /home too.
+ *     log in again -> lands on /home -> opening "/" again lands on /home too (signed in and
+ *     onboarded, "/" never sends you to the landing page) -> logging out lands on /login.
  *  2. A second, independent user who stops after step 1, logs out mid-wizard, and logs back in to
  *     confirm they resume at /setup/2.
  *  3. A third, independent user who fills steps 1-2 then skips 3, 4, 5 and 6 — confirms /setup/done
@@ -20,17 +21,24 @@
  *
  * Run with:  npm run flow
  *
- * Requires both dev servers already running — backend on :8000, Expo web on :8081 — and leaves them
- * running afterwards. Localhost only. Never prints a PIN or password — only pass/fail.
+ * Requires the backend and the Expo web dev server already running (:8000 and :8081) and leaves them
+ * running afterwards. Starts its own landing-page server on :8082 if nothing's already listening
+ * there (closed again at the end) — see scripts/lib/landing_server.mjs. Localhost only. Never prints
+ * a PIN or password — only pass/fail.
  */
 
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
 
+import { ensureLandingServer } from './lib/landing_server.mjs';
+
 const APP_URL = 'http://localhost:8081';
+// Must match mobile/src/config.ts's EXPO_PUBLIC_LANDING_URL default — the app itself decides where
+// "/" sends a signed-out visitor, this just has to be listening wherever that actually points.
+const LANDING_URL = 'http://localhost:8082';
 const TIMEOUT = 15_000;
-const SCREEN_DIR = 'docs/screens/step8b';
+const SCREEN_DIR = 'docs/screens/step8c';
 
 function findChrome() {
   const candidates = [
@@ -217,32 +225,35 @@ async function skipStep(page, fromStep, toPath) {
   console.log(`OK — skipped step ${fromStep}.`);
 }
 
-// Step 8b's route-map proof: the landing page and "/" (signed out, ending on /login), at a desktop
-// and a phone width.
-async function captureLandingAndRootScreens(page) {
-  const landingUrl = new URL('../landing/index.html', import.meta.url).href;
+// Step 8c's route-map proof: the landing page (hero) and /login (with its "Back to website" link),
+// at a desktop and a phone width.
+async function captureStep8cScreens(page) {
   for (const { width, height, suffix } of [
     { width: 1280, height: 900, suffix: '1280' },
     { width: 390, height: 844, suffix: '390' },
   ]) {
     await page.setViewport({ width, height });
 
-    await page.goto(landingUrl, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await page.goto(`${LANDING_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await page.screenshot({ path: `${SCREEN_DIR}/landing-${suffix}.png` });
 
-    await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-    await waitForPath(page, '/login');
-    await page.screenshot({ path: `${SCREEN_DIR}/root-login-${suffix}.png` });
+    await page.goto(`${APP_URL}/login`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Back to website');
+    await page.screenshot({ path: `${SCREEN_DIR}/login-${suffix}.png` });
   }
-  console.log(`OK — saved landing page and "/" screenshots at 1280px and 390px to ${SCREEN_DIR}/.`);
+  console.log(
+    `OK — saved landing page and /login screenshots at 1280px and 390px to ${SCREEN_DIR}/.`,
+  );
 }
 
-// Opened as a file:// page, not served — its "Start free" buttons point at an absolute URL
-// (SIGNUP_URL in landing/index.html's own script), so this works the same regardless of how the
-// landing page itself happens to be hosted.
-async function checkLandingHeroSignup(page) {
-  const landingUrl = new URL('../landing/index.html', import.meta.url).href;
-  await page.goto(landingUrl, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+// "/" is the public front door now (Step 8c): a signed-out visitor is sent to the landing page, a
+// full page navigation out of the app — not a route inside it, so this checks the real cross-origin
+// hop rather than anything client-side-routable.
+async function checkRootSignedOutToLanding(page) {
+  await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await retryUntil(async () => (await page.evaluate(() => location.href)).startsWith(LANDING_URL));
+  console.log('OK — opening the app root signed out ends on the landing page.');
+
   await (await findVisible(page, '#heroSignupLink')).click();
   await retryUntil(async () => (await page.evaluate(() => location.href)).includes('/signup'));
   console.log('OK — the landing page\'s hero "Start free" button opens /signup.');
@@ -251,23 +262,23 @@ async function checkLandingHeroSignup(page) {
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
+  // Reuses an already-running landing server (e.g. `npm run dev`) if one answers at that port;
+  // otherwise starts a throwaway one for the duration of this run — "/" won't have anywhere real to
+  // land without it.
+  const landingServer = await ensureLandingServer(8082);
 
   try {
     const page = await browser.newPage();
     page.on('pageerror', (err) => fail(`a JS error occurred in the page: ${err}`));
 
-    await captureLandingAndRootScreens(page);
+    await captureStep8cScreens(page);
 
     // Tall enough that every field on every wizard screen fits without scrolling — sidesteps both
     // react-native-web's internally-scrolling ScrollView (native scrollIntoView is a no-op for it)
     // and the sticky BottomActionBar occluding whatever sits directly above it.
     await page.setViewport({ width: 390, height: 3000 });
 
-    await checkLandingHeroSignup(page);
-
-    await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-    await waitForPath(page, '/login');
-    console.log('OK — opening "/" signed out lands on /login.');
+    await checkRootSignedOutToLanding(page);
 
     // === User 1: full flow through all six wizard steps ===
     const name = 'Flow Test';
@@ -377,6 +388,7 @@ async function main() {
     console.log('OK — opening "/" again while signed in and onboarded lands on /home.');
 
     await logoutFromAnywhere(page);
+    console.log('OK — logging out lands on /login.');
 
     // === User 2: stop after step 1, confirm resume at /setup/2 ===
     const name2 = 'Resume Test';
@@ -458,6 +470,7 @@ async function main() {
     throw err;
   } finally {
     await browser.close();
+    if (landingServer) landingServer.close();
   }
 }
 

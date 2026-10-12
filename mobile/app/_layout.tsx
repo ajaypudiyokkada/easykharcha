@@ -14,9 +14,8 @@ import { AuthProvider, useAuth } from '../src/auth/AuthContext';
 import { useOnlineStatus } from '../src/hooks/useOnlineStatus';
 import { registerServiceWorker } from '../src/pwa/registerServiceWorker';
 import { strings } from '../src/strings';
-import { Banner, Body, Button, Heading } from '../src/ui';
-import { MAX_CONTENT_WIDTH } from '../src/ui/constants';
-import { colours, spacing } from '../src/theme/tokens';
+import { Banner, OfflineRetry } from '../src/ui';
+import { colours } from '../src/theme/tokens';
 
 const s = strings.app;
 
@@ -82,13 +81,12 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
   if (status === 'offline') {
     return (
-      <View style={styles.gate}>
-        <View style={styles.gateContent}>
-          <Heading level={2}>{s.offlineGate.title}</Heading>
-          <Body style={styles.gateBody}>{s.offlineGate.body}</Body>
-          <Button label={s.offlineGate.retry} variant="primary" onPress={retryBootstrap} />
-        </View>
-      </View>
+      <OfflineRetry
+        title={s.offlineGate.title}
+        body={s.offlineGate.body}
+        retryLabel={s.offlineGate.retry}
+        onRetry={retryBootstrap}
+      />
     );
   }
 
@@ -113,20 +111,5 @@ function RootShell({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
-  },
-  gate: {
-    flex: 1,
-    backgroundColor: colours.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  gateContent: {
-    width: '100%',
-    maxWidth: MAX_CONTENT_WIDTH,
-    gap: spacing.lg,
-  },
-  gateBody: {
-    color: colours.muted,
   },
 });

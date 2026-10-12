@@ -8,11 +8,17 @@ export const strings = {
       body: "You're offline, so EasyKharcha can't confirm it's really you yet.",
       retry: 'Retry',
     },
+    landingOffline: {
+      title: "Can't reach the website",
+      body: "You're offline, so EasyKharcha can't open the main site right now.",
+      retry: 'Retry',
+    },
     notFound: {
       title: 'Page not found',
       body: "That page doesn't exist, or may have moved.",
       goHome: 'Go to Home',
     },
+    backToWebsite: 'Back to website',
   },
   signup: {
     title: 'Create your EasyKharcha account',

@@ -17,8 +17,9 @@ npm run dev
 ```
 
 Starts the backend (`http://127.0.0.1:8000`), the app (`http://localhost:8081`) and the landing page
-(`http://127.0.0.1:8082`) together, in one terminal, and prints all three URLs. Ctrl+C stops all three.
-See `scripts/dev.mjs`.
+(`http://127.0.0.1:8082`) together, in one terminal, and prints all three URLs — **open the landing
+page one**, `http://localhost:8082`, since that's the public front door (see "Landing page" below).
+Ctrl+C stops all three. See `scripts/dev.mjs`.
 
 ## Database
 
@@ -92,9 +93,11 @@ With **both** the backend and the mobile dev server (`npm run start`, port 8081)
 npm run flow
 ```
 
-Drives a real headless browser against the running app: signup → login → all six setup wizard steps →
-home, plus a second user who stops mid-wizard and resumes, a third who skips steps, and a team member
-logging in with a PIN. Proves the frontend and backend are wired together end to end.
+Drives a real headless browser against the running app: opening "/" signed out lands on the landing
+page, whose "Start free" button opens /signup → login → all six setup wizard steps → home, plus a
+second user who stops mid-wizard and resumes, a third who skips steps, and a team member logging in
+with a PIN. Proves the frontend and backend are wired together end to end. Starts its own throwaway
+landing-page server on :8082 if nothing's already there (closed again afterwards).
 
 ## Production build and PWA / offline check
 
@@ -120,6 +123,10 @@ recovers once back online. Screenshots land in `docs/screens/step8/`.
 
 ## Landing page
 
+The landing page is the **public front door** — a signed-out visitor who opens the app's own URL ("/")
+is sent there automatically, as a full page navigation (not a route inside the app). `/login` and
+`/signup` stay directly reachable, and both carry a quiet "Back to website" link back to it.
+
 `landing/index.html` is a static file — open it directly in a browser, no build step, or serve it at
 `http://127.0.0.1:8082` via `npm run dev` (above). Its "Start free" buttons (hero, nav, sticky mobile
 bar) and the nav's "Log in" link point at the running app — `SIGNUP_URL` / `LOGIN_URL` constants at the
@@ -127,3 +134,14 @@ top of its own `<script>`. The lead-capture form further down the page is separa
 
 Note: `npm run serve:web` (the production PWA build server, above) also defaults to port 8082 — it's a
 separate one-off command for `pwa-check`, not meant to run at the same time as `npm run dev`.
+
+### Two sites, two URLs — production setup
+
+The landing page and the app are two separate sites, each with its own production URL:
+
+1. **The app's own URL** — wherever `npm run build:web`'s export is actually deployed. Once that's
+   known, update `landing/index.html`'s `SIGNUP_URL` / `LOGIN_URL` constants to point at it (they
+   default to `http://localhost:8081/...` for local dev).
+2. **The landing page's own URL** — wherever `landing/index.html` is actually deployed. Set
+   `EXPO_PUBLIC_LANDING_URL` to it in `mobile/.env` (see `mobile/.env.example`) before building the
+   app, so a signed-out visitor is sent to the real site instead of `http://localhost:8082`.

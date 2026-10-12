@@ -35,6 +35,15 @@ not built yet.
   in"/etc. bar) was pinned flush to the left edge above 480px instead of staying in the centred column
   — `Screen.tsx`'s `barWrap` had `left`, `right` and `maxWidth` all set at once, which is
   over-constrained and resolves flush-left, not centred. See the route map below.
+- **Step 8c — Landing page is the public front door.** `/` no longer shows `/login` for a signed-out
+  web visitor — it sends them to the landing page instead, a full page navigation out of the app
+  (`EXPO_PUBLIC_LANDING_URL`, defaults to `http://localhost:8082`; native still goes straight to
+  `/login`, since there's no landing page there). `/login` and `/signup` both gained a quiet "Back to
+  website" link (web only). The redirect itself is offline-safe: if the device has no network, a
+  retry screen shows instead of handing the browser off to a dead navigation (reusing the same
+  `OfflineRetry` component the root layout's auth check already used). `npm run dev` now prints the
+  landing URL first. `landing/index.html` itself was not touched this step — only Step 8b's changes
+  are in it (verified against git history; see the Step 8c commit message for the diff).
 
 ## Route map
 
@@ -44,9 +53,9 @@ linked from the live app — developer-only tools, reachable only by typing the 
 
 | Screen | Route | Reached from | Leads to |
 |---|---|---|---|
-| Dispatcher (no UI) | `/` | Typing the URL; the landing page's old in-app links | Loading screen, then `/login` (signed out) or wherever `nextRouteAfterAuth` says a signed-in user belongs (`/home`, `/setup/<n>`, or `/setup/done`) |
-| Log in | `/login` | `/` when signed out; "New here? Create an account" on `/signup`; the landing page's "Log in" | On success, wherever `nextRouteAfterAuth` says; "New here?" → `/signup` |
-| Create account | `/signup` | "New here?" on `/login`; the landing page's "Start free" (hero, nav, sticky) | On success → `/login` (prefilled, with a banner); "Already have an account?" → `/login` |
+| Dispatcher (no UI) | `/` | Typing the URL | Loading screen, then: signed in → wherever `nextRouteAfterAuth` says (`/home`, `/setup/<n>`, or `/setup/done`); signed out on web → the landing page (`EXPO_PUBLIC_LANDING_URL`, a full page navigation out of the app); signed out on native → `/login`. Offline with no stored session → a retry screen, not a dead navigation. |
+| Log in | `/login` | The landing page's "Log in"; "New here? Create an account" on `/signup` | On success, wherever `nextRouteAfterAuth` says; "New here?" → `/signup`; "Back to website" (web only) → the landing page |
+| Create account | `/signup` | The landing page's "Start free" (hero, nav, sticky); "New here?" on `/login` | On success → `/login` (prefilled, with a banner); "Already have an account?" → `/login`; "Back to website" (web only) → the landing page |
 | Home | `/home` | Post-login/signup once onboarded; "Go to Home" on `/setup/done`; "Save and finish later" on any setup step | "Continue" on a skipped step in the checklist → `/setup/<n>`; "Log out" → `/login` |
 | Setup steps 1–6 | `/setup/1` … `/setup/6` | `nextRouteAfterAuth` resuming a wizard in progress; Next/Back between steps; `/home`'s "Finish setting up" checklist | Next step, previous step, `/home` ("finish later"), or `/setup/done` after step 6 |
 | Setup done | `/setup/done` | Finishing or skipping step 6 | "Go to Home" → `/home`; "Add today's opening stock" is disabled with a "Coming soon" label (stock tracking isn't built yet — see Not built yet) |

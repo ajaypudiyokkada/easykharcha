@@ -6,7 +6,16 @@ import { useAuth } from '../src/auth/AuthContext';
 import { ApiError } from '../src/api/client';
 import { nextRouteAfterAuth } from '../src/business/routing';
 import { strings } from '../src/strings';
-import { Banner, BottomActionBar, Heading, MobileField, Screen, Small, TextField } from '../src/ui';
+import {
+  BackToWebsiteLink,
+  Banner,
+  BottomActionBar,
+  Heading,
+  MobileField,
+  Screen,
+  Small,
+  TextField,
+} from '../src/ui';
 import { colours, fonts, spacing } from '../src/theme/tokens';
 
 const s = strings.login;
@@ -104,6 +113,8 @@ export default function Login() {
       </Pressable>
 
       <Small style={styles.hint}>{s.teamMemberHint}</Small>
+
+      <BackToWebsiteLink />
     </Screen>
   );
 }

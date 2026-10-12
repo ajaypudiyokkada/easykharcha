@@ -33,6 +33,9 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+  // Same-origin only — this also means the landing page can never be touched by this worker: it's
+  // served from a different origin (a different port in dev, a different domain in production), a
+  // page this service worker has no scope over and was never asked to fetch or cache.
   if (url.origin !== self.location.origin || isNeverCached(url)) return;
 
   event.respondWith(

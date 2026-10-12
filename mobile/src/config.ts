@@ -5,4 +5,7 @@
 export const links = {
   privacyUrl: process.env.EXPO_PUBLIC_PRIVACY_URL ?? '',
   termsUrl: process.env.EXPO_PUBLIC_TERMS_URL ?? '',
+  /** The public marketing site (landing/index.html) — web only; there's no equivalent on native, so
+   * callers must guard with Platform.OS === 'web' before using this. */
+  landingUrl: process.env.EXPO_PUBLIC_LANDING_URL ?? 'http://localhost:8082',
 } as const;
