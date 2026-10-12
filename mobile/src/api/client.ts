@@ -3,10 +3,20 @@
  * lives, how long to wait before giving up, and how to turn whatever went wrong into one typed shape.
  */
 
-const DEFAULT_API_URL = 'http://127.0.0.1:8000/api/v1';
 const TIMEOUT_MS = 10_000;
 
-export const API_URL: string = process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL;
+// On web, falls back to whatever host the page itself was loaded from (so opening the app at a LAN
+// IP — e.g. http://192.168.1.5:8081, printed by `npm run dev` — talks to the backend at that same
+// IP, with nothing hardcoded) rather than always 127.0.0.1, which from a phone means "this phone",
+// not the dev machine. Native has no `window`, so it keeps the previous hardcoded default.
+function defaultApiUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    return `http://${window.location.hostname}:8000/api/v1`;
+  }
+  return 'http://127.0.0.1:8000/api/v1';
+}
+
+export const API_URL: string = process.env.EXPO_PUBLIC_API_URL ?? defaultApiUrl();
 
 export type ApiErrorKind = 'network' | 'timeout' | 'server' | 'offline';
 

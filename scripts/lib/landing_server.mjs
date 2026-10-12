@@ -22,7 +22,9 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-/** Binds and returns the server — caller is responsible for closing it. Localhost only. */
+/** Binds and returns the server — caller is responsible for closing it. Listens on all interfaces
+ * (not just localhost) so a phone on the same Wi-Fi can reach it at this machine's LAN IP — see
+ * scripts/dev.mjs, which prints that address. */
 export function startLandingServer(port) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -42,7 +44,7 @@ export function startLandingServer(port) {
       res.end('Not found');
     }
   });
-  server.listen(port, '127.0.0.1');
+  server.listen(port);
   return server;
 }
 

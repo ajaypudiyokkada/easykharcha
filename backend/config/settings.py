@@ -152,3 +152,13 @@ CORS_ALLOWED_ORIGINS = env.list(
         "http://127.0.0.1:8082",
     ],
 )
+
+# Step 8d: lets a phone on the same Wi-Fi reach the dev server at this machine's LAN IP (printed by
+# `npm run dev`) without hardcoding that address anywhere. Private-network ranges only, and only in
+# DEBUG — never matched in a real deployment, where CORS_ALLOWED_ORIGINS above should be set instead.
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^http://192\.168\.\d{1,3}\.\d{1,3}:(8081|8082)$",
+        r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}:(8081|8082)$",
+        r"^http://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:(8081|8082)$",
+    ]

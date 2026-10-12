@@ -18,6 +18,7 @@ import {
   Small,
   TextField,
 } from '../src/ui';
+import { AUTH_CARD_WIDTH, MIN_TOUCH_TARGET } from '../src/ui/constants';
 import { colours, fonts, spacing, type } from '../src/theme/tokens';
 
 const s = strings.signup;
@@ -105,6 +106,7 @@ export default function Signup() {
 
   return (
     <Screen
+      maxWidth={AUTH_CARD_WIDTH}
       bottomBar={
         <BottomActionBar
           primaryLabel={s.submit}
@@ -199,7 +201,7 @@ export default function Signup() {
 
 function InlineLink({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="link" onPress={onPress}>
+    <Pressable accessibilityRole="link" style={styles.linkTap} onPress={onPress}>
       <Small style={styles.link}>{label}</Small>
     </Pressable>
   );
@@ -210,7 +212,7 @@ function LegalLink({ label, url }: { label: string; url: string }) {
     return <Small style={styles.legalLinkMuted}>{label}</Small>;
   }
   return (
-    <Pressable accessibilityRole="link" onPress={() => Linking.openURL(url)}>
+    <Pressable accessibilityRole="link" style={styles.linkTap} onPress={() => Linking.openURL(url)}>
       <Small style={styles.link}>{label}</Small>
     </Pressable>
   );
@@ -229,6 +231,10 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colours.danger,
     fontFamily: fonts.bodyExtraBold,
+  },
+  linkTap: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   link: {
     color: colours.primary,

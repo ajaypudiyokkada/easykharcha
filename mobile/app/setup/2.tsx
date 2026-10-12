@@ -11,6 +11,7 @@ import { BRAND_COLOUR_PRESETS } from '../../src/constants/brandColours';
 import { strings } from '../../src/strings';
 import { bestTextOn, ensureContrast } from '../../src/theme/brand';
 import { BottomActionBar, Body, Icon, Muted, Screen, Small, StepHeader } from '../../src/ui';
+import { MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
@@ -157,8 +158,29 @@ export default function SetupStepTwo() {
 
   const previewTextColour = bestTextOn(colour);
 
+  const preview = (
+    <View style={styles.field}>
+      <Body style={styles.label}>{s2.previewLabel}</Body>
+      <View style={styles.phone}>
+        <View style={[styles.phoneHeader, { backgroundColor: colour }]}>
+          {logoUri ? (
+            <Image source={{ uri: logoUri }} style={styles.phoneLogo} />
+          ) : (
+            <View style={styles.phoneLogoPlaceholder} />
+          )}
+          <Body style={[styles.phoneName, { color: previewTextColour }]}>{existing.name}</Body>
+        </View>
+        <View style={styles.phoneBody}>
+          <Muted size="sm">Today&rsquo;s stock</Muted>
+        </View>
+      </View>
+    </View>
+  );
+
   return (
     <Screen
+      maxWidth={WIZARD_CONTENT_WIDTH}
+      aside={preview}
       bottomBar={
         <BottomActionBar
           primaryLabel={s.next}
@@ -255,28 +277,11 @@ export default function SetupStepTwo() {
           <Muted size="sm">{s2.colourAdjustedNotice}</Muted>
         ) : null}
       </View>
-
-      <View style={styles.field}>
-        <Body style={styles.label}>{s2.previewLabel}</Body>
-        <View style={styles.phone}>
-          <View style={[styles.phoneHeader, { backgroundColor: colour }]}>
-            {logoUri ? (
-              <Image source={{ uri: logoUri }} style={styles.phoneLogo} />
-            ) : (
-              <View style={styles.phoneLogoPlaceholder} />
-            )}
-            <Body style={[styles.phoneName, { color: previewTextColour }]}>{existing.name}</Body>
-          </View>
-          <View style={styles.phoneBody}>
-            <Muted size="sm">Today&rsquo;s stock</Muted>
-          </View>
-        </View>
-      </View>
     </Screen>
   );
 }
 
-const SWATCH_SIZE = 40;
+const SWATCH_SIZE = MIN_TOUCH_TARGET;
 
 const styles = StyleSheet.create({
   loading: {
@@ -329,7 +334,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   logoButton: {
-    minHeight: 40,
+    minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
   logoButtonText: {

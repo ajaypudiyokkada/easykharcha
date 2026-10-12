@@ -9,6 +9,7 @@ import { getOnboardingBusiness } from '../../src/business/routing';
 import { DEFAULT_BUSINESS_SETTINGS } from '../../src/constants/businessSettings';
 import { strings } from '../../src/strings';
 import { BottomActionBar, Body, Button, Icon, Screen, StepHeader, TextField } from '../../src/ui';
+import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
@@ -153,6 +154,7 @@ export default function SetupStepSix() {
 
   return (
     <Screen
+      maxWidth={WIZARD_CONTENT_WIDTH}
       bottomBar={
         <BottomActionBar
           primaryLabel={s.next}

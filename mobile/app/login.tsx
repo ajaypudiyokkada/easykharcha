@@ -16,6 +16,7 @@ import {
   Small,
   TextField,
 } from '../src/ui';
+import { AUTH_CARD_WIDTH, MIN_TOUCH_TARGET } from '../src/ui/constants';
 import { colours, fonts, spacing } from '../src/theme/tokens';
 
 const s = strings.login;
@@ -78,6 +79,7 @@ export default function Login() {
 
   return (
     <Screen
+      maxWidth={AUTH_CARD_WIDTH}
       bottomBar={
         <BottomActionBar
           primaryLabel={s.submit}
@@ -108,7 +110,11 @@ export default function Login() {
         error={passwordError}
       />
 
-      <Pressable accessibilityRole="link" onPress={() => router.push('/signup')}>
+      <Pressable
+        accessibilityRole="link"
+        style={styles.linkTap}
+        onPress={() => router.push('/signup')}
+      >
         <Small style={styles.link}>{s.newHere}</Small>
       </Pressable>
 
@@ -125,6 +131,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colours.background,
+  },
+  linkTap: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   link: {
     color: colours.primary,

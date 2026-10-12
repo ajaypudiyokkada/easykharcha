@@ -19,6 +19,8 @@ import {
   TextField,
   Toggle,
 } from '../../src/ui';
+import { useMinWidth } from '../../src/hooks/useMinWidth';
+import { BREAKPOINT_DESKTOP, MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
@@ -48,6 +50,7 @@ export default function SetupStepThree() {
   const router = useRouter();
   const { status, businesses, authedFetch, refreshMe } = useAuth();
   const onboardingBusiness = getOnboardingBusiness(businesses);
+  const twoColumns = useMinWidth(BREAKPOINT_DESKTOP);
 
   const [starterPack, setStarterPack] = useState<StarterPack | null>(null);
   const [tickedStarter, setTickedStarter] = useState<Record<string, boolean>>({});
@@ -239,6 +242,7 @@ export default function SetupStepThree() {
 
   return (
     <Screen
+      maxWidth={WIZARD_CONTENT_WIDTH}
       bottomBar={
         <BottomActionBar
           primaryLabel={s.next}
@@ -380,37 +384,42 @@ export default function SetupStepThree() {
       {ownItems.length > 0 ? (
         <View style={styles.field}>
           <Body style={styles.sectionLabel}>{s3.addedItems}</Body>
-          {ownItems.map((item, index) => (
-            <View key={`${item.name}-${index}`} style={styles.itemRow}>
-              <View style={styles.itemRowCopy}>
-                <Body style={styles.itemRowName}>{item.name}</Body>
-                <Small style={styles.itemRowMeta}>
-                  {item.unit}
-                  {item.shared ? ' · shared' : ''}
-                  {item.goesOff ? ' · goes off' : ''}
-                </Small>
-                {ownItemErrors[index] ? (
-                  <Small style={styles.formErrorText}>{ownItemErrors[index]}</Small>
-                ) : null}
+          <View style={twoColumns ? styles.itemGrid : styles.field}>
+            {ownItems.map((item, index) => (
+              <View
+                key={`${item.name}-${index}`}
+                style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}
+              >
+                <View style={styles.itemRowCopy}>
+                  <Body style={styles.itemRowName}>{item.name}</Body>
+                  <Small style={styles.itemRowMeta}>
+                    {item.unit}
+                    {item.shared ? ' · shared' : ''}
+                    {item.goesOff ? ' · goes off' : ''}
+                  </Small>
+                  {ownItemErrors[index] ? (
+                    <Small style={styles.formErrorText}>{ownItemErrors[index]}</Small>
+                  ) : null}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s3.edit} ${item.name}`}
+                  onPress={() => handleEditItem(index)}
+                  style={styles.itemAction}
+                >
+                  <Icon name="edit" size={18} colour={colours.primary} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s3.remove} ${item.name}`}
+                  onPress={() => handleRemoveItem(index)}
+                  style={styles.itemAction}
+                >
+                  <Icon name="delete" size={18} colour={colours.danger} />
+                </Pressable>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${s3.edit} ${item.name}`}
-                onPress={() => handleEditItem(index)}
-                style={styles.itemAction}
-              >
-                <Icon name="edit" size={18} colour={colours.primary} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${s3.remove} ${item.name}`}
-                onPress={() => handleRemoveItem(index)}
-                style={styles.itemAction}
-              >
-                <Icon name="delete" size={18} colour={colours.danger} />
-              </Pressable>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
       ) : null}
     </Screen>
@@ -454,7 +463,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   unitChip: {
-    minHeight: 40,
+    minHeight: MIN_TOUCH_TARGET,
     paddingHorizontal: spacing.lg,
     justifyContent: 'center',
     borderWidth: 2,
@@ -485,6 +494,11 @@ const styles = StyleSheet.create({
     color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
   },
+  itemGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -494,8 +508,15 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
   },
+  // Two per row at 900px+ — a percentage width, not a fixed pixel one, so it still shrinks cleanly
+  // with the wrapping `itemGrid` gap rather than overflowing it.
+  itemRowHalf: {
+    flexBasis: '48%',
+    minWidth: 0,
+  },
   itemRowCopy: {
     flex: 1,
+    minWidth: 0,
     gap: spacing.xs,
   },
   itemRowName: {
@@ -505,8 +526,8 @@ const styles = StyleSheet.create({
     color: colours.muted,
   },
   itemAction: {
-    width: 36,
-    height: 36,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

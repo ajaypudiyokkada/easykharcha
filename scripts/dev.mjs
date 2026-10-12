@@ -12,6 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,6 +28,17 @@ const VENV_PYTHON = join(ROOT, '.venv', 'Scripts', 'python.exe');
 function fail(message) {
   console.error(`FAIL: ${message}`);
   process.exit(1);
+}
+
+// The first non-internal IPv4 address — good enough for "which Wi-Fi am I on" on a dev machine with
+// one active network adapter. Never hardcoded: read fresh every run, so it's correct on any network.
+function findLanAddress() {
+  for (const addrs of Object.values(networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === 'IPv4' && !addr.internal) return addr.address;
+    }
+  }
+  return null;
 }
 
 function prefixedPipe(child, label) {
@@ -49,15 +61,26 @@ async function main() {
     fail(`no venv at ${VENV_PYTHON} — see README for the setup commands.`);
   }
 
+  const lan = findLanAddress();
+
   console.log('Starting EasyKharcha:');
   console.log('  Landing:  http://127.0.0.1:8082/   <- Open this one: http://localhost:8082');
   console.log('  App:      http://localhost:8081/');
   console.log('  Backend:  http://127.0.0.1:8000/api/v1/');
+  if (lan) {
+    console.log('');
+    console.log('  On your phone (same Wi-Fi):');
+    console.log(`  Landing:  http://${lan}:8082/`);
+    console.log(`  App:      http://${lan}:8081/`);
+  } else {
+    console.log('');
+    console.log('  (no LAN network address found — phone testing needs this machine on Wi-Fi/Ethernet)');
+  }
   console.log('');
 
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-  const backend = spawn(VENV_PYTHON, ['manage.py', 'runserver', '127.0.0.1:8000'], {
+  const backend = spawn(VENV_PYTHON, ['manage.py', 'runserver', '0.0.0.0:8000'], {
     cwd: BACKEND_DIR,
     env: { ...process.env, DJANGO_SETTINGS_MODULE: 'config.settings' },
     stdio: ['ignore', 'pipe', 'pipe'],

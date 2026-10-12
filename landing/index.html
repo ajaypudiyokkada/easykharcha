@@ -39,9 +39,9 @@
     .label:before{content:"";width:10px;height:10px;border-radius:50%;background:var(--highlight)}
     .btn{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:13px 22px;border:0;border-radius:999px;background:var(--primary);color:var(--card);font-weight:800;text-decoration:none;cursor:pointer}
     .btn:hover{transform:translateY(-1px)}
-    .topbar{display:none;position:sticky;top:0;z-index:40;background:var(--background);border-bottom:2px solid var(--mint)}
+    .topbar{display:block;position:sticky;top:0;z-index:40;background:var(--background);border-bottom:2px solid var(--mint)}
     .topbar .inner{height:74px;display:flex;align-items:center;justify-content:space-between}
-    .wordmark{color:var(--text);text-decoration:none;font-size:1.3rem;font-weight:700}
+    .wordmark{display:inline-flex;align-items:center;min-height:44px;color:var(--text);text-decoration:none;font-size:1.3rem;font-weight:700}
     .hero{padding:30px 0 68px;overflow:hidden}
     .hero-grid{display:grid;gap:38px;align-items:center}
     .tag{display:inline-block;background:var(--highlight);color:var(--text);border-radius:999px;padding:8px 14px;font-weight:800;margin-bottom:18px}
@@ -78,8 +78,8 @@
     .mini-head{border-radius:18px;padding:14px;min-height:88px;color:var(--text)}.fomo .mini-head{background:var(--fomo-teak)}.bakery .mini-head{background:var(--bakery-pink)}
     .mini-brand{font-family:"Poppins";font-weight:700}.mini-sub{font-size:.78rem;margin-top:4px}.mini-body{display:grid;gap:9px;padding-top:11px}
     .mini-chip{border-radius:12px;padding:11px;font-size:.78rem;font-weight:800;color:var(--text)}.fomo .mini-chip{background:var(--fomo-blue)}.bakery .mini-chip{background:var(--background)}
-    .mini-label{text-align:center;font-weight:800;font-size:.9rem}
-    .who{background:var(--background)}.intro{max-width:760px}.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:28px}
+    .mini-label{text-align:center;font-weight:800;font-size:1rem}
+    .who{background:var(--background)}.intro{max-width:760px}.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:28px}
     .tile{background:var(--card);border:2px solid var(--mint);border-radius:var(--r2);padding:18px;min-height:150px;font-weight:800}
     .tile .iconbox{margin-bottom:12px}.tile:nth-child(3n+2) .iconbox{background:var(--highlight);color:var(--text)}.tile:nth-child(3n+3) .iconbox{background:var(--secondary);color:var(--text)}
     .story{background:var(--secondary);position:relative;overflow:hidden}.story:before{content:"";position:absolute;width:220px;height:220px;border-radius:50%;background:var(--highlight);right:-70px;top:-70px}
@@ -92,6 +92,7 @@
     .privacy{color:var(--muted);font-size:.95rem}
     .form-warning{background:var(--highlight);color:var(--text);padding:12px 14px;border-radius:14px;font-weight:800;margin-bottom:18px}
     .consent{display:flex;align-items:flex-start;gap:10px;font-weight:700}
+    .consent a{padding:11px 0;display:inline-block}
     .consent input{width:22px;height:22px;min-height:22px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--primary)}
     .send-error{display:none;background:var(--danger);color:var(--card);padding:12px 14px;border-radius:14px;font-weight:800}
     .send-error.show{display:block}
@@ -101,13 +102,13 @@
     .faq{background:var(--mint)}.faq-list{display:grid;gap:12px}details{background:var(--card);border-radius:var(--r2);padding:0 18px}
     summary{list-style:none;min-height:62px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:16px;font-weight:800}
     summary::-webkit-details-marker{display:none}summary:after{content:"+";color:var(--primary);font:700 1.45rem "Poppins"}details[open] summary:after{content:"–"}details p{padding:0 0 18px;margin-top:0}
-    footer{background:var(--text);color:var(--card);padding:48px 0 100px}.footer-grid{display:grid;gap:22px}.footer-word{font:700 1.45rem "Poppins"}.footer-tag{font-weight:800;margin-top:6px}.footer-meta{display:grid;gap:8px}footer a{color:var(--card)}
+    footer{background:var(--text);color:var(--card);padding:48px 0 100px}.footer-grid{display:grid;gap:22px}.footer-word{font:700 1.45rem "Poppins"}.footer-tag{font-weight:800;margin-top:6px}.footer-meta{display:grid;gap:8px}footer a{display:inline-flex;align-items:center;min-height:44px;color:var(--card)}
     .sticky{position:fixed;z-index:60;left:0;right:0;bottom:0;background:var(--card);padding:10px 16px;border-top:2px solid var(--mint)}.sticky .btn{width:100%}
-    .nav-actions{display:flex;align-items:center;gap:18px}.nav-login{font-weight:800;color:var(--text);text-decoration:none}
+    .nav-actions{display:none;align-items:center;gap:18px}.nav-login{display:inline-flex;align-items:center;min-height:44px;font-weight:800;color:var(--text);text-decoration:none}
     @media(min-width:760px){
-      .topbar{display:block}.hero{padding:72px 0 88px}.hero-grid{grid-template-columns:1.05fr .95fr;gap:52px}.section{padding:96px 0}
+      .nav-actions{display:flex}.hero{padding:72px 0 88px}.hero-grid{grid-template-columns:1.05fr .95fr;gap:52px}.section{padding:96px 0}
       .steps{grid-template-columns:repeat(3,1fr);gap:22px}.steps:before{content:"";position:absolute;top:48px;left:15%;right:15%;height:4px;background:var(--highlight)}
-      .benefit-grid{grid-template-columns:repeat(3,1fr)}.tiles{grid-template-columns:repeat(4,1fr)}.signup-grid{grid-template-columns:.85fr 1.15fr;align-items:start}
+      .benefit-grid{grid-template-columns:repeat(3,1fr)}.tiles{grid-template-columns:repeat(4,minmax(0,1fr))}.signup-grid{grid-template-columns:.85fr 1.15fr;align-items:start}
       .form-shell{padding:30px}.footer-grid{grid-template-columns:1fr auto;align-items:end}.sticky{display:none}footer{padding-bottom:48px}
     }
     @media(min-width:1020px){.problem-lines{grid-template-columns:repeat(3,1fr)}.problem-line{min-height:170px;display:flex;align-items:center}.brand .container{display:grid;grid-template-columns:1fr .9fr;gap:64px;align-items:center}.mockups{margin-top:0}}

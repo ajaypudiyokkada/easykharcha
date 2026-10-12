@@ -19,7 +19,8 @@ npm run dev
 Starts the backend (`http://127.0.0.1:8000`), the app (`http://localhost:8081`) and the landing page
 (`http://127.0.0.1:8082`) together, in one terminal, and prints all three URLs — **open the landing
 page one**, `http://localhost:8082`, since that's the public front door (see "Landing page" below).
-Ctrl+C stops all three. See `scripts/dev.mjs`.
+It also prints this machine's LAN address (e.g. `http://192.168.1.5:8081`) for testing on a real
+phone — see "Testing on a real phone" below. Ctrl+C stops all three. See `scripts/dev.mjs`.
 
 ## Database
 
@@ -73,6 +74,19 @@ npm run check
 Runs backend lint + format check + `manage.py check` + migrations check, then mobile lint + format
 check + type check. Each half can also be run on its own: `npm run check:backend`,
 `npm run check:mobile`.
+
+## Responsive check
+
+With the backend and the mobile dev server running (same prerequisite as the flow test, below):
+
+```powershell
+npm run responsive
+```
+
+Headless browser checks of every screen at seven widths (320–1920px): no horizontal overflow, no
+touch target under 44px, no text under 15px (16px for inputs), nothing hidden behind a sticky bottom
+bar. Prints a table of any failures and saves one screenshot per screen/width to
+`docs/screens/step8d/`. See `docs/RESPONSIVE_AUDIT.md` for what it found before Step 8d's fixes.
 
 ## Smoke test
 
@@ -145,3 +159,23 @@ The landing page and the app are two separate sites, each with its own productio
 2. **The landing page's own URL** — wherever `landing/index.html` is actually deployed. Set
    `EXPO_PUBLIC_LANDING_URL` to it in `mobile/.env` (see `mobile/.env.example`) before building the
    app, so a signed-out visitor is sent to the real site instead of `http://localhost:8082`.
+
+## Testing on a real phone
+
+`npm run dev` prints this machine's LAN address alongside the usual `localhost` ones — open that
+address on a phone connected to the same Wi-Fi (e.g. `http://192.168.1.5:8081` for the app,
+`http://192.168.1.5:8082` for the landing page). Nothing is hardcoded to make this work:
+
+- The backend binds to `0.0.0.0`, not just `127.0.0.1`, so it accepts connections from other devices
+  on the network.
+- The app's API base URL (`mobile/src/api/client.ts`) defaults to whatever host the page itself was
+  loaded from — opening the app at a LAN IP talks to the backend at that same IP automatically, with
+  no manual configuration.
+- The backend's dev-only CORS config (`backend/config/settings.py`) allows any private-network IP
+  (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`) on ports 8081/8082, so the browser doesn't block the
+  app's requests to the backend.
+
+**The service worker (Step 8's offline support) only works on `localhost` or over HTTPS** — a browser
+security restriction, not a bug here. Opening the app at a plain `http://` LAN IP on a phone will work
+for everything except offline mode and the "add to home screen" install prompt; testing those for real
+needs either `localhost` (so only this machine, not a phone) or a real HTTPS deployment.

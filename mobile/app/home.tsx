@@ -6,6 +6,7 @@ import { useAuth } from '../src/auth/AuthContext';
 import { bestTextOn, ensureContrast } from '../src/theme/brand';
 import { strings } from '../src/strings';
 import { Body, Button, Card, Heading, Muted, Screen, Small } from '../src/ui';
+import { HOME_CONTENT_WIDTH } from '../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../src/theme/tokens';
 
 const s = strings.home;
@@ -61,7 +62,7 @@ export default function Home() {
   }
 
   return (
-    <Screen>
+    <Screen maxWidth={HOME_CONTENT_WIDTH}>
       {isOwner && business ? (
         <View style={[styles.brandHeader, { backgroundColor: brandColour }]}>
           {business.logo ? <Image source={{ uri: business.logo }} style={styles.logo} /> : null}

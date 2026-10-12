@@ -9,6 +9,7 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { strings } from '../../src/strings';
 import { Banner, Body, Button, Heading, Icon, Muted, Screen, Small } from '../../src/ui';
+import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup.done;
@@ -71,7 +72,7 @@ export default function SetupDone() {
   const skippedSteps = business.skipped_steps.map((step) => stepTitles[step] ?? `Step ${step}`);
 
   return (
-    <Screen>
+    <Screen maxWidth={WIZARD_CONTENT_WIDTH}>
       <Heading level={1}>{s.title}</Heading>
 
       {completeError ? <Banner kind="error">{completeError}</Banner> : null}

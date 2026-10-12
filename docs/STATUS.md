@@ -44,6 +44,16 @@ not built yet.
   `OfflineRetry` component the root layout's auth check already used). `npm run dev` now prints the
   landing URL first. `landing/index.html` itself was not touched this step — only Step 8b's changes
   are in it (verified against git history; see the Step 8c commit message for the diff).
+- **Step 8d — Mobile-first responsive design.** Audited every screen at seven widths (320–1920px;
+  see `docs/RESPONSIVE_AUDIT.md`) and fixed everything found: a CSS grid overflow in the landing
+  page's "who it's for" tiles at 320px, half a dozen sub-44px touch targets (nav/footer links, quiet
+  text links, colour/unit/role chips), the landing page showing no wordmark at all on phones, and
+  every app screen using the same flat 480px-wide column regardless of viewport (a thin strip on a
+  big screen above ~600px). Screens now get purpose-built widths — auth 440px, wizard 640px (steps 2
+  and 5 show their preview/role-info panel beside the form at 1024px+), home 720px — and stock/sell/
+  team lists go two columns at 900px+. `npm run dev` now also prints this machine's LAN address (the
+  backend binds `0.0.0.0`; the app's API base URL and the backend's dev CORS config both key off the
+  requesting origin, nothing hardcoded) for testing on a real phone. New `npm run responsive` check.
 
 ## Route map
 

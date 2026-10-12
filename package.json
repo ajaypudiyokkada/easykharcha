@@ -8,6 +8,7 @@
     "check:mobile": "npm --prefix mobile run check",
     "smoke": "python scripts/smoke.py",
     "flow": "node scripts/flow.mjs",
+    "responsive": "node scripts/responsive_check.mjs",
     "icons": "node scripts/generate_icons.mjs",
     "pwa-check": "node scripts/pwa_check.mjs",
     "build:web": "npm --prefix mobile run build:web && node scripts/patch_web_shell.mjs",

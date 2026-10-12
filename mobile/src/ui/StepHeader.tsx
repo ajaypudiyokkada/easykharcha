@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colours, fonts, radii, spacing, type } from '../theme/tokens';
-import { PROGRESS_BAR_HEIGHT } from './constants';
+import { MIN_TOUCH_TARGET, PROGRESS_BAR_HEIGHT } from './constants';
 import { Icon } from './Icon';
 import { Small } from './Text';
 
@@ -39,7 +39,7 @@ export function StepHeader({ current, total, onBack, onSaveForLater }: Props) {
         </View>
 
         {onSaveForLater ? (
-          <Pressable accessibilityRole="link" onPress={onSaveForLater}>
+          <Pressable accessibilityRole="link" onPress={onSaveForLater} style={styles.saveLinkTap}>
             <Small style={styles.saveLink}>Save and continue later</Small>
           </Pressable>
         ) : null}
@@ -85,6 +85,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.heading,
     fontSize: type.md,
     color: colours.text,
+  },
+  // A bare text Pressable has no touch target of its own beyond its glyph box — this pads it to the
+  // 44px floor without changing how the link itself looks.
+  saveLinkTap: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   saveLink: {
     color: colours.primary,

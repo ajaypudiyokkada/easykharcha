@@ -17,6 +17,8 @@ import {
   StepHeader,
   TextField,
 } from '../../src/ui';
+import { useMinWidth } from '../../src/hooks/useMinWidth';
+import { BREAKPOINT_DESKTOP, MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
@@ -42,6 +44,7 @@ export default function SetupStepFive() {
   const router = useRouter();
   const { status, businesses, authedFetch, refreshMe } = useAuth();
   const onboardingBusiness = getOnboardingBusiness(businesses);
+  const twoColumns = useMinWidth(BREAKPOINT_DESKTOP);
 
   const [addedPeople, setAddedPeople] = useState<PersonDraft[]>([]);
   const [personErrors, setPersonErrors] = useState<Record<number, string>>({});
@@ -209,8 +212,21 @@ export default function SetupStepFive() {
     }
   }
 
+  const roleInfo = (
+    <View style={styles.field}>
+      {ROLES.map((role) => (
+        <View key={role} style={styles.roleRow}>
+          <Body style={styles.roleName}>{roleLabel(role, business.business_type)}</Body>
+          <Small style={styles.roleDescription}>{roleDescription(role)}</Small>
+        </View>
+      ))}
+    </View>
+  );
+
   return (
     <Screen
+      maxWidth={WIZARD_CONTENT_WIDTH}
+      aside={roleInfo}
       bottomBar={
         <BottomActionBar
           primaryLabel={s.next}
@@ -238,15 +254,6 @@ export default function SetupStepFive() {
           <Body style={styles.formErrorText}>{submitError}</Body>
         </View>
       ) : null}
-
-      <View style={styles.field}>
-        {ROLES.map((role) => (
-          <View key={role} style={styles.roleRow}>
-            <Body style={styles.roleName}>{roleLabel(role, business.business_type)}</Body>
-            <Small style={styles.roleDescription}>{roleDescription(role)}</Small>
-          </View>
-        ))}
-      </View>
 
       <View style={styles.field}>
         <TextField
@@ -347,35 +354,40 @@ export default function SetupStepFive() {
       {addedPeople.length > 0 ? (
         <View style={styles.field}>
           <Body style={styles.sectionLabel}>{s5.addedPeople}</Body>
-          {addedPeople.map((person, index) => (
-            <View key={`${person.mobile}-${index}`} style={styles.personRow}>
-              <View style={styles.personRowCopy}>
-                <Body style={styles.personRowName}>{person.name}</Body>
-                <Small style={styles.personRowMeta}>
-                  {roleLabel(person.role, business.business_type)} · {maskMobile(person.mobile)}
-                </Small>
-                {personErrors[index] ? (
-                  <Small style={styles.formErrorText}>{personErrors[index]}</Small>
-                ) : null}
+          <View style={twoColumns ? styles.personGrid : styles.field}>
+            {addedPeople.map((person, index) => (
+              <View
+                key={`${person.mobile}-${index}`}
+                style={[styles.personRow, twoColumns ? styles.personRowHalf : null]}
+              >
+                <View style={styles.personRowCopy}>
+                  <Body style={styles.personRowName}>{person.name}</Body>
+                  <Small style={styles.personRowMeta}>
+                    {roleLabel(person.role, business.business_type)} · {maskMobile(person.mobile)}
+                  </Small>
+                  {personErrors[index] ? (
+                    <Small style={styles.formErrorText}>{personErrors[index]}</Small>
+                  ) : null}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s5.edit} ${person.name}`}
+                  onPress={() => handleEditPerson(index)}
+                  style={styles.personAction}
+                >
+                  <Icon name="edit" size={18} colour={colours.primary} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s5.remove} ${person.name}`}
+                  onPress={() => handleRemovePerson(index)}
+                  style={styles.personAction}
+                >
+                  <Icon name="delete" size={18} colour={colours.danger} />
+                </Pressable>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${s5.edit} ${person.name}`}
-                onPress={() => handleEditPerson(index)}
-                style={styles.personAction}
-              >
-                <Icon name="edit" size={18} colour={colours.primary} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${s5.remove} ${person.name}`}
-                onPress={() => handleRemovePerson(index)}
-                style={styles.personAction}
-              >
-                <Icon name="delete" size={18} colour={colours.danger} />
-              </Pressable>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
       ) : null}
     </Screen>
@@ -435,7 +447,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   roleChip: {
-    minHeight: 40,
+    minHeight: MIN_TOUCH_TARGET,
     paddingHorizontal: spacing.lg,
     justifyContent: 'center',
     borderWidth: 2,
@@ -481,6 +493,11 @@ const styles = StyleSheet.create({
     color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
   },
+  personGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   personRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -490,8 +507,15 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
   },
+  // Two per row at 900px+ — a percentage width, not a fixed pixel one, so it still shrinks cleanly
+  // with the wrapping `personGrid` gap rather than overflowing it.
+  personRowHalf: {
+    flexBasis: '48%',
+    minWidth: 0,
+  },
   personRowCopy: {
     flex: 1,
+    minWidth: 0,
     gap: spacing.xs,
   },
   personRowName: {
@@ -501,8 +525,8 @@ const styles = StyleSheet.create({
     color: colours.muted,
   },
   personAction: {
-    width: 36,
-    height: 36,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

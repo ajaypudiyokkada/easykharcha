@@ -4,6 +4,7 @@ import { Platform, Pressable, StyleSheet } from 'react-native';
 import { links } from '../config';
 import { strings } from '../strings';
 import { colours, fonts } from '../theme/tokens';
+import { MIN_TOUCH_TARGET } from './constants';
 import { Small } from './Text';
 
 /**
@@ -17,6 +18,7 @@ export function BackToWebsiteLink() {
   return (
     <Pressable
       accessibilityRole="link"
+      style={styles.tap}
       onPress={() => {
         window.location.href = links.landingUrl;
       }}
@@ -27,6 +29,12 @@ export function BackToWebsiteLink() {
 }
 
 const styles = StyleSheet.create({
+  // A bare text Pressable has no touch target beyond its glyph box — padded to the 44px floor
+  // without changing how the link itself looks.
+  tap: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+  },
   link: {
     color: colours.muted,
     fontFamily: fonts.body,

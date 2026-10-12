@@ -13,8 +13,9 @@ web first. Development is on Windows with PowerShell — every command and scrip
   `node -e`, never a PowerShell here-string, never an inline throwaway script.
 - **Light checking only.** No test suites. The only checks are: lint, type check, formatting, Django's
   own `check` and `makemigrations --check`, the smoke script (backend API) and flow script (browser
-  end-to-end) that prove the frontend and backend work together, and the pwa-check script that proves
-  the offline/service-worker behaviour. Keep it fast.
+  end-to-end) that prove the frontend and backend work together, the pwa-check script that proves the
+  offline/service-worker behaviour, and the responsive script that checks every screen at seven widths.
+  Keep it fast.
 - **Don't add scope.** Build exactly what the current step asks for, nothing it doesn't mention. Flag
   gaps and open questions instead of guessing past them.
 - **Don't push to git.** Local commits are fine when asked for; nothing leaves this machine on its own.
@@ -32,14 +33,16 @@ render correctly with no network access at all.
 ```
 backend/    Django project — config/ (settings, urls) + accounts/ (the User model only, so far)
 mobile/     Expo app — app/ (screens), src/theme/ (tokens), src/api/ (the fetch wrapper)
-landing/    static landing page — the public front door; copied in unmodified at Step 1, since Step
-            8b wired its sign-up/login buttons at the running app (only those, see docs/STATUS.md)
+landing/    static landing page — the public front door; copied in unmodified at Step 1. Step 8b
+            wired its sign-up/login buttons at the running app; Step 8d adjusted only its layout and
+            responsive CSS (mobile-first, touch targets, a slim mobile header) — see docs/STATUS.md
 docs/       specs and design files, written as steps add them
 legacy/     a previous, larger multi-tenant build of a different EasyKharcha product — see below
 scripts/    dev.mjs (backend + app + landing page together), smoke.py (backend API proof), flow.mjs
             (browser end-to-end), check_backend.ps1 (backend lint/format/check), generate_icons.mjs
             (PWA icons), serve_web.mjs (serves the production web export locally), pwa_check.mjs
-            (offline/service-worker proof), lib/landing_server.mjs (shared by dev.mjs and flow.mjs)
+            (offline/service-worker proof), responsive_check.mjs (checks every screen at seven
+            widths), lib/landing_server.mjs (shared by dev.mjs, flow.mjs and responsive_check.mjs)
 ```
 
 ## `legacy/`
