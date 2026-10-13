@@ -22,9 +22,17 @@ type NavItem = {
   icon: IconName;
   href: string;
   /** Undefined means "always shown to anyone who reaches the shell at all" — Home/Reports and the
-   * not-yet-built Sales/Wastage/Alerts placeholders don't have a permission to check yet. */
-  permission?: string;
+   * not-yet-built Sales/Wastage/Alerts placeholders don't have a permission to check yet. An array
+   * means "any one of these" — Team is visible to both the Owner (team.manage) and the Manager
+   * (team.view), who see different things once they're there. */
+  permission?: string | string[];
 };
+
+function hasNavPermission(permissions: string[], required: string | string[] | undefined): boolean {
+  if (!required) return true;
+  const list = Array.isArray(required) ? required : [required];
+  return list.some((permission) => can(permissions, permission));
+}
 
 function navItems(
   s: typeof strings.nav,
@@ -62,7 +70,13 @@ function navItems(
         permission: 'wastage.view_all',
       },
       { key: 'alerts', label: s.alerts, icon: 'alert', href: '/alerts' },
-      { key: 'team', label: s.team, icon: 'team', href: '/team', permission: 'team.manage' },
+      {
+        key: 'team',
+        label: s.team,
+        icon: 'team',
+        href: '/team',
+        permission: ['team.manage', 'team.view'],
+      },
       {
         key: 'settings',
         label: s.settings,
@@ -96,10 +110,8 @@ export function AppShell({ active, children }: Props) {
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
   const { primary, more } = navItems(strings.nav, isLimitedRole(permissions));
-  const visiblePrimary = primary.filter(
-    (item) => !item.permission || can(permissions, item.permission),
-  );
-  const visibleMore = more.filter((item) => !item.permission || can(permissions, item.permission));
+  const visiblePrimary = primary.filter((item) => hasNavPermission(permissions, item.permission));
+  const visibleMore = more.filter((item) => hasNavPermission(permissions, item.permission));
 
   function go(href: string) {
     setMoreOpen(false);

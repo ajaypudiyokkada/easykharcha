@@ -43,6 +43,7 @@ const SCREEN_DIR = 'docs/screens/step8c';
 const STEP9_SCREEN_DIR = 'docs/screens/step9';
 const STEP10_SCREEN_DIR = 'docs/screens/step10';
 const STEP12_SCREEN_DIR = 'docs/screens/step12';
+const STEP13_SCREEN_DIR = 'docs/screens/step13';
 
 function findChrome() {
   const candidates = [
@@ -675,6 +676,76 @@ async function checkSettingsFlow(page) {
   );
 }
 
+// Step 13: Owner -> Team -> opens the Helper -> resets their PIN (toast) -> removes them from the
+// team via the confirmation dialog -> the list updates. Run late in the flow, once nothing further
+// depends on the wizard-created Helper still existing.
+async function checkTeamManagementFlow(page, helperName) {
+  await page.goto(`${APP_URL}/team`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Team');
+  await waitForText(page, helperName);
+  console.log('OK — Owner opens Team; the Helper is listed.');
+
+  await (await findVisible(page, `[aria-label="${helperName}"]`)).click();
+  await waitForText(page, 'Team member');
+  await waitForText(page, helperName);
+  console.log('OK — opened the Helper\'s member detail.');
+
+  await clickButton(page, 'Reset PIN');
+  await waitForText(page, 'Reset PIN?');
+  await typeInto(page, 'New PIN', '4821');
+  await clickButton(page, 'Reset PIN', { last: true });
+  await waitForText(page, 'PIN reset');
+  console.log('OK — reset the Helper\'s PIN; toast confirms the save.');
+
+  await clickButton(page, 'Remove from team');
+  await waitForText(page, `Remove ${helperName} from the team?`);
+  await clickButton(page, 'Remove from team', { last: true });
+  await waitForPath(page, '/team');
+  const afterRemoveText = await page.evaluate(() => document.body.innerText);
+  if (afterRemoveText.includes(helperName)) {
+    fail(`${helperName} should no longer appear in the Team list after being removed`);
+  }
+  console.log('OK — removed the Helper via the confirmation dialog; the Team list updates.');
+}
+
+// Required screenshots at 390px only: Team list, Member detail, Reset PIN sheet, Remove dialog.
+// Uses the Head chef (never removed anywhere else in this script) rather than the Helper above, so
+// this has no ordering dependency on checkTeamManagementFlow — the Remove dialog is opened and
+// then cancelled, purely for the screenshot.
+async function captureStep13Screens(page, ownerMobile, ownerPassword, headChefName) {
+  await mkdir(STEP13_SCREEN_DIR, { recursive: true });
+  await page.setViewport({ width: 390, height: 3000 });
+
+  // captureStep12Screens (run just before this) leaves the page signed in on /settings/alerts, not
+  // on /login — log out first so `login()` below has the mobile/password fields to type into.
+  await logoutFromAnywhere(page);
+  await login(page, ownerMobile, ownerPassword);
+  await waitForPath(page, '/home');
+
+  await page.goto(`${APP_URL}/team`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Team');
+  await waitForText(page, headChefName);
+  await page.screenshot({ path: `${STEP13_SCREEN_DIR}/team-list-390.png` });
+
+  await (await findVisible(page, `[aria-label="${headChefName}"]`)).click();
+  await waitForText(page, 'Team member');
+  await page.screenshot({ path: `${STEP13_SCREEN_DIR}/member-detail-390.png` });
+
+  await clickButton(page, 'Reset PIN');
+  await waitForText(page, 'Reset PIN?');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP13_SCREEN_DIR}/reset-pin-sheet-390.png` });
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+
+  await clickButton(page, 'Remove from team');
+  await waitForText(page, `Remove ${headChefName} from the team?`);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP13_SCREEN_DIR}/remove-dialog-390.png` });
+  await clickButton(page, 'Keep them');
+
+  console.log(`OK — saved Step 13 screenshots at 390px to ${STEP13_SCREEN_DIR}/.`);
+}
+
 // Required screenshots at 390px only: Settings hub, What you buy, edit sheet, Alert rules.
 async function captureStep12Screens(page, ownerMobile, ownerPassword) {
   await mkdir(STEP12_SCREEN_DIR, { recursive: true });
@@ -938,10 +1009,12 @@ async function main() {
     await logoutFromAnywhere(page);
     await checkCountReviewAndWastageFlow(page, mobile, password);
     await checkSettingsFlow(page);
+    await checkTeamManagementFlow(page, 'Helper One');
     await logoutFromAnywhere(page);
 
     await captureStep10Screens(page);
     await captureStep12Screens(page, mobile, password);
+    await captureStep13Screens(page, mobile, password, 'Chef Rahul');
 
     console.log('\nAll flow checks passed.');
   } catch (err) {

@@ -50,6 +50,13 @@ an active sell item still uses it as the main item -> deactivating that sell ite
 item, both succeed -> a sell item's uses_qty is saved once it has a main stock item, and rejected
 without one -> a Manager gets 403 on every one of these PATCHes -> audit rows exist for the stock and
 sell item updates.
+
+Then the Step 13 team reset flow: a weak PIN is rejected on reset -> resetting a Helper's PIN
+invalidates the old PIN and their old refresh token, and the new PIN works -> Helper <-> Head chef
+role changes need no secret -> changing to Manager without a secret is rejected, and succeeds once
+one is given -> removing a member drops their access to the business but their account still exists
+-> the Owner can't reset or remove their own Owner access -> a Manager gets 403 on reset, role
+change, and remove, but can still view the team list.
 """
 
 import binascii
@@ -531,6 +538,214 @@ def check_team_flow() -> None:
     print("OK — the complete endpoint sets onboarding_completed_at once steps 1-2 are done and 3-6 are done or skipped.")
 
 
+def check_team_reset_flow() -> None:
+    _, owner_access, _ = signup_and_login("Reset Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Reset Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"team reset flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=owner_access)
+    if status != 200:
+        fail(f"team reset flow: list expected 200, got {status} ({body})")
+    owner_access_id = next(row["id"] for row in body if row["role"] == "owner")
+
+    # a Helper with a PIN
+    helper_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    helper_pin = "7392"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {"name": "Reset Helper", "mobile": helper_mobile, "role": "helper", "secret": helper_pin},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"team reset flow: add helper expected 201, got {status} ({body})")
+    helper_access_id = body["id"]
+
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": helper_mobile, "secret": helper_pin}
+    )
+    if status != 200:
+        fail(f"team reset flow: helper login expected 200, got {status} ({body})")
+    helper_refresh = body["refresh"]
+
+    # weak PIN rejected on reset
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/{helper_access_id}/reset-secret/",
+        {"secret": "1111"},
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"team reset flow: weak PIN reset expected a validation error, got {status} ({body})")
+    print("OK — a weak PIN is rejected on reset.")
+
+    # reset the Helper's PIN
+    new_pin = "5810"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/{helper_access_id}/reset-secret/",
+        {"secret": new_pin},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"team reset flow: reset PIN expected 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": helper_mobile, "secret": helper_pin}
+    )
+    if status == 200:
+        fail("team reset flow: old PIN should no longer work after reset")
+    status, body, _ = request("POST", "/auth/login/", {"mobile": helper_mobile, "secret": new_pin})
+    if status != 200:
+        fail(f"team reset flow: new PIN should work, got {status} ({body})")
+    status, body, _ = request("POST", "/auth/refresh/", {"refresh": helper_refresh})
+    if status == 200:
+        fail("team reset flow: the Helper's old refresh token should be rejected after reset")
+    print("OK — resetting a PIN invalidates the old PIN and the old refresh token, and the new PIN works.")
+
+    # Helper <-> Head chef role changes freely, no secret needed
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/team/{helper_access_id}/",
+        {"role": "head_chef"},
+        token=owner_access,
+    )
+    if status != 200 or body.get("role") != "head_chef":
+        fail(f"team reset flow: Helper -> Head chef expected 200, got {status} ({body})")
+    print("OK — changing Helper to Head chef needs no secret.")
+
+    # crossing into Manager without a secret is rejected
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/team/{helper_access_id}/",
+        {"role": "manager"},
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"team reset flow: role change to Manager without secret expected a validation error, got {status} ({body})")
+
+    # ... but succeeds with a password
+    manager_password = f"Kharcha{random.randint(1000, 9999)}!"
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/team/{helper_access_id}/",
+        {"role": "manager", "secret": manager_password},
+        token=owner_access,
+    )
+    if status != 200 or body.get("role") != "manager":
+        fail(f"team reset flow: role change to Manager with a password expected 200, got {status} ({body})")
+    print("OK — changing to Manager without a secret is rejected, and succeeds once one is given.")
+
+    # remove the member: their login to this business fails, but the user account still exists
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/team/{helper_access_id}/", token=owner_access
+    )
+    if status != 204:
+        fail(f"team reset flow: remove member expected 204, got {status} ({body})")
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": helper_mobile, "secret": manager_password}
+    )
+    if status != 200:
+        fail(f"team reset flow: removed member's account should still exist, got {status} ({body})")
+    removed_access = body["access"]
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/team/", token=removed_access
+    )
+    if status not in (403, 404):
+        fail(f"team reset flow: removed member's access to the business expected 403/404, got {status} ({body})")
+    print("OK — removing a member drops their access to this business, but their account still exists.")
+
+    # the Owner cannot reset or remove their own Owner access
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/{owner_access_id}/reset-secret/",
+        {"secret": "whatever"},
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"team reset flow: Owner reset-self expected a validation error, got {status} ({body})")
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/team/{owner_access_id}/", token=owner_access
+    )
+    if status not in (400, 422):
+        fail(f"team reset flow: Owner remove-self expected a validation error, got {status} ({body})")
+    print("OK — the Owner cannot reset or remove their own Owner access.")
+
+    # a Manager gets 403 on reset, role change, and remove
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {
+            "name": "Reset Head Chef",
+            "mobile": random.choice("6789") + "".join(random.choices("0123456789", k=9)),
+            "role": "head_chef",
+            "secret": "6204",
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"team reset flow: add second head chef expected 201, got {status} ({body})")
+    target_access_id = body["id"]
+
+    manager_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    manager_password2 = f"Kharcha{random.randint(1000, 9999)}!"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {
+            "name": "Reset Manager",
+            "mobile": manager_mobile,
+            "role": "manager",
+            "secret": manager_password2,
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"team reset flow: add manager expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": manager_mobile, "secret": manager_password2}
+    )
+    if status != 200:
+        fail(f"team reset flow: manager login expected 200, got {status} ({body})")
+    manager_access = body["access"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/{target_access_id}/reset-secret/",
+        {"secret": "9183"},
+        token=manager_access,
+    )
+    if status != 403:
+        fail(f"team reset flow: manager reset-secret expected 403, got {status} ({body})")
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/team/{target_access_id}/",
+        {"role": "helper"},
+        token=manager_access,
+    )
+    if status != 403:
+        fail(f"team reset flow: manager role change expected 403, got {status} ({body})")
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/team/{target_access_id}/", token=manager_access
+    )
+    if status != 403:
+        fail(f"team reset flow: manager remove expected 403, got {status} ({body})")
+    print("OK — a Manager gets 403 on reset, role change, and remove.")
+
+    # but a Manager can still see the team list (team.view)
+    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=manager_access)
+    if status != 200:
+        fail(f"team reset flow: manager list view expected 200, got {status} ({body})")
+    print("OK — a Manager can still view the team list.")
+
+
 def check_auth_flow() -> None:
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
     name = "Smoke Test"
@@ -889,6 +1104,7 @@ def check_purchase_flow() -> None:
         "counts.review",
         "wastage.view_all",
         "wastage.view_value",
+        "team.view",
     }
     if set(manager_business.get("permissions", [])) != expected_manager:
         fail(
@@ -1475,6 +1691,7 @@ def main() -> None:
     check_business_flow()
     check_stock_flow()
     check_team_flow()
+    check_team_reset_flow()
     check_purchase_flow()
     check_count_and_wastage_flow()
     check_settings_flow()

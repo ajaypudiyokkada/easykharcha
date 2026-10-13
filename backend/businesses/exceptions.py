@@ -29,3 +29,15 @@ class CannotRemoveSelf(APIException):
     status_code = 422
     default_detail = "You can't remove your own Owner access."
     default_code = "CANNOT_REMOVE_SELF"
+
+
+class CannotResetSelf(APIException):
+    status_code = 422
+    default_detail = "You can't reset your own Owner access."
+    default_code = "CANNOT_RESET_SELF"
+
+
+class CannotChangeOwnerRole(APIException):
+    status_code = 422
+    default_detail = "Owner role can't be changed here."
+    default_code = "CANNOT_CHANGE_OWNER_ROLE"

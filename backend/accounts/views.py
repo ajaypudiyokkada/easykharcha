@@ -115,7 +115,8 @@ class LoginView(APIView):
 
         user.failed_login_count = 0
         user.locked_until = None
-        user.save(update_fields=["failed_login_count", "locked_until"])
+        user.last_login = timezone.now()
+        user.save(update_fields=["failed_login_count", "locked_until", "last_login"])
         return Response(_tokens_for(user))
 
 

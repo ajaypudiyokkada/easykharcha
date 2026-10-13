@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .business_settings import BusinessSettingsView
-from .team import TeamListCreateView, TeamMemberDetailView
+from .team import TeamListCreateView, TeamMemberDetailView, TeamResetSecretView
 from .views import (
     BusinessCreateView,
     BusinessLogoView,
@@ -36,6 +36,11 @@ urlpatterns = [
         "businesses/<int:business_id>/team/<int:access_id>/",
         TeamMemberDetailView.as_view(),
         name="team-detail",
+    ),
+    path(
+        "businesses/<int:business_id>/team/<int:access_id>/reset-secret/",
+        TeamResetSecretView.as_view(),
+        name="team-reset-secret",
     ),
     path(
         "businesses/<int:business_id>/settings/",

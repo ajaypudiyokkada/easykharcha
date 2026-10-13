@@ -27,8 +27,14 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `GET businesses/<id>/onboarding/` — OnboardingListView — wizard step states
 - `PATCH businesses/<id>/onboarding/<step>/` — OnboardingStepView — save or skip one step
 - `POST businesses/<id>/onboarding/complete/` — OnboardingCompleteView — mark wizard done
-- `GET/POST businesses/<id>/team/` — TeamListCreateView — list team, add a member
-- `PATCH/DELETE businesses/<id>/team/<access_id>/` — TeamMemberDetailView — edit/remove a member
+- `GET/POST businesses/<id>/team/` — TeamListCreateView — list team (team.manage or team.view), add
+  a member (team.manage); list includes `last_login_at`/`added_at` per member
+- `PATCH/DELETE businesses/<id>/team/<access_id>/` — TeamMemberDetailView — edit role (Helper/Head
+  chef swap freely; crossing the Manager boundary needs a new `secret` in the same request) / remove
+  a member (blacklists their refresh tokens)
+- `POST businesses/<id>/team/<access_id>/reset-secret/` — TeamResetSecretView — Owner resets a
+  member's PIN/password, blacklists their refresh tokens, clears lockout; refused for the caller's
+  own Owner access, never logs the secret
 - `GET/PATCH businesses/<id>/settings/` — BusinessSettingsView — deadlines, cost target, alert %s
 - `GET starter-packs/<business_type>/` — StarterPackView — suggested stock/sell items by type
 - `GET businesses/<id>/stock-items/` — StockItemListView — `?include_inactive=1` for Settings
@@ -69,7 +75,9 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `count.tsx` — Blind stock count form (opening or closing)
 - `counts/index.tsx` — Count review list (Owner/Manager), remind sheet
 - `counts/[id].tsx` — Count detail, flagged items first
-- `reports.tsx`, `sales.tsx`, `alerts.tsx`, `team.tsx` — ComingSoonScreen stubs
+- `reports.tsx`, `sales.tsx`, `alerts.tsx` — ComingSoonScreen stubs
+- `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
+  — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
   edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — list +
   add/edit sheet (StockItemForm/SellItemForm) screens; `settings/alerts.tsx` — the 5 alert settings
@@ -116,6 +124,9 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
 - `screens/ComingSoonScreen.tsx` — shared stub for Reports/Sales/Alerts/Team/Settings
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx` — the two shared record sheets
+- `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
+  a member, change role (asks for a new secret only when crossing the Manager boundary), reset a
+  PIN/password
 - `screens/StockItemSheet.tsx`, `SellItemSheet.tsx` — Settings' add/edit sheets (list screen owns
   the list, these own the form + save)
 - `forms/StockItemForm.tsx`, `SellItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared
@@ -145,7 +156,7 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 | Role | Permissions |
 |---|---|
 | Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete |
-| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value |
+| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view |
 | Head chef | counts.create, counts.status, wastage.create/view_all |
 | Helper | counts.create, wastage.create/view_own |
 

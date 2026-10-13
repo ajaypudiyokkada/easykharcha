@@ -40,6 +40,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "counts.review",
             "wastage.view_all",
             "wastage.view_value",
+            "team.view",
         }
     ),
     AccessRole.HEAD_CHEF: frozenset(

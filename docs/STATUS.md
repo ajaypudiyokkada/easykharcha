@@ -87,6 +87,11 @@ not built yet.
   Brand, What you buy, What you sell, Alert rules), sharing one form component each with the setup
   wizard (`StockItemForm`/`SellItemForm`/`BusinessForm`/`BrandForm`). Stock item detail gained an
   "Edit item" button for the Owner.
+- **Step 13 — Team screen, member detail, reset PIN or password.** New `POST team/<id>/reset-secret/`
+  (Owner-only, blacklists the member's refresh tokens, clears lockout, never logs the secret); role
+  changes between Helper/Head chef are free, crossing the Manager boundary needs a new secret in the
+  same PATCH. New `team.view` permission (Manager, list/detail only). `GET team/` now returns
+  `last_login_at`/`added_at`. New Team list and member detail screens, replacing the Team stub.
 
 ## Permission table
 
@@ -103,6 +108,7 @@ unilaterally:
 | `purchases.delete` | yes | no | no | no |
 | `stock.view` | yes | yes | no | no |
 | `team.manage` | yes | no | no | no |
+| `team.view` | yes (implied) | yes | no | no |
 | `settings.manage` | yes | no | no | no |
 | `stockitems.manage` | yes | no | no | no |
 | `sellitems.manage` | yes | no | no | no |
@@ -159,8 +165,8 @@ both say so in the UI.
 
 - **OTP provider** — signup/login use a password/PIN only; no SMS OTP integration.
 - **Forgot password** — no reset flow of any kind.
-- **PIN change and forced password change** — a team member's PIN and an owner's password can be set
-  once (signup, add-team) but never changed afterwards; no forced-change-on-first-login flow.
+- **Forced change on first login** — `must_change_password` is set and cleared by the Owner's
+  add/reset/role-change flows, but nothing in the login flow actually prompts a Manager to change it.
 - **Account screen** — no screen to change your own password, or to request account deletion.
 - **Logo delete** — a business logo can be uploaded and replaced, but not removed back to no logo.
 - **Per-process rate limiting across multiple workers** — the current rate limiter is in-process memory;

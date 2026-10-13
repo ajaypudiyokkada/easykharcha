@@ -552,6 +552,13 @@ async function buildOwnerSession(page) {
   await waitForText(page, 'Count detail');
   const countDetailPath = await page.evaluate(() => location.pathname);
 
+  // Step 13: Team member detail, so /team/[id] has a real page to check too.
+  await page.goto(`${APP_URL}/team`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Team');
+  await (await findVisible(page, '[aria-label="Helper One"]')).click();
+  await waitForText(page, 'Team member');
+  const teamMemberPath = await page.evaluate(() => location.pathname);
+
   const tokens = await page.evaluate(() => ({
     access: localStorage.getItem('easykharcha.access'),
     refresh: localStorage.getItem('easykharcha.refresh'),
@@ -566,6 +573,7 @@ async function buildOwnerSession(page) {
     purchasePath,
     stockItemPath,
     countDetailPath,
+    teamMemberPath,
   };
 }
 
@@ -784,6 +792,7 @@ async function main() {
       purchasePath,
       stockItemPath,
       countDetailPath,
+      teamMemberPath,
     } = await buildOwnerSession(setupPage);
     await setupPage.close();
     console.log('Setting up a Helper session...');
@@ -820,6 +829,7 @@ async function main() {
       { name: 'wastage', url: `${APP_URL}/wastage` },
       { name: 'alerts', url: `${APP_URL}/alerts` },
       { name: 'team', url: `${APP_URL}/team` },
+      { name: 'team-detail', url: `${APP_URL}${teamMemberPath}` },
       { name: 'settings', url: `${APP_URL}/settings` },
       // Step 12
       { name: 'settings-business', url: `${APP_URL}/settings/business` },
@@ -962,6 +972,34 @@ async function main() {
           await waitForText(page, 'What you sell');
           await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
           await waitForText(page, 'Edit item sold');
+        },
+      },
+      // Step 13
+      {
+        name: 'sheet-add-team-member',
+        url: `${APP_URL}/team`,
+        open: async (page) => {
+          await waitForText(page, 'Team');
+          await clickButton(page, 'Add team member');
+          await waitForText(page, 'Add team member');
+        },
+      },
+      {
+        name: 'sheet-reset-pin',
+        url: `${APP_URL}${teamMemberPath}`,
+        open: async (page) => {
+          await waitForText(page, 'Team member');
+          await clickButton(page, 'Reset PIN');
+          await waitForText(page, 'Reset PIN?');
+        },
+      },
+      {
+        name: 'dialog-remove-member',
+        url: `${APP_URL}${teamMemberPath}`,
+        open: async (page) => {
+          await waitForText(page, 'Team member');
+          await clickButton(page, 'Remove from team');
+          await waitForText(page, 'from the team?');
         },
       },
     ];
