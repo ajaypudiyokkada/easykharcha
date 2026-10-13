@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "counts",
     "wastage",
     "sales",
+    "alerts",
 ]
 
 MIDDLEWARE = [

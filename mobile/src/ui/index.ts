@@ -1,4 +1,5 @@
 export { AppShell, type NavKey } from './AppShell';
+export { Avatar } from './Avatar';
 export { BackToWebsiteLink } from './BackToWebsiteLink';
 export { Banner, type BannerKind } from './Banner';
 export { BottomActionBar } from './BottomActionBar';

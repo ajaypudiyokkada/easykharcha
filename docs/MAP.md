@@ -1,6 +1,6 @@
 # Repo map
 
-One line per item. Current as of Step 14. Backend API prefix on every endpoint below: `/api/v1/`.
+One line per item. Current as of Step 15. Backend API prefix on every endpoint below: `/api/v1/`.
 
 ## Backend apps (backend/)
 
@@ -8,11 +8,12 @@ One line per item. Current as of Step 14. Backend API prefix on every endpoint b
 - `audit/` — one audit-log row per write; models.py (AuditLog), log.py (log_action helper), no endpoints
 - `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business, Access, AccessRole), views.py, team.py, business_settings.py, permissions.py (the role→permission table), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py, urls.py
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
-- `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, config.py (unusual-value guard constants), exceptions.py, urls.py
+- `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
 - `stock/` — stock items, sell items; models.py (StockItem, SellItem), views.py, serializers.py, exceptions.py, urls.py
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
+- `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
 
@@ -59,13 +60,15 @@ One line per item. Current as of Step 14. Backend API prefix on every endpoint b
   `gap_qty`, `gap_value`, `gap_status`, `gap_reason` (Step 14) — never sent to Head chef/Helper,
   who can't reach this endpoint at all (no `counts.review`)
 - `POST businesses/<id>/counts/remind/` — CountRemindView — Owner-only, returns a wa.me link
-- `GET businesses/<id>/today/` — TodayView — opening/closing state, deadlines, wastage count
+- `GET businesses/<id>/today/` — TodayView — opening/closing state, deadlines, wastage count, `alerts_count` (Owner/Manager only)
 - `GET/POST businesses/<id>/wastage/` — WastageListCreateView — role-scoped values
 - `DELETE businesses/<id>/wastage/<entry_id>/` — WastageDetailView — Owner-only
 - `GET/POST businesses/<id>/sales/` — SaleListCreateView — list (newest first, paginated, date-range
   filter) + summary (sales today, items sold today, last update, last 7 days); POST takes one
   business_date and 1-30 lines (sell_item, quantity, optional amount)
 - `DELETE businesses/<id>/sales/<sid>/` — SaleDetailView — Owner-only, soft-delete
+- `GET businesses/<id>/alerts/` — AlertListView — `?type=` filter; open (unchecked) alerts + per-type/total counts
+- `POST businesses/<id>/alerts/check/` — AlertCheckView — `{key}`, hides the alert until its key changes
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
@@ -87,7 +90,10 @@ One line per item. Current as of Step 14. Backend API prefix on every endpoint b
 - `counts/[id].tsx` — Count detail: gap-flagged items first, then not-sure/confirmed-unusual, then
   the rest; Owner/Manager lines show expected used and the gap (qty + Rs value), red when flagged; a
   not_comparable line shows a one-line reason linking to What you sell or Sales for that date
-- `reports.tsx`, `alerts.tsx` — ComingSoonScreen stubs
+- `reports.tsx` — ComingSoonScreen stub
+- `alerts/index.tsx` — Alerts (Owner/Manager): filter chips (type + count), severity-coloured list;
+  `alerts/[key].tsx` — detail: plain-language detail line, the numbers, primary next action, "Mark
+  as checked"
 - `sales.tsx` — Sales (Owner/Manager): summary strip, "Record sales", a date switcher, today's sales,
   Owner-only delete via confirmation dialog
 - `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
@@ -100,7 +106,9 @@ One line per item. Current as of Step 14. Backend API prefix on every endpoint b
 
 ## Components in src/ui/ (barrel: src/ui/index.ts)
 
-- `AppShell.tsx` — bottom tab bar (phone) / side nav (≥840px) + "More" sheet, role-aware items
+- `AppShell.tsx` — bottom tab bar (phone) / side nav (≥840px) + "More" sheet, role-aware items; also
+  the top bar avatar (phone) / user block (desktop side nav) that opens the profile sheet
+- `Avatar.tsx` — initials circle, the only avatar anywhere in the app (no profile photos)
 - `BackToWebsiteLink.tsx` — link back to the marketing landing page
 - `Banner.tsx` — inline error/success/warning strip
 - `BottomActionBar.tsx` — sticky bottom action bar (wizard Next/Save)
@@ -129,15 +137,18 @@ One line per item. Current as of Step 14. Backend API prefix on every endpoint b
 
 ## Shared state / cross-cutting (mobile/src/)
 
-- `auth/AuthContext.tsx` — signed-in user, businesses list, tokens, authedFetch, login/logout/refresh
+- `auth/AuthContext.tsx` — signed-in user, businesses list, tokens, authedFetch, login/logout/refresh,
+  setActiveBusiness (moves a business to the front of the list — "Switch business")
 - `auth/permissions.ts` — `can(permissions, 'x.y')`, `isLimitedRole(permissions)`
 - `auth/storage.ts` — access/refresh token persistence (SecureStore on native, localStorage on web)
 - `api/client.ts` — fetch wrapper: base URL, timeout, typed ApiError
-- `api/{auth,business,stock,purchases,counts,wastage,team,sales}.ts` — one typed client per backend
-  resource
+- `api/{auth,business,stock,purchases,counts,wastage,team,sales,alerts}.ts` — one typed client per
+  backend resource
 - `business/routing.ts` — where to send a signed-in user (wizard step vs /home)
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
-- `screens/ComingSoonScreen.tsx` — shared stub for Reports/Sales/Alerts/Team/Settings
+- `screens/ComingSoonScreen.tsx` — shared stub for Reports/Team/Settings
+- `screens/ProfileSheet.tsx` — name/role/business, Switch business (if >1), Account (coming soon),
+  Log out — the only place Log out lives now, opened from AppShell's avatar/user block
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx`, `RecordSalesSheet.tsx` — the shared
   record sheets
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
@@ -171,8 +182,8 @@ One line per item. Current as of Step 14. Backend API prefix on every endpoint b
 
 | Role | Permissions |
 |---|---|
-| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete, sales.view/create/delete |
-| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view, sales.view/create |
+| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete, sales.view/create/delete, alerts.view/check |
+| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view, sales.view/create, alerts.view/check |
 | Head chef | counts.create, counts.status, wastage.create/view_all |
 | Helper | counts.create, wastage.create/view_own |
 

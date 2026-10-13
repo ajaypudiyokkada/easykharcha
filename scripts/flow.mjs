@@ -45,6 +45,7 @@ const STEP10_SCREEN_DIR = 'docs/screens/step10';
 const STEP12_SCREEN_DIR = 'docs/screens/step12';
 const STEP13_SCREEN_DIR = 'docs/screens/step13';
 const STEP14_SCREEN_DIR = 'docs/screens/step14';
+const STEP15_SCREEN_DIR = 'docs/screens/step15';
 
 function findChrome() {
   const candidates = [
@@ -216,21 +217,22 @@ async function waitForPreviewColour(page, businessName, expectedHex) {
   );
 }
 
-// Signs the current user out via /home (the only screen with a Log out button) regardless of which
-// screen they're actually on — needed between scenarios, since /login bounces a signed-in user
-// straight to /home.
+// Signs the current user out via the profile sheet (Step 15: the only place Log out lives now)
+// regardless of which screen they're actually on — needed between scenarios, since /login bounces a
+// signed-in user straight to /home.
 async function logoutFromAnywhere(page) {
   await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await clickAndSettle(await findVisible(page, '[aria-label="Open profile menu"]'));
   await clickButton(page, 'Log out');
   await waitForPath(page, '/login');
 }
 
-/** Pushes this business's opening-count deadline late in the day (direct API call, same trick
- * already used elsewhere in this script and in responsive_check.mjs to force a count *late* by
- * setting closing_count_hour to 0) — the opposite adjustment, so the opening count this flow is
- * about to submit stays "not_started" (not already "late") regardless of what time of day this
- * script happens to run. Without it, checkOwnerOpeningCount's assertions about the *first*
- * submission being "done" would depend on running before the default 11 AM deadline. */
+/** Pushes both count deadlines late in the day (direct API call, same trick used elsewhere in this
+ * script and in responsive_check.mjs to force a count *late* by setting an hour to 0) — the
+ * opposite adjustment, so neither the opening count this flow is about to submit nor the closing
+ * count it hasn't submitted yet reads as already "late" regardless of what time of day this script
+ * happens to run. Without it, checkOwnerOpeningCount's assertions that the opening count is "done"
+ * and the closing one is still just "due by" a time would depend on running before 11 AM/8 PM. */
 async function keepOpeningCountNotLate(page) {
   const access = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
   const me = await fetch(`${API_BASE}/me/`, { headers: { Authorization: `Bearer ${access}` } }).then(
@@ -240,7 +242,7 @@ async function keepOpeningCountNotLate(page) {
   await fetch(`${API_BASE}/businesses/${businessId}/settings/`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ count_deadline_hour: 23 }),
+    body: JSON.stringify({ count_deadline_hour: 23, closing_count_hour: 23 }),
   });
 }
 
@@ -430,6 +432,15 @@ async function assertNoForbiddenText(page, { allowUsual = false } = {}) {
   }
 }
 
+// Step 15: Log out moved into the profile sheet for every role — Home itself must never show a
+// standalone "Log out" button again.
+async function assertNoStandaloneLogoutButton(page) {
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  if (bodyText.includes('Log out')) {
+    fail(`Home should have no standalone "Log out" button (${page.url()})`);
+  }
+}
+
 // Step 10: the Helper signs in, sees the Today screen, submits the closing stock count (one value
 // deliberately unusual against the Owner's opening baseline, exercising the confirm-guard), then
 // records wastage and sees it under "My entries today".
@@ -438,6 +449,7 @@ async function checkHelperTodayFlow(page, helperMobile, helperPin) {
   await waitForPath(page, '/home');
   await waitForText(page, 'Good evening,');
   await assertNoForbiddenText(page);
+  await assertNoStandaloneLogoutButton(page);
   console.log('OK — the Helper signs in and sees the Today screen.');
 
   await (await findVisible(page, '[aria-label="Count stock"]')).click();
@@ -483,6 +495,7 @@ async function checkHeadChefTodayFlow(page, headChefMobile, headChefPin) {
   await waitForText(page, 'Good evening,');
   await waitForText(page, 'Entries today');
   await assertNoForbiddenText(page);
+  await assertNoStandaloneLogoutButton(page);
   console.log('OK — the Head chef signs in and sees the team Today screen.');
 }
 
@@ -496,6 +509,7 @@ async function checkManagerHomeFlow(page, managerMobile, managerPassword) {
   if (bodyText.includes('Start stock count')) {
     fail('a Manager should not see "Start stock count" on Home — they have no counts.create permission');
   }
+  await assertNoStandaloneLogoutButton(page);
   console.log('OK — the Manager signs in and Home has no "Start stock count" button.');
 }
 
@@ -865,6 +879,58 @@ async function captureStep14Screens(page) {
   console.log(`OK — saved Step 14 screenshots at 390px to ${STEP14_SCREEN_DIR}/.`);
 }
 
+// Step 15: Home's real "Needs attention" (the flagged Fresh Paneer gap checkSalesFlow just proved
+// exists) -> its alert detail -> the primary action lands on Count review detail -> back -> "Mark
+// as checked" -> the Alerts list updates -> the profile sheet (avatar) -> Log out -> /login.
+async function checkAlertsAndProfileFlow(page, ownerName) {
+  await page.setViewport({ width: 390, height: 3000 });
+  await mkdir(STEP15_SCREEN_DIR, { recursive: true });
+
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Needs attention');
+  await waitForText(page, 'Fresh Paneer has an unexplained gap');
+  await assertNoStandaloneLogoutButton(page);
+  await page.screenshot({ path: `${STEP15_SCREEN_DIR}/home-390.png` });
+  console.log('OK — Home shows "Needs attention" with a real alert, and no standalone Log out button.');
+
+  await (await findVisible(page, '[aria-label="Fresh Paneer has an unexplained gap"]')).click();
+  await waitForText(page, 'Fresh Paneer has an unexplained gap');
+  await waitForText(page, 'Review count');
+  await page.screenshot({ path: `${STEP15_SCREEN_DIR}/alert-detail-390.png` });
+  console.log('OK — tapping the alert opens its detail, with a "Review count" primary action.');
+
+  await clickButton(page, 'Review count');
+  await waitForText(page, 'Count detail');
+  console.log('OK — the primary action lands on Count review detail.');
+
+  await page.goBack({ waitUntil: 'networkidle0' });
+  await waitForText(page, 'Fresh Paneer has an unexplained gap');
+  await waitForText(page, 'Mark as checked');
+  console.log('OK — back lands on the alert detail again.');
+
+  await clickButton(page, 'Mark as checked');
+  await waitForText(page, 'Marked as checked');
+  await waitForPath(page, '/alerts');
+  await page.screenshot({ path: `${STEP15_SCREEN_DIR}/alerts-390.png` });
+  console.log('OK — marking it checked shows a toast and returns to the Alerts list.');
+
+  const alertsText = await page.evaluate(() => document.body.innerText);
+  if (alertsText.includes('Fresh Paneer has an unexplained gap')) {
+    fail('a checked alert should no longer appear in the Alerts list');
+  }
+  console.log('OK — the checked alert no longer appears in the list.');
+
+  await clickAndSettle(await findVisible(page, '[aria-label="Open profile menu"]'));
+  await waitForText(page, 'Profile');
+  await waitForText(page, ownerName);
+  await page.screenshot({ path: `${STEP15_SCREEN_DIR}/profile-sheet-390.png` });
+  console.log("OK — the avatar opens the profile sheet with the signed-in user's name.");
+
+  await clickButton(page, 'Log out');
+  await waitForPath(page, '/login');
+  console.log('OK — Log out from the profile sheet lands on /login.');
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
@@ -1007,8 +1073,11 @@ async function main() {
     }
     console.log('OK — /home shows no "Finish setting up" card once nothing is left.');
 
+    await clickAndSettle(await findVisible(page, '[aria-label="Open profile menu"]'));
+    await waitForText(page, 'Profile');
     await clickButton(page, 'Log out');
     await waitForPath(page, '/login');
+    console.log('OK — the avatar opens the profile sheet, and Log out from there lands on /login.');
     await login(page, mobile, password);
     await waitForPath(page, '/home');
     console.log('OK — after finishing all six steps, logging back in lands on /home.');
@@ -1100,6 +1169,11 @@ async function main() {
     await checkCountReviewAndWastageFlow(page, mobile, password);
     await checkSettingsFlow(page);
     await checkSalesFlow(page);
+    await checkAlertsAndProfileFlow(page, name);
+    // checkAlertsAndProfileFlow ends by logging out via the profile sheet — back in as Owner for
+    // the team management scenario below.
+    await login(page, mobile, password);
+    await waitForPath(page, '/home');
     await checkTeamManagementFlow(page, 'Helper One');
     await logoutFromAnywhere(page);
 

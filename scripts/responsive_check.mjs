@@ -684,6 +684,55 @@ async function seedLateClosingCountAndWastage(accessToken) {
   if (saleRes.status !== 201) {
     throw new Error(`seed: sale failed, got ${saleRes.status} (${JSON.stringify(saleRes.body)})`);
   }
+
+  // Step 15: price_rise (two purchases at 60, then one at 70 — default rate_creep_pct is 10) and
+  // wastage_high (buy 20 kg, waste 2 kg — default wastage_alert_pct is 5), so the Alerts screen,
+  // its detail route and the profile sheet all have something real to check.
+  const paneerId = items.find((item) => item.name === 'Fresh Paneer')?.id ?? items[1].id;
+  for (const price of ['60', '60', '70']) {
+    const res = await apiRequest(`/businesses/${businessId}/purchases/`, {
+      method: 'POST',
+      token: accessToken,
+      body: {
+        supplier_name: 'Dairy Co',
+        purchase_date_time: new Date().toISOString(),
+        lines: [
+          { stock_item: paneerId, quantity: '5', unit_price: price, line_total: String(5 * Number(price)) },
+        ],
+      },
+    });
+    if (res.status !== 201) {
+      throw new Error(`seed: paneer purchase at ${price} failed, got ${res.status} (${JSON.stringify(res.body)})`);
+    }
+  }
+
+  const riceId = items[0].id;
+  const riceBuyRes = await apiRequest(`/businesses/${businessId}/purchases/`, {
+    method: 'POST',
+    token: accessToken,
+    body: {
+      supplier_name: 'Grain Co',
+      purchase_date_time: new Date().toISOString(),
+      lines: [{ stock_item: riceId, quantity: '20', unit_price: '40', line_total: '800' }],
+    },
+  });
+  if (riceBuyRes.status !== 201) {
+    throw new Error(`seed: rice purchase failed, got ${riceBuyRes.status} (${JSON.stringify(riceBuyRes.body)})`);
+  }
+  const riceWasteRes = await apiRequest(`/businesses/${businessId}/wastage/`, {
+    method: 'POST',
+    token: accessToken,
+    body: { stock_item: riceId, quantity: '2', reason: 'spillage', note: '' },
+  });
+  if (riceWasteRes.status !== 201) {
+    throw new Error(`seed: rice wastage failed, got ${riceWasteRes.status} (${JSON.stringify(riceWasteRes.body)})`);
+  }
+
+  const alertsRes = await apiRequest(`/businesses/${businessId}/alerts/`, { token: accessToken });
+  if (alertsRes.status !== 200 || alertsRes.body.results.length === 0) {
+    throw new Error(`seed: expected at least one alert, got ${alertsRes.status} (${JSON.stringify(alertsRes.body)})`);
+  }
+  return { alertKey: alertsRes.body.results[0].key };
 }
 
 // ---------- main ----------
@@ -814,8 +863,9 @@ async function main() {
     const helperTokens = await buildHelperSession(browser, helperMobile, helperPin);
     console.log('Setting up a Head chef session...');
     const headChefTokens = await buildHeadChefSession(browser, headChefMobile, headChefPin);
-    console.log('Seeding a late closing count and a wastage entry for the sheet checks...');
-    await seedLateClosingCountAndWastage(ownerTokens.access);
+    console.log('Seeding a late closing count, wastage and alert-triggering data...');
+    const { alertKey } = await seedLateClosingCountAndWastage(ownerTokens.access);
+    const alertDetailPath = `/alerts/${encodeURIComponent(alertKey)}`;
     console.log('Sessions ready. Checking every route at every width...\n');
 
     const noAuthRoutes = [
@@ -843,6 +893,7 @@ async function main() {
       { name: 'sales', url: `${APP_URL}/sales` },
       { name: 'wastage', url: `${APP_URL}/wastage` },
       { name: 'alerts', url: `${APP_URL}/alerts` },
+      { name: 'alert-detail', url: `${APP_URL}${alertDetailPath}` },
       { name: 'team', url: `${APP_URL}/team` },
       { name: 'team-detail', url: `${APP_URL}${teamMemberPath}` },
       { name: 'settings', url: `${APP_URL}/settings` },
@@ -888,6 +939,14 @@ async function main() {
     // Step 11: every bottom sheet / dialog, not just routes — opened fresh at each width.
     console.log('\nChecking sheets and dialogs at every width...\n');
     const ownerSheets = [
+      // Step 15
+      {
+        name: 'sheet-profile',
+        url: `${APP_URL}/home`,
+        open: async (page) => {
+          await clickAndSettle(await findVisible(page, '[aria-label="Open profile menu"]'));
+        },
+      },
       {
         name: 'sheet-record-purchase',
         url: `${APP_URL}/buy`,
@@ -1054,6 +1113,13 @@ async function main() {
       }
     }
     const helperSheets = [
+      {
+        name: 'sheet-profile-helper',
+        url: `${APP_URL}/home`,
+        open: async (page) => {
+          await clickAndSettle(await findVisible(page, '[aria-label="Open profile menu"]'));
+        },
+      },
       {
         name: 'sheet-record-wastage-helper',
         url: `${APP_URL}/wastage`,

@@ -35,6 +35,9 @@ type AuthContextValue = {
   /** Re-fetches /me and updates `user`/`businesses` — used after the wizard writes a business, so
    * the rest of the app sees the change without needing a fresh login. */
   refreshMe: () => Promise<MeResponse>;
+  /** Moves a business to the front of `businesses` — every screen reads `businesses[0]` as "the
+   * current business", so this is what the profile sheet's "Switch business" picker calls. */
+  setActiveBusiness: (businessId: number) => void;
   /** Re-attempts the startup /me check — what the `status === 'offline'` retry screen calls. */
   retryBootstrap: () => Promise<void>;
   /** True only when a token refresh failed mid-session (not on an ordinary logout, and not when the
@@ -163,6 +166,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const dismissSessionExpired = useCallback(() => setSessionExpired(false), []);
 
+  const setActiveBusiness = useCallback((businessId: number) => {
+    setBusinesses((prev) => {
+      const index = prev.findIndex((business) => business.id === businessId);
+      if (index <= 0) return prev;
+      const next = [...prev];
+      const [chosen] = next.splice(index, 1);
+      next.unshift(chosen);
+      return next;
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       status,
@@ -172,6 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       authedFetch,
       refreshMe,
+      setActiveBusiness,
       retryBootstrap: bootstrap,
       sessionExpired,
       dismissSessionExpired,
@@ -184,6 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       authedFetch,
       refreshMe,
+      setActiveBusiness,
       bootstrap,
       sessionExpired,
       dismissSessionExpired,

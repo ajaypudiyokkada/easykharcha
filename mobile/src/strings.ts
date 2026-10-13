@@ -53,6 +53,15 @@ export const strings = {
     body: "This isn't built yet — check back in a future update.",
     goHome: 'Go to Home',
   },
+  profileSheet: {
+    openLabel: 'Open profile menu',
+    title: 'Profile',
+    switchBusiness: 'Switch business',
+    switchBusinessTitle: 'Switch business',
+    account: 'Account',
+    comingSoon: 'Coming soon',
+    logOut: 'Log out',
+  },
   chart: {
     takeaway: (itemName: string, direction: 'more' | 'less', pct: number, period: string) =>
       `${itemName} costs ${pct}% ${direction} than ${period}.`,
@@ -112,7 +121,6 @@ export const strings = {
     greeting: (name: string) => `Hello, ${name}`,
     subtitle: 'Your EasyKharcha account is ready.',
     placeholderMessage: "Your tasks aren't set up yet — check back soon.",
-    logOut: 'Log out',
     checklistTitle: 'Finish setting up',
     continueStep: 'Continue',
     dismissChecklist: 'Dismiss',
@@ -140,8 +148,7 @@ export const strings = {
     itemsSoldToday: (n: string) => `${n} sold today`,
     needsAttention: 'Needs attention',
     needsAttentionSubtitle: 'Every current problem appears here once.',
-    closingCountLateTitle: 'Closing count is late',
-    closingCountLateBody: (minutes: number) => `Late by ${minutes} min`,
+    allAlerts: 'All alerts',
     setUsesQtyTitle: 'Set what each item uses',
     setUsesQtyBody: "So we can compare what's sold with what's used.",
     setUsesQtyLink: 'Go to What you sell',
@@ -413,6 +420,53 @@ export const strings = {
     gapReasonLinkSell: 'What you sell',
     gapReasonLinkSales: (date: string) => `Sales for ${date}`,
   },
+  alerts: {
+    title: 'Alerts',
+    subtitle: 'Everything that needs your attention, once each.',
+    filters: {
+      all: (n: number) => `All ${n}`,
+      count_late: 'Counts',
+      price_rise: 'Prices',
+      wastage_high: 'Wastage',
+      gap_flagged: 'Gaps',
+    } as Record<string, string | ((n: number) => string)>,
+    empty: {
+      message: 'Nothing needs attention',
+      button: 'Go to Home',
+    },
+    errors: {
+      network: "Can't reach EasyKharcha. Check your internet and try again.",
+      generic: 'Something went wrong. Please try again.',
+    },
+  },
+  alertDetail: {
+    title: 'Alert',
+    markAsChecked: 'Mark as checked',
+    checkedToast: 'Marked as checked',
+    notFoundTitle: "This alert isn't open anymore",
+    notFoundBody: 'It may already have been checked, or the numbers behind it have changed.',
+    backToAlerts: 'Back to Alerts',
+    countTypeOpening: 'Opening',
+    countTypeClosing: 'Closing',
+    numberLabels: {
+      count_type: 'Count',
+      minutes_late: 'Minutes late',
+      deadline_hour: 'Deadline hour',
+      latest_price: 'Latest price',
+      average_price: 'Recent average',
+      pct_increase: 'Price increase',
+      wasted_qty: 'Wasted',
+      bought_qty: 'Bought',
+      pct: 'Percent of bought',
+      gap_qty: 'Gap',
+      gap_value: 'Gap value',
+      expected_used: 'Expected used',
+    } as Record<string, string>,
+    errors: {
+      network: "Can't reach EasyKharcha. Check your internet and try again.",
+      generic: 'Something went wrong. Please try again.',
+    },
+  },
   setup: {
     totalSteps: 6,
     back: 'Back',
@@ -648,6 +702,16 @@ export const strings = {
       gapAlertLabel: 'Stock gap alert %',
       gapAlertExample:
         "e.g. 10 means you'll be alerted if a stock gap goes above 10% of expected use.",
+      openingCountMechanism: (hour: string) =>
+        `Opening count late: when it's not submitted by ${hour}:00.`,
+      closingCountMechanism: (hour: string) =>
+        `Closing count late: when it's not submitted by ${hour}:00.`,
+      rateRiseMechanism: (pct: string) =>
+        `Price rise alert: when a purchase price is more than ${pct}% above the recent average.`,
+      wastageMechanism: (pct: string) =>
+        `Wastage alert: when wastage is more than ${pct}% of what you bought in the last 7 days.`,
+      gapAlertMechanism: (pct: string) =>
+        `Stock gap alert: when a stock gap is more than ${pct}% of expected use.`,
       save: 'Save rules',
       savedToast: 'Alert rules saved',
       errors: {

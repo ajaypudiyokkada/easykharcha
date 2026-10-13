@@ -67,6 +67,16 @@ deleting the window's only sale makes it not_comparable/sales_missing with that 
 record sales but gets 403 on delete -> a Helper gets 403 on every sales endpoint -> a future-dated
 sale is rejected -> the Owner deletes a sale and the summary updates -> Helper/Head chef count
 endpoints carry no expected/gap field (enforced by the existing 403 on count review).
+
+Then the Step 15 alerts flow: one business trips count_late (closing_count_hour 0), price_rise (two
+purchases at 60 then one at 70) and wastage_high (2 L wasted against 20 L bought) in a single GET,
+with the right severities, numbers and next-action routes -> today/ carries the same alerts_count for
+the Owner -> checking one alert hides it and the counts drop, and checking it again is rejected ->
+a Helper gets 403 on both alerts endpoints and sees no alerts_count -> a Manager can view and check.
+A second business reuses the Step 14 gap numbers to prove a flagged gap line surfaces as a danger
+gap_flagged alert (count_late and gap_flagged can't both appear in one business/day — a submitted
+opening count is unavoidably needed as the gap's "previous" baseline, which leaves no count-type slot
+free to be late that same day).
 """
 
 import binascii
@@ -1104,6 +1114,8 @@ def check_purchase_flow() -> None:
         "sales.view",
         "sales.create",
         "sales.delete",
+        "alerts.view",
+        "alerts.check",
     }
     if set(owner_business.get("permissions", [])) != expected_owner:
         fail(f"/me owner permissions: expected {expected_owner}, got {owner_business.get('permissions')}")
@@ -1120,6 +1132,8 @@ def check_purchase_flow() -> None:
         "team.view",
         "sales.view",
         "sales.create",
+        "alerts.view",
+        "alerts.check",
     }
     if set(manager_business.get("permissions", [])) != expected_manager:
         fail(
@@ -1938,6 +1952,256 @@ def check_sales_and_gap_flow() -> None:
     print("OK — the Owner soft-deletes a sale and the summary updates.")
 
 
+def check_alerts_flow() -> None:
+    # count_late + price_rise + wastage_high all live on one business — a submitted opening count
+    # is unavoidably needed as the "previous" data point for any gap_flagged line (the only other
+    # count slot in a day), so getting a count_late alert in the same business as gap_flagged in the
+    # same GET is structurally impossible via the real API; gap_flagged gets its own business below,
+    # reusing the exact Step 14 numbers.
+    _, owner_access, _ = signup_and_login("Alerts Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Alerts Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    # closing late today; opening's deadline pushed to the end of the day (not yet passed, whatever
+    # time this script happens to run) so exactly one count_late alert fires, deterministically
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/settings/",
+        {"closing_count_hour": 0, "count_deadline_hour": 23},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"alerts flow: settings patch expected 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Flour", "unit": "kg"}, {"name": "Cooking Oil", "unit": "L"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: stock bulk create expected 201, got {status} ({body})")
+    flour_id = next(i["id"] for i in body if i["name"] == "Flour")
+    oil_id = next(i["id"] for i in body if i["name"] == "Cooking Oil")
+
+    # price_rise: two purchases at 60, then one at 70 — default rate_creep_pct is 10, and
+    # (70-60)/60 = 16.67% > 10%
+    for price in ("60", "60", "70"):
+        status, body, _ = request(
+            "POST",
+            f"/businesses/{business_id}/purchases/",
+            {
+                "supplier_name": "Flour Mill",
+                "purchase_date_time": _now_iso(),
+                "lines": [
+                    {"stock_item": flour_id, "quantity": "10", "unit_price": price, "line_total": str(10 * int(price))}
+                ],
+            },
+            token=owner_access,
+        )
+        if status != 201:
+            fail(f"alerts flow: flour purchase at {price} expected 201, got {status} ({body})")
+
+    # wastage_high: 2 L wasted against 20 L bought — default wastage_alert_pct is 5, and 2/20 = 10%
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Oil Depot",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": oil_id, "quantity": "20", "unit_price": "150", "line_total": "3000"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: oil purchase expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/wastage/",
+        {"stock_item": oil_id, "quantity": "2", "reason": "spillage"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: oil wastage expected 201, got {status} ({body})")
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    if status != 200:
+        fail(f"alerts flow: list expected 200, got {status} ({body})")
+    by_type = {a["type"]: a for a in body["results"]}
+    if set(by_type) != {"count_late", "price_rise", "wastage_high"}:
+        fail(f"alerts flow: expected count_late/price_rise/wastage_high, got {set(by_type)}")
+    if body["counts"]["total"] != 3:
+        fail(f"alerts flow: expected 3 total alerts, got {body['counts']}")
+    if by_type["count_late"]["severity"] != "warning" or by_type["wastage_high"]["severity"] != "warning":
+        fail(f"alerts flow: expected count_late/wastage_high severity warning, got {by_type}")
+    if by_type["price_rise"]["severity"] != "danger":
+        fail(f"alerts flow: expected price_rise severity danger, got {by_type['price_rise']}")
+    if Decimal(by_type["price_rise"]["numbers"]["pct_increase"]) != Decimal("16.67"):
+        fail(f"alerts flow: expected price_rise pct_increase 16.67, got {by_type['price_rise']}")
+    if Decimal(by_type["wastage_high"]["numbers"]["pct"]) != Decimal("10.00"):
+        fail(f"alerts flow: expected wastage_high pct 10.00, got {by_type['wastage_high']}")
+    if by_type["price_rise"]["next_action"]["route"] != f"/stock/{flour_id}":
+        fail(f"alerts flow: expected price_rise route /stock/{flour_id}, got {by_type['price_rise']}")
+    if by_type["count_late"]["next_action"]["label"] != "Prepare reminder":
+        fail(f"alerts flow: expected Owner's count_late action 'Prepare reminder', got {by_type['count_late']}")
+    print("OK — one business trips count_late, price_rise and wastage_high with the right severities and numbers.")
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=owner_access)
+    if status != 200 or body.get("alerts_count") != 3:
+        fail(f"alerts flow: today expected alerts_count 3, got {status} ({body})")
+    print("OK — GET today/ carries the same alerts_count for the Owner.")
+
+    # check the wastage_high alert -> it disappears and the counts drop
+    wastage_key = by_type["wastage_high"]["key"]
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/alerts/check/", {"key": wastage_key}, token=owner_access
+    )
+    if status != 204:
+        fail(f"alerts flow: check expected 204, got {status} ({body})")
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    if body["counts"]["total"] != 2 or body["counts"]["wastage_high"] != 0:
+        fail(f"alerts flow: expected total 2 and wastage_high 0 after check, got {body['counts']}")
+    if wastage_key in {a["key"] for a in body["results"]}:
+        fail(f"alerts flow: checked alert still present, got {body['results']}")
+    print("OK — checking an alert hides it and the counts drop.")
+
+    # re-checking the same key is rejected (no longer open)
+    status, _, _ = request(
+        "POST", f"/businesses/{business_id}/alerts/check/", {"key": wastage_key}, token=owner_access
+    )
+    if status not in (400, 422):
+        fail(f"alerts flow: re-check of a closed alert expected rejection, got {status}")
+
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "Alerts Helper", "helper")
+    status, _, _ = request("GET", f"/businesses/{business_id}/alerts/", token=helper_access)
+    if status != 403:
+        fail(f"alerts flow: helper list expected 403, got {status}")
+    status, _, _ = request(
+        "POST", f"/businesses/{business_id}/alerts/check/", {"key": by_type["count_late"]["key"]}, token=helper_access
+    )
+    if status != 403:
+        fail(f"alerts flow: helper check expected 403, got {status}")
+    status, helper_today, _ = request("GET", f"/businesses/{business_id}/today/", token=helper_access)
+    if "alerts_count" in helper_today:
+        fail("alerts flow: helper's today should carry no alerts_count")
+    print("OK — a Helper gets 403 on alerts, and sees no alerts_count on today.")
+
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Alerts Manager", "manager")
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=manager_access)
+    if status != 200 or body["counts"]["total"] != 2:
+        fail(f"alerts flow: manager list expected 200 with total 2, got {status} ({body})")
+    status, _, _ = request(
+        "POST",
+        f"/businesses/{business_id}/alerts/check/",
+        {"key": by_type["price_rise"]["key"]},
+        token=manager_access,
+    )
+    if status != 204:
+        fail(f"alerts flow: manager check expected 204, got {status}")
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=manager_access)
+    if body["counts"]["total"] != 1:
+        fail(f"alerts flow: expected total 1 after manager's check, got {body['counts']}")
+    print("OK — a Manager can view and check alerts.")
+
+    # gap_flagged: its own business, exact Step 14 numbers (12 L opening, 20 L bought, 1.5 L wasted,
+    # 8 L closing, 100 Tea packs sold -> gap_qty 2.5, 12.5% over the 10% default -> flagged)
+    _, gap_owner_access, _ = signup_and_login("Gap Alert Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Gap Alert Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=gap_owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: gap business create expected 201, got {status} ({body})")
+    gap_business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gap_business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}]},
+        token=gap_owner_access,
+    )
+    milk_id = body[0]["id"]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gap_business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {
+                    "name": "Tea pack",
+                    "selling_price": "20.00",
+                    "main_stock_item": milk_id,
+                    "uses_qty": "0.200",
+                }
+            ]
+        },
+        token=gap_owner_access,
+    )
+    tea_pack_id = body[0]["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gap_business_id}/counts/",
+        {"type": "opening", "lines": [{"stock_item": milk_id, "state": "counted", "counted_qty": "12"}]},
+        token=gap_owner_access,
+    )
+    business_date = body["business_date"]
+    request(
+        "POST",
+        f"/businesses/{gap_business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"}],
+        },
+        token=gap_owner_access,
+    )
+    request(
+        "POST",
+        f"/businesses/{gap_business_id}/wastage/",
+        {"stock_item": milk_id, "quantity": "1.5", "reason": "spillage"},
+        token=gap_owner_access,
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gap_business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": milk_id, "state": "counted", "counted_qty": "8"}]},
+        token=gap_owner_access,
+    )
+    closing_count_id = body["id"]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gap_business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "100"}]},
+        token=gap_owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: gap sale expected 201, got {status} ({body})")
+
+    status, body, _ = request("GET", f"/businesses/{gap_business_id}/alerts/", token=gap_owner_access)
+    if status != 200:
+        fail(f"alerts flow: gap alerts list expected 200, got {status} ({body})")
+    gap_alerts = [a for a in body["results"] if a["type"] == "gap_flagged"]
+    if len(gap_alerts) != 1:
+        fail(f"alerts flow: expected exactly 1 gap_flagged alert, got {body['results']}")
+    gap_alert = gap_alerts[0]
+    if gap_alert["severity"] != "danger":
+        fail(f"alerts flow: expected gap_flagged severity danger, got {gap_alert}")
+    if Decimal(gap_alert["numbers"]["gap_qty"]) != Decimal("2.5"):
+        fail(f"alerts flow: expected gap_qty 2.5, got {gap_alert}")
+    if gap_alert["next_action"]["route"] != f"/counts/{closing_count_id}":
+        fail(f"alerts flow: expected gap_flagged route /counts/{closing_count_id}, got {gap_alert}")
+    print("OK — a separate business's flagged gap line surfaces as a danger-severity gap_flagged alert.")
+
+
 def main() -> None:
     check_health()
     check_auth_flow()
@@ -1949,6 +2213,7 @@ def main() -> None:
     check_count_and_wastage_flow()
     check_settings_flow()
     check_sales_and_gap_flow()
+    check_alerts_flow()
     print("\nAll smoke checks passed.")
 
 

@@ -174,14 +174,14 @@ export default function AlertRulesSettings() {
               value={countDeadlineHour}
               onChangeText={setCountDeadlineHour}
               keyboardType="number-pad"
-              hint={s6.countDeadlineExample}
+              hint={sa.openingCountMechanism(countDeadlineHour)}
             />
             <TextField
               label={sa.closingCountLabel}
               value={closingCountHour}
               onChangeText={setClosingCountHour}
               keyboardType="number-pad"
-              hint={sa.closingCountExample}
+              hint={sa.closingCountMechanism(closingCountHour)}
             />
             <TextField
               label={s6.targetCostLabel}
@@ -195,21 +195,21 @@ export default function AlertRulesSettings() {
               value={wastageAlertPct}
               onChangeText={setWastageAlertPct}
               keyboardType="decimal-pad"
-              hint={s6.wastageAlertExample}
+              hint={sa.wastageMechanism(wastageAlertPct)}
             />
             <TextField
               label={s6.rateRiseLabel}
               value={rateCreepPct}
               onChangeText={setRateCreepPct}
               keyboardType="decimal-pad"
-              hint={s6.rateRiseExample}
+              hint={sa.rateRiseMechanism(rateCreepPct)}
             />
             <TextField
               label={sa.gapAlertLabel}
               value={gapAlertPct}
               onChangeText={setGapAlertPct}
               keyboardType="decimal-pad"
-              hint={sa.gapAlertExample}
+              hint={sa.gapAlertMechanism(gapAlertPct)}
             />
 
             <Button

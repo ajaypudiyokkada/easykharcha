@@ -83,4 +83,6 @@ export type TodayStatus = {
   /** Only present for a role with counts.status (Head chef) — how many of the business's active
    * items have been counted by anyone today, out of how many there are. */
   team_progress?: { counted: number; total: number };
+  /** Step 15, Owner/Manager only — the same count GET alerts/ would show. */
+  alerts_count?: number;
 };

@@ -101,6 +101,15 @@ not built yet.
   detail. New Sales screen (replacing its ComingSoon stub), Record sales sheet, Count review gap
   display, and a real Home Sales card/stat/quick action plus a setup nudge when `uses_qty` is
   missing. `login_per_ip`'s dev rate limit raised 30 -> 50 for the larger smoke suite.
+- **Step 15 — Alerts, and a profile menu.** New `alerts` app: `compute_alerts`/`open_alerts`
+  (count_late, price_rise, wastage_high, gap_flagged — computed on read, nothing scheduled),
+  `AlertCheck` (hides an alert until its key changes), `GET/POST alerts/`, new `alerts.view`/
+  `alerts.check` permissions (Owner/Manager), `GET today/` gained `alerts_count`. Step 14's gap math
+  moved to `counts/gap.py` so both counts and alerts share it. New real Alerts screen (filter chips)
+  and Alert detail (numbers, primary next action, "Mark as checked"), replacing the ComingSoon stub.
+  Home's one-off "Closing count is late" card replaced by a real "Needs attention" (top 4 alerts).
+  New profile sheet (avatar/user block -> name, role, business, Switch business, Account placeholder,
+  Log out) is now the only place Log out lives — removed from Home for every role.
 
 ## Permission table
 
@@ -195,7 +204,10 @@ both say so in the UI.
 - **A legacy/ code reuse plan** — `legacy/` (the earlier multi-tenant restaurant SaaS build) is kept
   intact and untouched; nothing in the current app reads from or depends on it, and no decision has
   been made about reusing any of its code. Do not delete it.
-- **Reports, alerts and costing features** — purchases, stock counts, wastage and (Step 14) manual
-  sales are now built; there's still no screen to see reports, alerts, or costing-margin numbers.
+- **Reports and costing features** — purchases, stock counts, wastage, sales and (Step 15) alerts are
+  now built; there's still no screen to see reports or costing-margin numbers.
+- **Account screen's "Switch business"** — the profile sheet's picker only reorders the signed-in
+  user's own `businesses` list client-side (so the rest of the app treats the chosen one as current);
+  there's no dedicated multi-business management screen.
 - **Sales file upload (Petpooja)** — Step 14 deliberately built manual sales entry only, no upload
   button or upload screen; a later step may add bulk/file-based sales import.

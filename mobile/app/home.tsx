@@ -2,6 +2,7 @@ import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 
+import type { Alert, AlertListResponse } from '../src/api/alerts';
 import type { PurchaseListResponse } from '../src/api/purchases';
 import type { TodayStatus } from '../src/api/counts';
 import type { SaleListResponse } from '../src/api/sales';
@@ -17,7 +18,6 @@ import { bestTextOn, ensureContrast } from '../src/theme/brand';
 import { strings } from '../src/strings';
 import {
   Body,
-  Button,
   Card,
   Heading,
   Icon,
@@ -29,11 +29,25 @@ import {
   Toast,
 } from '../src/ui';
 import { AppShell } from '../src/ui/AppShell';
-import { HOME_CONTENT_WIDTH } from '../src/ui/constants';
+import { HOME_CONTENT_WIDTH, MIN_TOUCH_TARGET } from '../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../src/theme/tokens';
 
 const s = strings.home;
 const t = strings.today;
+
+function alertIconFor(type: Alert['type']): IconName {
+  switch (type) {
+    case 'count_late':
+      return 'clock';
+    case 'price_rise':
+      return 'reports';
+    case 'wastage_high':
+      return 'wastage';
+    case 'gap_flagged':
+    default:
+      return 'alert';
+  }
+}
 
 export default function Home() {
   const { status, user, businesses } = useAuth();
@@ -61,7 +75,7 @@ export default function Home() {
  * for a Helper, the team's for a Head chef (who also gets a team-progress line). */
 function TodayHome() {
   const router = useRouter();
-  const { user, businesses, authedFetch, logout } = useAuth();
+  const { user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
   const canRecordWastage = can(permissions, 'wastage.create');
@@ -72,7 +86,6 @@ function TodayHome() {
   const [loading, setLoading] = useState(true);
   const [wasteSheetVisible, setWasteSheetVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   const load = useCallback(() => {
     if (!business) return;
@@ -198,16 +211,6 @@ function TodayHome() {
             <Body style={styles.emptyText}>{t.entriesEmpty}</Body>
           )}
         </View>
-
-        <Button
-          label={s.logOut}
-          variant="secondary"
-          onPress={async () => {
-            setLoggingOut(true);
-            await logout();
-          }}
-          loading={loggingOut}
-        />
       </Screen>
 
       <RecordWastageSheet
@@ -228,9 +231,8 @@ function TodayHome() {
  * stock count state, wastage entries, sales) and working quick actions. */
 function OwnerHome() {
   const router = useRouter();
-  const { user, businesses, authedFetch, refreshMe, logout } = useAuth();
+  const { user, businesses, authedFetch, refreshMe } = useAuth();
   const business = businesses[0]!;
-  const [loggingOut, setLoggingOut] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [purchaseSummary, setPurchaseSummary] = useState<PurchaseListResponse['summary'] | null>(
     null,
@@ -238,6 +240,7 @@ function OwnerHome() {
   const [salesSummary, setSalesSummary] = useState<SaleListResponse['summary'] | null>(null);
   const [needsUsesQtySetup, setNeedsUsesQtySetup] = useState(false);
   const [today, setToday] = useState<TodayStatus | null>(null);
+  const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [purchaseSheetVisible, setPurchaseSheetVisible] = useState(false);
   const [wasteSheetVisible, setWasteSheetVisible] = useState(false);
   const [salesSheetVisible, setSalesSheetVisible] = useState(false);
@@ -250,6 +253,7 @@ function OwnerHome() {
   const canStartCount = can(permissions, 'counts.create');
   const canSeeSales = can(permissions, 'sales.view');
   const canRecordSales = can(permissions, 'sales.create');
+  const canSeeAlerts = can(permissions, 'alerts.view');
   const timezone = business.timezone;
   const isOwner = business.role === 'owner';
 
@@ -276,11 +280,16 @@ function OwnerHome() {
         )
         .catch(() => {});
     }
+    if (canSeeAlerts) {
+      authedFetch<AlertListResponse>(`/businesses/${business.id}/alerts/`)
+        .then((response) => setAlerts(response.results))
+        .catch(() => {});
+    }
     authedFetch<TodayStatus>(`/businesses/${business.id}/today/`)
       .then(setToday)
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business.id, canSeePurchases, canSeeSales, isOwner, timezone]);
+  }, [business.id, canSeePurchases, canSeeSales, canSeeAlerts, isOwner, timezone]);
 
   useEffect(() => {
     loadToday();
@@ -295,11 +304,6 @@ function OwnerHome() {
   const brandColour = ensureContrast(business.primary_colour).colour;
   const brandTextColour = bestTextOn(business.primary_colour);
 
-  async function handleLogout() {
-    setLoggingOut(true);
-    await logout();
-  }
-
   async function handleDismissChecklist() {
     setDismissing(true);
     try {
@@ -312,9 +316,6 @@ function OwnerHome() {
       setDismissing(false);
     }
   }
-
-  const closingLate = today?.closing.state === 'late';
-  const openingLate = today?.opening.state === 'late';
 
   function countStateLine(
     type: 'opening' | 'closing',
@@ -386,26 +387,46 @@ function OwnerHome() {
           </Card>
         ) : null}
 
-        {(closingLate || openingLate) && can(permissions, 'counts.review') ? (
+        {canSeeAlerts && alerts && alerts.length > 0 ? (
           <View>
             <Small style={styles.sectionLabel}>{s.needsAttention}</Small>
+            <Small style={styles.sectionSub}>{s.needsAttentionSubtitle}</Small>
+            <View style={styles.entryList}>
+              {alerts.slice(0, 4).map((alert) => (
+                <Pressable
+                  key={alert.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={alert.title}
+                  style={styles.attentionCard}
+                  onPress={() =>
+                    router.push({ pathname: '/alerts/[key]', params: { key: alert.key } })
+                  }
+                >
+                  <View
+                    style={[
+                      styles.attentionIcon,
+                      {
+                        backgroundColor:
+                          alert.severity === 'danger' ? colours.danger : colours.warning,
+                      },
+                    ]}
+                  >
+                    <Icon name={alertIconFor(alert.type)} size={20} colour={colours.card} />
+                  </View>
+                  <View style={styles.entryMain}>
+                    <Body style={styles.attentionTitle}>{alert.title}</Body>
+                    <Small style={styles.entryMeta}>{alert.detail}</Small>
+                  </View>
+                  <Icon name="chevronRight" size={20} colour={colours.muted} />
+                </Pressable>
+              ))}
+            </View>
             <Pressable
               accessibilityRole="button"
-              style={styles.attentionCard}
-              onPress={() => router.push('/counts')}
+              style={styles.allAlertsLink}
+              onPress={() => router.push('/alerts')}
             >
-              <View style={styles.attentionIcon}>
-                <Icon name="clock" size={20} colour={colours.card} />
-              </View>
-              <View style={styles.entryMain}>
-                <Body style={styles.attentionTitle}>{s.closingCountLateTitle}</Body>
-                <Small style={styles.entryMeta}>
-                  {closingLate
-                    ? formatDateTime(today!.closing.deadline_at, timezone)
-                    : formatDateTime(today!.opening.deadline_at, timezone)}
-                </Small>
-              </View>
-              <Icon name="chevronRight" size={20} colour={colours.muted} />
+              <Small style={styles.continueLink}>{s.allAlerts}</Small>
             </Pressable>
           </View>
         ) : null}
@@ -513,15 +534,6 @@ function OwnerHome() {
             ) : null}
           </View>
         </View>
-
-        <Button
-          label={s.logOut}
-          variant="secondary"
-          colour={brandColour}
-          textColour={brandTextColour}
-          onPress={handleLogout}
-          loading={loggingOut}
-        />
       </Screen>
 
       <RecordPurchaseSheet
@@ -627,6 +639,11 @@ const styles = StyleSheet.create({
   },
   checklistStepTitle: {
     flex: 1,
+  },
+  allAlertsLink: {
+    alignSelf: 'flex-start',
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   continueLink: {
     color: colours.primary,

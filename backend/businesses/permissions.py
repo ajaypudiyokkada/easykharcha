@@ -33,6 +33,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "sales.view",
             "sales.create",
             "sales.delete",
+            "alerts.view",
+            "alerts.check",
         }
     ),
     AccessRole.MANAGER: frozenset(
@@ -46,6 +48,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "team.view",
             "sales.view",
             "sales.create",
+            "alerts.view",
+            "alerts.check",
         }
     ),
     AccessRole.HEAD_CHEF: frozenset(

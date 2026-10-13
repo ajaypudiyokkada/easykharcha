@@ -6,9 +6,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { can, isLimitedRole } from '../auth/permissions';
 import { useMinWidth } from '../hooks/useMinWidth';
+import { roleLabel } from '../labels';
+import { ProfileSheet } from '../screens/ProfileSheet';
 import { strings } from '../strings';
 import { colours, fonts, radii, spacing, type } from '../theme/tokens';
-import { NAV_SIDE_BREAKPOINT } from './constants';
+import { Avatar } from './Avatar';
+import { MIN_TOUCH_TARGET, NAV_SIDE_BREAKPOINT } from './constants';
 import { Icon, type IconName } from './Icon';
 import { Sheet } from './Sheet';
 import { Body, Small } from './Text';
@@ -102,10 +105,11 @@ type Props = {
  */
 export function AppShell({ active, children }: Props) {
   const router = useRouter();
-  const { businesses } = useAuth();
+  const { user, businesses } = useAuth();
   const insets = useSafeAreaInsets();
   const isWide = useMinWidth(NAV_SIDE_BREAKPOINT);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
@@ -123,17 +127,53 @@ export function AppShell({ active, children }: Props) {
       <View style={styles.wideRoot}>
         <View style={styles.sideNav}>
           <Body style={styles.sideBrand}>{business?.name ?? 'EasyKharcha'}</Body>
+          {user ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.profileSheet.openLabel}
+              onPress={() => setProfileOpen(true)}
+              style={styles.sideUserBlock}
+            >
+              <Avatar name={user.name} size={36} />
+              <View style={styles.sideUserText}>
+                <Body style={styles.sideUserName} numberOfLines={1}>
+                  {user.name}
+                </Body>
+                {business ? (
+                  <Small style={styles.sideUserRole} numberOfLines={1}>
+                    {roleLabel(business.role ?? '', business.business_type)}
+                  </Small>
+                ) : null}
+              </View>
+            </Pressable>
+          ) : null}
           {[...visiblePrimary, ...visibleMore].map((item) => (
             <SideNavItem key={item.key} item={item} active={active === item.key} onPress={go} />
           ))}
         </View>
         <View style={styles.wideContent}>{children}</View>
+        <ProfileSheet visible={profileOpen} onClose={() => setProfileOpen(false)} />
       </View>
     );
   }
 
   return (
     <View style={styles.root}>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
+        <Body style={styles.topBarBrand} numberOfLines={1}>
+          {business?.name ?? 'EasyKharcha'}
+        </Body>
+        {user ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.profileSheet.openLabel}
+            onPress={() => setProfileOpen(true)}
+            style={styles.avatarBtn}
+          >
+            <Avatar name={user.name} size={36} />
+          </Pressable>
+        ) : null}
+      </View>
       <View style={styles.content}>{children}</View>
       <View style={[styles.bottomNav, { paddingBottom: spacing.sm + insets.bottom }]}>
         {visiblePrimary.map((item) => (
@@ -171,6 +211,7 @@ export function AppShell({ active, children }: Props) {
           ))}
         </View>
       </Sheet>
+      <ProfileSheet visible={profileOpen} onClose={() => setProfileOpen(false)} />
     </View>
   );
 }
@@ -224,6 +265,28 @@ const BOTTOM_NAV_HEIGHT = 64;
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    backgroundColor: colours.card,
+    borderBottomWidth: 2,
+    borderBottomColor: colours.mint,
+  },
+  topBarBrand: {
+    flex: 1,
+    fontFamily: fonts.headingBold,
+    fontSize: type.lg,
+  },
+  avatarBtn: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     flex: 1,
@@ -298,6 +361,25 @@ const styles = StyleSheet.create({
     fontSize: type.lg,
     paddingHorizontal: spacing.sm,
     marginBottom: spacing.md,
+  },
+  sideUserBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 50,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  sideUserText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sideUserName: {
+    fontFamily: fonts.bodyExtraBold,
+  },
+  sideUserRole: {
+    color: colours.muted,
   },
   sideItem: {
     flexDirection: 'row',
