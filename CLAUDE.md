@@ -65,3 +65,13 @@ a restructure. See `README.md` for which one is actually in use right now.
 
 Every API error comes back as `{"error": {"code": "...", "message": "..."}}`, set up once in
 `backend/config/exceptions.py` as the DRF exception handler. No endpoint builds its own error shape.
+
+## How to work in this repo (read before anything else)
+- Read docs/MAP.md first. It says where every screen, endpoint, component
+  and script lives. Do not search the repo or spawn agents to explore;
+  open only the files MAP.md points you to for the current step.
+- Never read legacy/, node_modules/, docs/screens/, or the design HTML
+  files. Use docs/design/DESIGN_NOTES.md instead of the HTML.
+- After each step, update docs/MAP.md and docs/STATUS.md in 10 lines or
+  fewer each. Keep them short; they are read on every step.
+- Run checks once at the end of a step, not after every file edit.
