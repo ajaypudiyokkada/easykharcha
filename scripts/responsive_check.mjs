@@ -1,18 +1,28 @@
 #!/usr/bin/env node
 /**
- * Mobile-first responsive check (Step 8d). For every screen, at every width, asserts:
+ * Mobile-first responsive check (Step 8d, strengthened in Step 11). For every screen — and every
+ * bottom sheet / dialog, not just routes — at every width, asserts:
  *  - no horizontal overflow (anywhere in the DOM, not just the document root — react-native-web's
  *    ScrollView scrolls an inner div, not the page, so overflow can hide inside a nested container)
+ *  - no interactive element clipped by the viewport OR by any ancestor with overflow hidden/auto/
+ *    scroll/clip (Step 11: the opposite of this script's old behaviour of skipping those ancestors
+ *    entirely — that blind spot is exactly what let a clipped "Price per unit" field inside a
+ *    Sheet's ScrollView ship undetected; see docs/GAP_LIST.md bug 4)
+ *  - no text narrower than 40px holding more than 6 characters (the one-char-per-line symptom of a
+ *    squeezed flex row — see docs/GAP_LIST.md bug 3)
+ *  - no text clipped (scrollWidth > clientWidth) by its own overflow:hidden with no ellipsis style
  *  - no interactive element smaller than 44px in either dimension (a labelled checkbox/radio is
  *    measured by its <label>, the real tap target, not the bare input)
  *  - no text smaller than 15px (16px for form inputs, to stop iOS Safari auto-zooming on focus)
  *  - nothing sitting underneath a sticky bottom bar once scrolled to the end of the content
  *
- * Prints a table of failures and saves one screenshot per screen/width to docs/screens/step8d/.
- * Used both to drive docs/RESPONSIVE_AUDIT.md (run before the Step 8d fixes) and as the ongoing
- * regression check (`npm run responsive`, run after — expected clean).
+ * Prints a table of failures and saves one screenshot per screen/width (and per sheet/dialog/width)
+ * to docs/screens/step8d/. Used both to drive docs/RESPONSIVE_AUDIT.md (run before the Step 8d
+ * fixes) and as the ongoing regression check (`npm run responsive`, run after — expected clean).
  *
  * Run with:  npm run responsive
+ * Self-test the clipping check itself (injects a known-clipped input, confirms the check catches
+ * it, then removes it — proves the check can actually fail):  node scripts/responsive_check.mjs --self-test
  *
  * Requires the backend (:8000) and the Expo web dev server (:8081) already running. Starts its own
  * landing-page server on :8082 if nothing's already there (closed again at the end). Localhost only.
@@ -27,13 +37,19 @@ import { ensureLandingServer } from './lib/landing_server.mjs';
 
 const APP_URL = 'http://localhost:8081';
 const LANDING_URL = 'http://localhost:8082';
+const API_BASE = 'http://127.0.0.1:8000/api/v1';
 const TIMEOUT = 15_000;
 const SCREEN_DIR = 'docs/screens/step8d';
 const WIDTHS = [320, 360, 390, 768, 1024, 1280, 1920];
+// The exact set Step 11 asks sheets/dialogs to be checked at — a subset of WIDTHS, kept separate
+// so adding a sheet check doesn't multiply runtime by the desktop-only route widths too.
+const SHEET_WIDTHS = [320, 360, 390, 768, 1280];
 const HEIGHT = 900;
 const MIN_TOUCH = 44;
 const MIN_TEXT = 15;
 const MIN_INPUT_TEXT = 16;
+const MIN_TEXT_BOX = 40;
+const MAX_CHARS_IN_NARROW_BOX = 6;
 
 function findChrome() {
   const candidates = [
@@ -134,7 +150,7 @@ async function typeInto(page, label, text, { last = false, minCount = 1 } = {}) 
 
 async function measurePage(page) {
   return page.evaluate(
-    ({ MIN_TOUCH, MIN_TEXT, MIN_INPUT_TEXT }) => {
+    ({ MIN_TOUCH, MIN_TEXT, MIN_INPUT_TEXT, MIN_TEXT_BOX, MAX_CHARS_IN_NARROW_BOX }) => {
       // Horizontal overflow can hide inside any nested scroller (react-native-web's ScrollView is an
       // inner div, not the document) — check every element, not just the document root. Two things
       // that look like overflow but aren't real problems:
@@ -161,6 +177,63 @@ async function measurePage(page) {
           if (hOverflowList.length >= 3) break;
         }
       }
+
+      // Per-control clipping: the opposite of hOverflowList's overflow-hidden skip above. Every
+      // visible interactive element must lie fully inside the viewport (horizontally — vertical
+      // scrolling past the fold is normal) AND fully inside every ancestor whose overflow-x is
+      // hidden/auto/scroll/clip, which is exactly the class of bug the old script's blanket skip
+      // let through (a Sheet's ScrollView sets overflow-x:hidden while scrolling vertically, and
+      // silently clipped a too-wide form row inside it).
+      const clippedControls = [];
+      const seenClipped = new Set();
+      document
+        .querySelectorAll('input,select,textarea,button,a,[role="button"],[role="link"]')
+        .forEach((el) => {
+          if (el.closest('.phone, .mini-phone')) return;
+          // tabindex="-1" means "not a real tab stop" — the landing page's spam-trap honeypot field
+          // (deliberately parked off-screen at left:-9999px to catch bots, never shown to a real
+          // visitor) is the one case of this in the app; a genuinely clipped control is always a
+          // real tab stop.
+          if (el.getAttribute('tabindex') === '-1') return;
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return;
+          const text = (
+            el.textContent ||
+            el.getAttribute('aria-label') ||
+            el.getAttribute('placeholder') ||
+            ''
+          )
+            .trim()
+            .slice(0, 40);
+
+          function report(by, extra) {
+            const key = `${el.tagName}:${text}:${by}`;
+            if (seenClipped.has(key)) return;
+            seenClipped.add(key);
+            clippedControls.push({ tag: el.tagName, text, by, ...extra });
+          }
+
+          if (r.left < -2 || r.right > window.innerWidth + 2) {
+            report('viewport', { left: Math.round(r.left), right: Math.round(r.right), bound: window.innerWidth });
+            return;
+          }
+
+          let node = el.parentElement;
+          while (node && node !== document.body) {
+            const style = getComputedStyle(node);
+            if (['hidden', 'auto', 'scroll', 'clip'].includes(style.overflowX)) {
+              const ar = node.getBoundingClientRect();
+              if (r.left < ar.left - 2 || r.right > ar.right + 2) {
+                report('ancestor', {
+                  ancestorTag: node.tagName,
+                  ancestorClass: typeof node.className === 'string' ? node.className.slice(0, 40) : '',
+                });
+                break;
+              }
+            }
+            node = node.parentElement;
+          }
+        });
 
       const smallTargets = [];
       const seenTargets = new Set();
@@ -194,6 +267,10 @@ async function measurePage(page) {
 
       const smallText = [];
       const seenText = new Set();
+      const narrowTextOverflow = [];
+      const seenNarrow = new Set();
+      const hiddenOverflowText = [];
+      const seenHiddenOverflow = new Set();
       document.querySelectorAll('body *').forEach((el) => {
         // Deliberate exception, documented in docs/RESPONSIVE_AUDIT.md: the landing page's phone
         // mockups (the hero's ".phone" and the brand section's ".mini-phone") are miniature
@@ -207,15 +284,46 @@ async function measurePage(page) {
         if (!hasDirectText) return;
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return;
+        const text = el.textContent.trim();
         const size = parseFloat(getComputedStyle(el).fontSize);
         const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
         const min = isInput ? MIN_INPUT_TEXT : MIN_TEXT;
         if (size < min) {
-          const text = el.textContent.trim().slice(0, 40);
-          const key = `${el.tagName}:${text}:${size}`;
-          if (seenText.has(key)) return;
-          seenText.add(key);
-          smallText.push({ tag: el.tagName, text, size: Math.round(size * 10) / 10 });
+          const key = `${el.tagName}:${text.slice(0, 40)}:${size}`;
+          if (!seenText.has(key)) {
+            seenText.add(key);
+            smallText.push({ tag: el.tagName, text: text.slice(0, 40), size: Math.round(size * 10) / 10 });
+          }
+        }
+
+        // One-char-per-line symptom (docs/GAP_LIST.md bug 3): a text box squeezed to near-zero
+        // width by a flex-row sibling still has room for each individual character, one per line.
+        if (r.width < MIN_TEXT_BOX && text.length > MAX_CHARS_IN_NARROW_BOX) {
+          const key = `${el.tagName}:${text.slice(0, 40)}`;
+          if (!seenNarrow.has(key)) {
+            seenNarrow.add(key);
+            narrowTextOverflow.push({ tag: el.tagName, text: text.slice(0, 40), width: Math.round(r.width) });
+          }
+        }
+
+        // Clipped by its own overflow:hidden with no ellipsis — readable-looking but actually
+        // truncated mid-word, with no visual cue that anything is missing.
+        const elStyle = getComputedStyle(el);
+        if (
+          (elStyle.overflowX === 'hidden' || elStyle.overflow === 'hidden') &&
+          elStyle.textOverflow !== 'ellipsis' &&
+          el.scrollWidth > el.clientWidth + 2
+        ) {
+          const key = `${el.tagName}:${text.slice(0, 40)}`;
+          if (!seenHiddenOverflow.has(key)) {
+            seenHiddenOverflow.add(key);
+            hiddenOverflowText.push({
+              tag: el.tagName,
+              text: text.slice(0, 40),
+              scrollWidth: el.scrollWidth,
+              clientWidth: el.clientWidth,
+            });
+          }
         }
       });
 
@@ -239,10 +347,23 @@ async function measurePage(page) {
         // whole viewport, which otherwise matched here and produced false positives on every screen.
         return r.width > 100 && r.height > 20 && r.height < 300;
       });
-      if (barCandidates.length > 0) {
-        const bar = barCandidates.reduce((a, b) =>
-          b.getBoundingClientRect().width > a.getBoundingClientRect().width ? b : a,
-        );
+      const bar = barCandidates.reduce(
+        (a, b) =>
+          !a || b.getBoundingClientRect().width > a.getBoundingClientRect().width ? b : a,
+        null,
+      );
+      // A Sheet/ConfirmDialog panel is painted on top of the page behind it (including the real
+      // sticky nav bar, still in the DOM but now visually covered) — their rects can still overlap
+      // geometrically even though the panel is the one actually on top. Confirm "the bar" is really
+      // the topmost thing at its own location before trusting any overlap with it.
+      const barOnTop =
+        bar &&
+        (() => {
+          const r = bar.getBoundingClientRect();
+          const topEl = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return Boolean(topEl) && (bar === topEl || bar.contains(topEl));
+        })();
+      if (bar && barOnTop) {
         const barRect = bar.getBoundingClientRect();
         document.querySelectorAll('*').forEach((el) => {
           const style = getComputedStyle(el);
@@ -267,9 +388,17 @@ async function measurePage(page) {
         }
       }
 
-      return { hOverflowList, smallTargets, smallText, barOcclusion };
+      return {
+        hOverflowList,
+        clippedControls,
+        smallTargets,
+        smallText,
+        narrowTextOverflow,
+        hiddenOverflowText,
+        barOcclusion,
+      };
     },
-    { MIN_TOUCH, MIN_TEXT, MIN_INPUT_TEXT },
+    { MIN_TOUCH, MIN_TEXT, MIN_INPUT_TEXT, MIN_TEXT_BOX, MAX_CHARS_IN_NARROW_BOX },
   );
 }
 
@@ -412,6 +541,7 @@ async function buildOwnerSession(page) {
   }));
   return {
     tokens,
+    ownerName: name,
     helperMobile,
     helperPin,
     headChefMobile,
@@ -460,7 +590,121 @@ async function injectTokens(page, tokens) {
   }, tokens.access, tokens.refresh);
 }
 
+// ---------- seed data for the sheet/dialog checks (direct API calls, same endpoints smoke.py uses) ----------
+
+async function apiRequest(path, { method = 'GET', token, body } = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  return { status: res.status, body: text ? JSON.parse(text) : null };
+}
+
+/** So the counts-review "Remind" button (and its reminder sheet — the thing Step 11 fixes) has
+ * something real to open, and so the wastage delete dialog has a real row to delete: pushes
+ * closing_count_hour to 0 (same trick smoke.py uses) so the closing count about to be submitted is
+ * late, submits it with the same quantities as the opening count (so the unusual-value guard never
+ * fires), then records one wastage entry. All via the same endpoints the UI itself calls — not a
+ * new backend feature, just driving existing ones directly instead of through a form. */
+async function seedLateClosingCountAndWastage(accessToken) {
+  const me = await apiRequest('/me/', { token: accessToken });
+  const businessId = me.body.businesses[0].id;
+
+  const settingsRes = await apiRequest(`/businesses/${businessId}/settings/`, {
+    method: 'PATCH',
+    token: accessToken,
+    body: { closing_count_hour: 0 },
+  });
+  if (settingsRes.status !== 200) {
+    throw new Error(`seed: set closing_count_hour failed, got ${settingsRes.status} (${JSON.stringify(settingsRes.body)})`);
+  }
+
+  const form = await apiRequest(`/businesses/${businessId}/counts/form/?type=closing`, { token: accessToken });
+  const items = form.body.items;
+  const lines = items.map((item) => ({ stock_item: item.id, state: 'counted', counted_qty: '5' }));
+  const countRes = await apiRequest(`/businesses/${businessId}/counts/`, {
+    method: 'POST',
+    token: accessToken,
+    body: { type: 'closing', lines },
+  });
+  if (countRes.status !== 201) {
+    throw new Error(`seed: closing count failed, got ${countRes.status} (${JSON.stringify(countRes.body)})`);
+  }
+
+  const wastageRes = await apiRequest(`/businesses/${businessId}/wastage/`, {
+    method: 'POST',
+    token: accessToken,
+    body: { stock_item: items[0].id, quantity: '1', reason: 'spillage', note: '' },
+  });
+  if (wastageRes.status !== 201) {
+    throw new Error(`seed: wastage entry failed, got ${wastageRes.status} (${JSON.stringify(wastageRes.body)})`);
+  }
+}
+
 // ---------- main ----------
+
+function recordFailures(name, width, result, failures) {
+  for (const o of result.hOverflowList) {
+    failures.push({
+      route: name,
+      width,
+      kind: 'horizontal overflow',
+      detail: `<${o.tag.toLowerCase()} class="${o.className}"> scrollWidth=${o.scrollWidth} clientWidth=${o.clientWidth}`,
+    });
+  }
+  for (const c of result.clippedControls ?? []) {
+    const detail =
+      c.by === 'viewport'
+        ? `<${c.tag.toLowerCase()}> "${c.text}" clipped by viewport (left=${c.left} right=${c.right} viewport=${c.bound})`
+        : `<${c.tag.toLowerCase()}> "${c.text}" clipped by <${c.ancestorTag.toLowerCase()} class="${c.ancestorClass}"> (overflow ancestor)`;
+    failures.push({ route: name, width, kind: 'control clipped', detail });
+  }
+  for (const t of result.smallTargets) {
+    failures.push({
+      route: name,
+      width,
+      kind: 'touch target < 44px',
+      detail: `<${t.tag.toLowerCase()}> "${t.text}" ${t.w}x${t.h}`,
+    });
+  }
+  for (const t of result.smallText) {
+    failures.push({
+      route: name,
+      width,
+      kind: 'text too small',
+      detail: `<${t.tag.toLowerCase()}> "${t.text}" ${t.size}px`,
+    });
+  }
+  for (const t of result.narrowTextOverflow ?? []) {
+    failures.push({
+      route: name,
+      width,
+      kind: 'one-char-per-line text',
+      detail: `<${t.tag.toLowerCase()}> "${t.text}" box width=${t.width}px`,
+    });
+  }
+  for (const t of result.hiddenOverflowText ?? []) {
+    failures.push({
+      route: name,
+      width,
+      kind: 'text clipped, no ellipsis',
+      detail: `<${t.tag.toLowerCase()}> "${t.text}" scrollWidth=${t.scrollWidth} clientWidth=${t.clientWidth}`,
+    });
+  }
+  if (result.barOcclusion) {
+    failures.push({
+      route: name,
+      width,
+      kind: 'hidden behind sticky bar',
+      detail: `<${result.barOcclusion.tag.toLowerCase()}> "${result.barOcclusion.text}"`,
+    });
+  }
+}
 
 async function checkRouteAtWidth(page, route, width, failures) {
   await page.setViewport({ width, height: HEIGHT });
@@ -480,38 +724,24 @@ async function checkRouteAtWidth(page, route, width, failures) {
 
   if (route.offline) await page.setOfflineMode(false);
 
-  for (const o of result.hOverflowList) {
-    failures.push({
-      route: route.name,
-      width,
-      kind: 'horizontal overflow',
-      detail: `<${o.tag.toLowerCase()} class="${o.className}"> scrollWidth=${o.scrollWidth} clientWidth=${o.clientWidth}`,
-    });
-  }
-  for (const t of result.smallTargets) {
-    failures.push({
-      route: route.name,
-      width,
-      kind: 'touch target < 44px',
-      detail: `<${t.tag.toLowerCase()}> "${t.text}" ${t.w}x${t.h}`,
-    });
-  }
-  for (const t of result.smallText) {
-    failures.push({
-      route: route.name,
-      width,
-      kind: 'text too small',
-      detail: `<${t.tag.toLowerCase()}> "${t.text}" ${t.size}px`,
-    });
-  }
-  if (result.barOcclusion) {
-    failures.push({
-      route: route.name,
-      width,
-      kind: 'hidden behind sticky bar',
-      detail: `<${result.barOcclusion.tag.toLowerCase()}> "${result.barOcclusion.text}"`,
-    });
-  }
+  recordFailures(route.name, width, result, failures);
+}
+
+/** Opens a bottom sheet / dialog fresh at each width (navigate, open, measure, screenshot) rather
+ * than resizing with it already open — simpler, and avoids any state carried over between widths.
+ * `sheet.open(page)` must leave the sheet/dialog visible and settled before returning. */
+async function checkSheetAtWidth(page, sheet, width, failures) {
+  await page.setViewport({ width, height: HEIGHT });
+  await page.goto(sheet.url, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await sheet.open(page);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const result = await measurePage(page);
+  await mkdir(SCREEN_DIR, { recursive: true });
+  await page.screenshot({ path: `${SCREEN_DIR}/${sheet.name}-${width}.png` });
+
+  recordFailures(sheet.name, width, result, failures);
 }
 
 async function main() {
@@ -529,6 +759,7 @@ async function main() {
     console.log('Setting up an Owner session with real wizard data...');
     const {
       tokens: ownerTokens,
+      ownerName,
       helperMobile,
       helperPin,
       headChefMobile,
@@ -542,6 +773,8 @@ async function main() {
     const helperTokens = await buildHelperSession(browser, helperMobile, helperPin);
     console.log('Setting up a Head chef session...');
     const headChefTokens = await buildHeadChefSession(browser, headChefMobile, headChefPin);
+    console.log('Seeding a late closing count and a wastage entry for the sheet checks...');
+    await seedLateClosingCountAndWastage(ownerTokens.access);
     console.log('Sessions ready. Checking every route at every width...\n');
 
     const noAuthRoutes = [
@@ -603,6 +836,81 @@ async function main() {
         await checkRouteAtWidth(ownerPage, route, width, failures);
       }
     }
+
+    // Step 11: every bottom sheet / dialog, not just routes — opened fresh at each width.
+    console.log('\nChecking sheets and dialogs at every width...\n');
+    const ownerSheets = [
+      {
+        name: 'sheet-record-purchase',
+        url: `${APP_URL}/buy`,
+        open: async (page) => {
+          await waitForText(page, 'Purchases');
+          await clickButton(page, 'Record purchase');
+          await waitForText(page, 'What did you buy?');
+        },
+      },
+      {
+        name: 'sheet-record-purchase-edit',
+        url: `${APP_URL}${purchasePath}`,
+        open: async (page) => {
+          await waitForText(page, 'Purchase detail');
+          await clickButton(page, 'Edit purchase');
+          await waitForText(page, 'Edit purchase');
+        },
+      },
+      {
+        name: 'sheet-record-wastage',
+        url: `${APP_URL}/wastage`,
+        open: async (page) => {
+          await waitForText(page, 'Wastage');
+          await clickButton(page, 'Record wastage');
+          await waitForText(page, 'What was lost?');
+        },
+      },
+      {
+        name: 'dialog-delete-purchase',
+        url: `${APP_URL}${purchasePath}`,
+        open: async (page) => {
+          await waitForText(page, 'Purchase detail');
+          await clickButton(page, 'Delete purchase');
+          await waitForText(page, 'Delete purchase?');
+        },
+      },
+      {
+        name: 'dialog-delete-wastage',
+        url: `${APP_URL}/wastage`,
+        open: async (page) => {
+          await waitForText(page, 'Wastage');
+          await clickAndSettle(await findVisible(page, '[aria-label="Delete entry"]'));
+          await waitForText(page, 'Delete this entry?');
+        },
+      },
+      {
+        name: 'sheet-more-menu',
+        url: `${APP_URL}/home`,
+        // Only below NAV_SIDE_BREAKPOINT (840px) — AppShell swaps the bottom nav + "More" sheet for
+        // a side menu listing everything directly from there up, so there's no "More" button to open.
+        widths: SHEET_WIDTHS.filter((w) => w < 840),
+        open: async (page) => {
+          await clickAndSettle(await findVisible(page, '[aria-label="More"]'));
+        },
+      },
+      {
+        name: 'sheet-prepare-reminder',
+        url: `${APP_URL}/counts`,
+        open: async (page) => {
+          await waitForText(page, "Today's counts");
+          await clickButton(page, `Remind ${ownerName}`);
+          await waitForText(page, 'Message about the late stock count');
+        },
+      },
+    ];
+    for (const sheet of ownerSheets) {
+      for (const width of sheet.widths ?? SHEET_WIDTHS) {
+        console.log(`  ${sheet.name.padEnd(26)} ${width}px`);
+        await checkSheetAtWidth(ownerPage, sheet, width, failures);
+      }
+    }
     await ownerPage.close();
 
     const helperPage = await browser.newPage();
@@ -611,6 +919,23 @@ async function main() {
       for (const width of WIDTHS) {
         console.log(`  ${route.name.padEnd(14)} ${width}px`);
         await checkRouteAtWidth(helperPage, route, width, failures);
+      }
+    }
+    const helperSheets = [
+      {
+        name: 'sheet-record-wastage-helper',
+        url: `${APP_URL}/wastage`,
+        open: async (page) => {
+          await waitForText(page, 'Wastage');
+          await clickButton(page, 'Record wastage');
+          await waitForText(page, 'What was lost?');
+        },
+      },
+    ];
+    for (const sheet of helperSheets) {
+      for (const width of sheet.widths ?? SHEET_WIDTHS) {
+        console.log(`  ${sheet.name.padEnd(26)} ${width}px`);
+        await checkSheetAtWidth(helperPage, sheet, width, failures);
       }
     }
     await helperPage.close();
@@ -654,4 +979,80 @@ async function main() {
   }
 }
 
-main().catch((err) => fail(err.stack ?? String(err)));
+// ---------- self-test ----------
+
+/** Proves the clipping check can actually fail: injects a deliberately clipped input into a real
+ * screen (a fixed-width overflow:hidden wrapper, with the input forced wider than it), confirms
+ * `measurePage` reports it, then removes the injected element and confirms the page is clean again.
+ * Run with: node scripts/responsive_check.mjs --self-test */
+async function selfTest() {
+  const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
+  const landingServer = await ensureLandingServer(8082);
+  let ok = true;
+
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 390, height: 900 });
+    await page.goto(`${APP_URL}/login`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const before = await measurePage(page);
+    if (before.clippedControls.length > 0) {
+      console.log('SELF-TEST FAIL: /login already has a clipped control before injection — pick a cleaner host screen.');
+      ok = false;
+    }
+
+    await page.evaluate(() => {
+      const wrapper = document.createElement('div');
+      wrapper.id = 'self-test-clip-wrapper';
+      wrapper.style.cssText = 'width:60px;overflow:hidden;position:relative;';
+      const input = document.createElement('input');
+      input.id = 'self-test-clip-input';
+      input.setAttribute('aria-label', 'Self-test clipped field');
+      input.style.cssText = 'width:300px;height:44px;display:block;';
+      wrapper.appendChild(input);
+      document.body.appendChild(wrapper);
+    });
+
+    const during = await measurePage(page);
+    const caught = during.clippedControls.some((c) => c.text === 'Self-test clipped field');
+    if (!caught) {
+      console.log('SELF-TEST FAIL: the injected clipped input was NOT flagged by measurePage().');
+      console.log('clippedControls found:', JSON.stringify(during.clippedControls));
+      ok = false;
+    } else {
+      console.log('SELF-TEST: injected a clipped input — measurePage() correctly flagged it.');
+    }
+
+    await page.evaluate(() => {
+      document.getElementById('self-test-clip-wrapper')?.remove();
+    });
+
+    const after = await measurePage(page);
+    const stillThere = after.clippedControls.some((c) => c.text === 'Self-test clipped field');
+    if (stillThere) {
+      console.log('SELF-TEST FAIL: the injected input is still flagged after removal — cleanup failed.');
+      ok = false;
+    } else {
+      console.log('SELF-TEST: removed the injected input — the page is clean again.');
+    }
+
+    await page.close();
+  } finally {
+    await browser.close();
+    if (landingServer) landingServer.close();
+  }
+
+  if (ok) {
+    console.log('\nSELF-TEST PASSED — the clipping check can catch a real clipped control.');
+  } else {
+    console.log('\nSELF-TEST FAILED — see above.');
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv.includes('--self-test')) {
+  selfTest().catch((err) => fail(err.stack ?? String(err)));
+} else {
+  main().catch((err) => fail(err.stack ?? String(err)));
+}

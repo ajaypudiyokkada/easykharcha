@@ -1,6 +1,6 @@
 import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import type { CountListEntry } from '../../src/api/counts';
 import { useAuth } from '../../src/auth/AuthContext';
@@ -192,7 +192,11 @@ export default function CountReview() {
           label={s.prepareReminder}
           variant="primary"
           loading={sending}
+          disabled={!waLink}
           onPress={() => {
+            if (waLink) {
+              Linking.openURL(waLink);
+            }
             setRemindTarget(null);
             setToast(s.reminderReadyToast);
           }}

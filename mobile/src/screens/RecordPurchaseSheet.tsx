@@ -256,18 +256,22 @@ export function RecordPurchaseSheet({
             })}
           </View>
           <View style={styles.formGrid}>
-            <TextField
-              label={s.lineQuantityLabel}
-              value={line.quantity}
-              onChangeText={(text) => updateLine(index, { quantity: text })}
-              keyboardType="decimal-pad"
-            />
-            <TextField
-              label={s.lineUnitPriceLabel}
-              value={line.unitPrice}
-              onChangeText={(text) => updateLine(index, { unitPrice: text })}
-              keyboardType="decimal-pad"
-            />
+            <View style={styles.formGridItem}>
+              <TextField
+                label={s.lineQuantityLabel}
+                value={line.quantity}
+                onChangeText={(text) => updateLine(index, { quantity: text })}
+                keyboardType="decimal-pad"
+              />
+            </View>
+            <View style={styles.formGridItem}>
+              <TextField
+                label={s.lineUnitPriceLabel}
+                value={line.unitPrice}
+                onChangeText={(text) => updateLine(index, { unitPrice: text })}
+                keyboardType="decimal-pad"
+              />
+            </View>
           </View>
           <Small style={styles.lineTotal}>
             {s.lineTotalLabel}: {formatRupees(lineTotal(line))}
@@ -371,6 +375,10 @@ const styles = StyleSheet.create({
   formGrid: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  formGridItem: {
+    flex: 1,
+    minWidth: 0,
   },
   lineTotal: {
     color: colours.muted,

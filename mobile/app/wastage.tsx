@@ -1,6 +1,6 @@
 import { Redirect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { WastageEntry, WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
@@ -17,6 +17,7 @@ import {
   ConfirmDialog,
   EmptyState,
   Heading,
+  Icon,
   NoAccess,
   ReadError,
   Screen,
@@ -204,7 +205,14 @@ function WastageRow({
         <Body style={styles.rowValue}>{formatRupees(entry.value)}</Body>
       ) : null}
       {canDelete ? (
-        <Button label={strings.wastage.deleteWastage} variant="link" onPress={onDelete} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={strings.wastage.deleteWastage}
+          style={styles.deleteButton}
+          onPress={onDelete}
+        >
+          <Icon name="delete" size={18} colour={colours.danger} />
+        </Pressable>
       ) : null}
     </View>
   );
@@ -251,6 +259,7 @@ const styles = StyleSheet.create({
   },
   rowMain: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   rowName: {
@@ -261,6 +270,13 @@ const styles = StyleSheet.create({
   },
   rowValue: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  deleteButton: {
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyMessage: {
     color: colours.muted,

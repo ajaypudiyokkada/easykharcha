@@ -78,8 +78,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Fixed to its own content width, never squeezed — the step counter is the primary label here,
+  // so it's saveLinkTap that gives up space (and wraps) when the row runs out of room, not this.
   copy: {
-    flex: 1,
+    flexShrink: 0,
   },
   stepText: {
     fontFamily: fonts.heading,
@@ -89,13 +91,17 @@ const styles = StyleSheet.create({
   // A bare text Pressable has no touch target of its own beyond its glyph box — this pads it to the
   // 44px floor without changing how the link itself looks.
   saveLinkTap: {
+    flex: 1,
+    minWidth: 0,
     minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
+    alignItems: 'flex-end',
   },
   saveLink: {
     color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
     textDecorationLine: 'underline',
+    textAlign: 'right',
   },
   track: {
     height: PROGRESS_BAR_HEIGHT,

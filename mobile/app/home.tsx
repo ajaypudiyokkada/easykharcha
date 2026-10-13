@@ -18,6 +18,7 @@ import {
   Card,
   Heading,
   Icon,
+  type IconName,
   Muted,
   Screen,
   Small,
@@ -240,6 +241,7 @@ function OwnerHome() {
   const canSeePurchases = can(permissions, 'purchases.view');
   const canRecordPurchase = can(permissions, 'purchases.create');
   const canRecordWastage = can(permissions, 'wastage.create');
+  const canStartCount = can(permissions, 'counts.create');
   const timezone = business.timezone;
 
   const loadToday = useCallback(() => {
@@ -289,11 +291,31 @@ function OwnerHome() {
   const closingLate = today?.closing.state === 'late';
   const openingLate = today?.opening.state === 'late';
 
-  function countStatusLabel(countState: TodayStatus['opening'] | undefined): string {
-    if (!countState) return '';
-    if (countState.state === 'done') return s.countDone;
-    if (countState.state === 'late') return s.countLate;
-    return s.countNotStarted;
+  function countStateLine(
+    type: 'opening' | 'closing',
+    info: TodayStatus['opening'] | undefined,
+  ): { icon: IconName; colour: string; label: string } {
+    if (!info) return { icon: 'clock', colour: colours.muted, label: '' };
+    if (info.state === 'done') {
+      return {
+        icon: 'success',
+        colour: colours.success,
+        label: type === 'opening' ? t.openingDone : t.closingDone,
+      };
+    }
+    if (info.state === 'late') {
+      return {
+        icon: 'warning',
+        colour: colours.warning,
+        label: type === 'opening' ? t.openingLate : t.closingLate,
+      };
+    }
+    const deadline = formatDateTime(info.deadline_at, timezone);
+    return {
+      icon: 'clock',
+      colour: colours.muted,
+      label: type === 'opening' ? t.openingDue(deadline) : t.closingDue(deadline),
+    };
   }
 
   return (
@@ -380,7 +402,17 @@ function OwnerHome() {
           <View style={styles.statRow}>
             <Card style={styles.statCard}>
               <Small style={styles.statLabel}>{s.stockCountToday}</Small>
-              <Heading level={3}>{countStatusLabel(today.closing)}</Heading>
+              {(['opening', 'closing'] as const).map((type) => {
+                const line = countStateLine(type, today[type]);
+                return (
+                  <View key={type} style={styles.countStateRow}>
+                    <Icon name={line.icon} size={16} colour={line.colour} />
+                    <Small style={[styles.countStateLabel, { color: line.colour }]}>
+                      {line.label}
+                    </Small>
+                  </View>
+                );
+              })}
             </Card>
             <Card style={styles.statCard}>
               <Small style={styles.statLabel}>{s.wastageToday}</Small>
@@ -399,11 +431,13 @@ function OwnerHome() {
                 onPress={() => setPurchaseSheetVisible(true)}
               />
             ) : null}
-            <ActionCard
-              label={s.startStockCount}
-              icon="stock"
-              onPress={() => router.push('/count')}
-            />
+            {canStartCount ? (
+              <ActionCard
+                label={s.startStockCount}
+                icon="stock"
+                onPress={() => router.push('/count')}
+              />
+            ) : null}
             {canRecordWastage ? (
               <ActionCard
                 label={s.recordWastage}
@@ -544,6 +578,15 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     color: colours.muted,
+  },
+  countStateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  countStateLabel: {
+    flex: 1,
+    minWidth: 0,
   },
   sectionLabel: {
     color: colours.muted,

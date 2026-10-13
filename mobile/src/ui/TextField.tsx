@@ -138,6 +138,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    minWidth: 0,
     minHeight: spacing.huge,
     paddingHorizontal: spacing.md,
     color: colours.text,

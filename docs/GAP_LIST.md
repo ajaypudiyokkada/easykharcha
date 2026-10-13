@@ -176,7 +176,7 @@ individually; see the Screens table above and Backend gaps below for what each n
 | "Ask for a recount" (opens remindSheet, mislabelled as "Remind Meena" regardless of context — another design bug) | not built | MISSING |
 | "Remind \<name\>" (Owner, late counts) | opens a real Sheet, calls the real endpoint | PARTIAL — see "Prepare reminder" below |
 | "Count it myself" | → `/count` | WORKS |
-| "Prepare reminder" | closes the sheet + a toast; **never opens the wa.me link it just fetched** | DEAD — the person can never actually send the reminder through the UI |
+| "Prepare reminder" | opens the already-fetched wa.me link via `Linking.openURL`, then closes the sheet + toast | **FIXED in Step 11** — was DEAD (closed the sheet + a toast but never opened the link) |
 
 ### Global nav (bottom nav / side menu / "More" sheet)
 
@@ -190,11 +190,23 @@ individually; see the Screens table above and Backend gaps below for what each n
 
 Tallying every row above (77 controls): **42 WORKS**, **8 DISABLED/Coming soon** (Record sales,
 Reports link ×2, All alerts, Filter×2 — themselves dead in the design — Sales task tile, Settings
-nav), **6 DEAD** (avatar button, 2 filter buttons — all three dead in the design itself — the
-count-review card's static-detail bug and its mislabelled recount button, and "Prepare reminder"),
-**21 MISSING** (everything on the ten not-built screens, plus Reset PIN, Remove-member UI, the two
-Record-wastage buttons missing from Buy/Stock-detail, and the Stock screen's missing count
-entry-points).
+nav), **6 DEAD** (see per-item resolution below — only one was an actual dead button inside the
+built app; the original tally lumped it in with five items that are either design-only dead ends
+or already-correct MISSING/WORKS behaviour, which the per-screen detail tables above state
+correctly and now this section matches), **21 MISSING** (everything on the ten not-built screens,
+plus Reset PIN, Remove-member UI, the two Record-wastage buttons missing from Buy/Stock-detail, and
+the Stock screen's missing count entry-points).
+
+**"6 DEAD" resolution (Step 11):**
+
+| # | Item | What's actually true | Resolution |
+|---|---|---|---|
+| 1 | Avatar button (Home) | Decorative in the design itself; no app element exists for it | N/A — nothing to fix, the design has no handler here either |
+| 2 | Filter button (`screen-buy`) | Not built in the app (MISSING), and dead in the design too (no click handler there) | N/A — not a live dead button; it's a not-yet-built feature, tracked as MISSING, not DEAD |
+| 3 | Filter button (`screen-stock`) | Same as #2 — not built, dead in the design too | N/A — tracked as MISSING, not DEAD |
+| 4 | Count-review card tap (static-detail bug) | Already WORKS — the app's tap goes to the tapped count's real detail page, fixing a bug present in the design | N/A — already correct, was mis-tallied in the original summary count, not actually dead |
+| 5 | "Ask for a recount" | Not built in the app (MISSING); correct per spec since the design's version is mislabelled regardless of context | N/A — tracked as MISSING, not DEAD |
+| 6 | "Prepare reminder" | Was genuinely dead: closed the sheet + a toast without ever opening the wa.me link it had already fetched | **Fixed** — `onPress` now calls `Linking.openURL(waLink)` before closing the sheet (`mobile/app/counts/index.tsx`) |
 
 ## Roles
 

@@ -379,6 +379,15 @@ async function checkOwnerOpeningCount(page) {
   await waitForPath(page, '/home');
   await waitForText(page, 'Stock count');
   console.log('OK — Home shows the stock count state card.');
+
+  // Step 11 bug 1: the card used to read only the closing count's state — assert both the opening
+  // count (just submitted, "done") and the closing count (not due yet) show up as separate lines.
+  await waitForText(page, 'Opening count done');
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  if (!bodyText.includes('Closing count due by')) {
+    fail('Home\'s stock count card should also show the closing count\'s own state, not just the opening one');
+  }
+  console.log('OK — Home\'s stock count card shows both the opening and closing count states.');
 }
 
 const FORBIDDEN_WORDS = ['₹', 'expected', 'gap', 'price'];
@@ -453,6 +462,19 @@ async function checkHeadChefTodayFlow(page, headChefMobile, headChefPin) {
   console.log('OK — the Head chef signs in and sees the team Today screen.');
 }
 
+// Step 11 bug 2: a Manager used to see an ungated "Start stock count" action that returned 403 —
+// Manager has no counts.create permission, so the button must not render at all.
+async function checkManagerHomeFlow(page, managerMobile, managerPassword) {
+  await login(page, managerMobile, managerPassword);
+  await waitForPath(page, '/home');
+  await waitForText(page, 'Quick actions');
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  if (bodyText.includes('Start stock count')) {
+    fail('a Manager should not see "Start stock count" on Home — they have no counts.create permission');
+  }
+  console.log('OK — the Manager signs in and Home has no "Start stock count" button.');
+}
+
 // Step 10: back as Owner — count review lists both counts with a late/on-time chip, the closing
 // count's detail shows the used-since-last-count numbers with the flagged item first, and the
 // Wastage screen shows the Helper's entry with its rupee value before the Owner deletes it.
@@ -484,7 +506,9 @@ async function checkCountReviewAndWastageFlow(page, ownerMobile, ownerPassword) 
   }
   console.log("OK — the Wastage screen shows the Helper's entry with its rupee value.");
 
-  await clickButton(page, 'Delete entry');
+  // Step 11 bug 3: the row's delete control is now a fixed-size icon button (fixed the one-char-
+  // per-line wrap a full-width text Button caused in the row) — no text content, aria-label only.
+  await clickAndSettle(await findVisible(page, '[aria-label="Delete entry"]'));
   await waitForText(page, 'Delete this entry?');
   await clickButton(page, 'Delete entry', { last: true });
   await waitForText(page, 'No wastage recorded yet.');
@@ -702,6 +726,17 @@ async function main() {
     await waitForText(page, 'Chef Rahul');
     console.log('OK — added a Head chef with a PIN.');
 
+    // Step 11: a Manager too, for the "no Start stock count button" scenario below.
+    const managerMobile = randomMobile();
+    const managerPassword = 'Manager1234!';
+    await typeInto(page, 'Name', 'Manoj Manager', { last: true });
+    await typeInto(page, 'Mobile number', managerMobile, { last: true });
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Manager'));
+    await typeInto(page, 'Temporary password', managerPassword);
+    await clickButton(page, 'Add person');
+    await waitForText(page, 'Manoj Manager');
+    console.log('OK — added a Manager with a temporary password.');
+
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/6');
     console.log('OK — step 5 saved, moved to /setup/6.');
@@ -812,6 +847,8 @@ async function main() {
     await checkHelperTodayFlow(page, helperMobile, helperPin);
     await logoutFromAnywhere(page);
     await checkHeadChefTodayFlow(page, headChefMobile, headChefPin);
+    await logoutFromAnywhere(page);
+    await checkManagerHomeFlow(page, managerMobile, managerPassword);
     await logoutFromAnywhere(page);
     await checkCountReviewAndWastageFlow(page, mobile, password);
     await logoutFromAnywhere(page);
