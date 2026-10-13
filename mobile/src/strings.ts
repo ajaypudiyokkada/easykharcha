@@ -132,6 +132,8 @@ export const strings = {
     } as Record<number, string>,
     boughtToday: 'Bought today',
     last7Days: 'Last 7 days',
+    moneyToday: 'Money today',
+    reportsLink: 'Reports',
     quickActions: 'Quick actions',
     recordPurchase: 'Record purchase',
     startStockCount: 'Start stock count',
@@ -465,6 +467,84 @@ export const strings = {
     errors: {
       network: "Can't reach EasyKharcha. Check your internet and try again.",
       generic: 'Something went wrong. Please try again.',
+    },
+  },
+  reports: {
+    title: 'Reports',
+    periods: {
+      today: 'Today',
+      '7d': '7 days',
+      '30d': '30 days',
+      '90d': '3 months',
+    } as Record<string, string>,
+    empty: {
+      message: 'Reports will appear after you record purchases, stock counts and sales.',
+      button: 'Record purchase',
+    },
+    errors: {
+      network: "Can't reach EasyKharcha. Check your internet and try again.",
+      generic: 'Something went wrong. Please try again.',
+    },
+    moneyWent: {
+      title: 'Where money went',
+      unit: '₹',
+      seriesBought: 'Bought',
+      seriesWastage: 'Wastage',
+      seriesGap: 'Gap',
+      takeaway: (dominant: string, gapDayLabel: string | null) =>
+        gapDayLabel
+          ? `Most money went into ${dominant}. Gaps were highest on ${gapDayLabel}.`
+          : `Most money went into ${dominant}.`,
+      button: 'View purchases',
+      emptyMessage: 'Record a purchase, a stock count or some wastage to see where money went.',
+    },
+    usedVsExpected: {
+      title: 'Stock used vs what it should have used',
+      unit: 'Quantity',
+      seriesUsed: 'Used',
+      seriesExpected: 'Expected',
+      takeaway: (name: string, gapQty: string, unit: string, gapValue: string) =>
+        `${name}'s gap was the biggest, at ${gapQty} ${unit} (${gapValue}).`,
+      noGapsTakeaway: 'No stock gaps in this period.',
+      button: 'Review counts',
+      emptyMessage: 'Closing counts with sales to compare against will show up here.',
+    },
+    wastageTrend: {
+      title: 'Wastage over time',
+      unit: '₹',
+      seriesValue: 'Wastage',
+      takeawayChange: (pct: string, direction: 'down' | 'up') =>
+        `Wastage is ${direction} ${pct}% from the previous period.`,
+      takeawayFlat: (total: string) => `${total} wasted this period.`,
+      button: 'View wastage',
+      emptyMessage: 'Record some wastage to see the trend over time.',
+    },
+    priceTrend: {
+      title: 'Purchase prices rising',
+      unit: '₹ per unit',
+      seriesPrice: 'Price',
+      takeaway: (name: string, direction: 'more' | 'less', pct: string) =>
+        `${name} costs ${pct}% ${direction} than at the start of the period.`,
+      pickerLabel: 'Item',
+      button: (name: string) => `Open ${name}`,
+      emptyMessage: 'Record a second purchase of the same item to see its price trend.',
+    },
+    salesVsCost: {
+      title: 'Sales vs cost',
+      unit: '₹',
+      seriesSales: 'Sales',
+      seriesCost: 'Stock cost',
+      seriesTarget: 'Target',
+      takeaway: (costPct: string, targetPct: string) =>
+        `Stock cost was ${costPct}% of sales, target ${targetPct}%.`,
+      coverage: (pct: string) => `Based on ${pct}% of sales.`,
+      button: 'View sales',
+      emptyMessage: 'Record sales and purchases to compare cost against revenue.',
+    },
+    biggestGaps: {
+      title: 'Biggest gaps',
+      empty: 'No flagged stock gaps in this period.',
+      button: 'Review counts',
     },
   },
   setup: {

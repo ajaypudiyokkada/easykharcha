@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/v1/", include("wastage.urls")),
     path("api/v1/", include("sales.urls")),
     path("api/v1/", include("alerts.urls")),
+    path("api/v1/", include("reports.urls")),
 ]
 
 if settings.DEBUG:

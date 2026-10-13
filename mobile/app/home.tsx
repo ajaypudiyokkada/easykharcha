@@ -449,24 +449,38 @@ function OwnerHome() {
         ) : null}
 
         {(canSeePurchases && purchaseSummary) || (canSeeSales && salesSummary) ? (
-          <View style={styles.statRow}>
-            {canSeePurchases && purchaseSummary ? (
-              <Card style={styles.statCard}>
-                <Small style={styles.statLabel}>{s.boughtToday}</Small>
-                <Heading level={3}>{formatRupees(purchaseSummary.bought_today)}</Heading>
-              </Card>
-            ) : null}
-            {canSeeSales && salesSummary ? (
-              <Card style={styles.statCard}>
-                <Small style={styles.statLabel}>{s.salesToday}</Small>
-                <Heading level={3}>{formatRupees(salesSummary.sales_today)}</Heading>
-              </Card>
-            ) : null}
-            {canSeePurchases && purchaseSummary ? (
-              <Card style={styles.statCard}>
-                <Small style={styles.statLabel}>{s.last7Days}</Small>
-                <Heading level={3}>{formatRupees(purchaseSummary.last_7_days)}</Heading>
-              </Card>
+          <View>
+            <Small style={styles.sectionLabel}>{s.moneyToday}</Small>
+            <View style={styles.statRow}>
+              {canSeePurchases && purchaseSummary ? (
+                <Card style={styles.statCard}>
+                  <Small style={styles.statLabel}>{s.boughtToday}</Small>
+                  <Heading level={3}>{formatRupees(purchaseSummary.bought_today)}</Heading>
+                </Card>
+              ) : null}
+              {canSeeSales && salesSummary ? (
+                <Card style={styles.statCard}>
+                  <Small style={styles.statLabel}>{s.salesToday}</Small>
+                  <Heading level={3}>{formatRupees(salesSummary.sales_today)}</Heading>
+                </Card>
+              ) : null}
+              {canSeePurchases && purchaseSummary ? (
+                <Card style={styles.statCard}>
+                  <Small style={styles.statLabel}>{s.last7Days}</Small>
+                  <Heading level={3}>{formatRupees(purchaseSummary.last_7_days)}</Heading>
+                </Card>
+              ) : null}
+            </View>
+            {can(permissions, 'reports.view') ? (
+              <Pressable
+                accessibilityRole="button"
+                style={styles.allAlertsLink}
+                onPress={() =>
+                  router.push('/reports?period=7d' as Parameters<typeof router.push>[0])
+                }
+              >
+                <Small style={styles.continueLink}>{s.reportsLink}</Small>
+              </Pressable>
             ) : null}
           </View>
         ) : null}

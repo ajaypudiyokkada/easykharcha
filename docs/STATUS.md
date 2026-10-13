@@ -110,6 +110,16 @@ not built yet.
   Home's one-off "Closing count is late" card replaced by a real "Needs attention" (top 4 alerts).
   New profile sheet (avatar/user block -> name, role, business, Switch business, Account placeholder,
   Log out) is now the only place Log out lives — removed from Home for every role.
+- **Step 16 — Reports and trends.** New `reports` app: `GET reports/summary/?period=` (one call, six
+  blocks — money_went, used_vs_expected, wastage_trend, price_trend, sales_vs_cost, biggest_gaps),
+  new `reports.view` permission (Owner/Manager), reusing `counts.gap.lines_with_gap` for every gap
+  figure rather than a third implementation. New `BarChart`/`LineChart` (react-native-svg + d3-scale/
+  d3-shape/d3-array, 10 small DOM-free packages, ~0.9MB unpacked source; `build:web`'s bundle is
+  3.45MB raw / ~608KB gzipped with charts included, no isolated before/after diff taken) alongside
+  the existing `PriceChart`. Real Reports screen (period chips, six cards) replaces the ComingSoon
+  stub; Home's Money section gained a "Reports" link onto the 7-day period. A 12px axis-tick text
+  exemption added to `scripts/responsive_check.mjs`, matching the landing-mockup one. `signup_per_ip`
+  raised 20 -> 30 for the larger smoke suite.
 
 ## Permission table
 
@@ -204,8 +214,6 @@ both say so in the UI.
 - **A legacy/ code reuse plan** — `legacy/` (the earlier multi-tenant restaurant SaaS build) is kept
   intact and untouched; nothing in the current app reads from or depends on it, and no decision has
   been made about reusing any of its code. Do not delete it.
-- **Reports and costing features** — purchases, stock counts, wastage, sales and (Step 15) alerts are
-  now built; there's still no screen to see reports or costing-margin numbers.
 - **Account screen's "Switch business"** — the profile sheet's picker only reorders the signed-in
   user's own `businesses` list client-side (so the rest of the app treats the chosen one as current);
   there's no dedicated multi-business management screen.

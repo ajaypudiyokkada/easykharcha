@@ -1,6 +1,6 @@
 # Repo map
 
-One line per item. Current as of Step 15. Backend API prefix on every endpoint below: `/api/v1/`.
+One line per item. Current as of Step 16. Backend API prefix on every endpoint below: `/api/v1/`.
 
 ## Backend apps (backend/)
 
@@ -14,6 +14,7 @@ One line per item. Current as of Step 15. Backend API prefix on every endpoint b
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
+- `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
 
@@ -69,6 +70,9 @@ One line per item. Current as of Step 15. Backend API prefix on every endpoint b
 - `DELETE businesses/<id>/sales/<sid>/` — SaleDetailView — Owner-only, soft-delete
 - `GET businesses/<id>/alerts/` — AlertListView — `?type=` filter; open (unchecked) alerts + per-type/total counts
 - `POST businesses/<id>/alerts/check/` — AlertCheckView — `{key}`, hides the alert until its key changes
+- `GET businesses/<id>/reports/summary/?period=today|7d|30d|90d&item=` — ReportsSummaryView — one call,
+  six blocks: money_went, used_vs_expected, wastage_trend, price_trend (`?item=` picks the stock item,
+  default the one with the largest rise), sales_vs_cost, biggest_gaps
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
@@ -90,7 +94,10 @@ One line per item. Current as of Step 15. Backend API prefix on every endpoint b
 - `counts/[id].tsx` — Count detail: gap-flagged items first, then not-sure/confirmed-unusual, then
   the rest; Owner/Manager lines show expected used and the gap (qty + Rs value), red when flagged; a
   not_comparable line shows a one-line reason linking to What you sell or Sales for that date
-- `reports.tsx` — ComingSoonScreen stub
+- `reports.tsx` — Reports (Owner, Manager): period chips (Today/7 days/30 days/3 months), six report
+  cards (money went, used vs expected, wastage trend, price trend with an item picker, sales vs cost,
+  biggest gaps), each with a real takeaway, "View as table" and one button; `?period=` sets the
+  initial chip
 - `alerts/index.tsx` — Alerts (Owner/Manager): filter chips (type + count), severity-coloured list;
   `alerts/[key].tsx` — detail: plain-language detail line, the numbers, primary next action, "Mark
   as checked"
@@ -123,7 +130,11 @@ One line per item. Current as of Step 15. Backend API prefix on every endpoint b
 - `NoAccess.tsx` — "you don't have access" block
 - `OfflineRetry.tsx` — offline banner + retry
 - `PasswordField.tsx` — TextField + Show/Hide toggle + strength meter
-- `PriceChart.tsx` — price-over-time chart with tap/hover tooltip
+- `PriceChart.tsx` — Step 9's hand-rolled single-series price chart (Stock item detail)
+- `charts/BarChart.tsx`, `charts/LineChart.tsx` — Step 16: react-native-svg + d3-scale/d3-shape/
+  d3-array; stacked/grouped bars or 1-3 lines (+ an optional dashed reference series), nearest-point
+  tap/hover, legend, "View as table"; `charts/shared.tsx` (header/takeaway/legend/table/empty/axis
+  formatting), `charts/types.ts` (`ChartSeries`)
 - `ReadError.tsx` (also exported as `ErrorState`) — "couldn't load, try again"
 - `Screen.tsx` — page wrapper: max width, scroll, safe-area padding
 - `SessionExpiredDialog.tsx` — forced re-login dialog on a 401
@@ -142,11 +153,11 @@ One line per item. Current as of Step 15. Backend API prefix on every endpoint b
 - `auth/permissions.ts` — `can(permissions, 'x.y')`, `isLimitedRole(permissions)`
 - `auth/storage.ts` — access/refresh token persistence (SecureStore on native, localStorage on web)
 - `api/client.ts` — fetch wrapper: base URL, timeout, typed ApiError
-- `api/{auth,business,stock,purchases,counts,wastage,team,sales,alerts}.ts` — one typed client per
-  backend resource
+- `api/{auth,business,stock,purchases,counts,wastage,team,sales,alerts,reports}.ts` — one typed client
+  per backend resource
 - `business/routing.ts` — where to send a signed-in user (wizard step vs /home)
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
-- `screens/ComingSoonScreen.tsx` — shared stub for Reports/Team/Settings
+- `screens/ComingSoonScreen.tsx` — shared stub for Team/Settings
 - `screens/ProfileSheet.tsx` — name/role/business, Switch business (if >1), Account (coming soon),
   Log out — the only place Log out lives now, opened from AppShell's avatar/user block
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx`, `RecordSalesSheet.tsx` — the shared
@@ -182,8 +193,8 @@ One line per item. Current as of Step 15. Backend API prefix on every endpoint b
 
 | Role | Permissions |
 |---|---|
-| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete, sales.view/create/delete, alerts.view/check |
-| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view, sales.view/create, alerts.view/check |
+| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete, sales.view/create/delete, alerts.view/check, reports.view |
+| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view, sales.view/create, alerts.view/check, reports.view |
 | Head chef | counts.create, counts.status, wastage.create/view_all |
 | Helper | counts.create, wastage.create/view_own |
 

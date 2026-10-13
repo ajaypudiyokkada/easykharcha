@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "wastage",
     "sales",
     "alerts",
+    "reports",
 ]
 
 MIDDLEWARE = [
@@ -121,7 +122,11 @@ MAX_TEAM_MEMBERS_PER_BUSINESS = env.int("MAX_TEAM_MEMBERS_PER_BUSINESS", default
 # (attempts, window in seconds). Dev-only LocMemCache backs this — see accounts/ratelimit.py.
 RATE_LIMITS = {
     "signup_per_mobile": (5, 3600),
-    "signup_per_ip": (20, 3600),
+    # Step 16's reports smoke checks add 2 more signups (their own business, plus a brand-new one for
+    # the empty-state check) on top of the ~17 the suite already made on one shared dev IP — raised
+    # from 20 so the full `npm run smoke` run doesn't trip its own rate limit, same reasoning as
+    # login_per_ip below.
+    "signup_per_ip": (30, 3600),
     "login_per_mobile": (10, 900),
     # Stricter than a password login's — same reasoning as PIN_LOGIN_LOCKOUT_THRESHOLD above.
     "login_per_mobile_pin": (5, 900),

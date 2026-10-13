@@ -278,6 +278,13 @@ async function measurePage(page) {
         // change how the illustration looks, which this step's rules forbid touching. Captions
         // like ".mini-label" sit outside the mockup and are real copy, not exempted.
         if (el.closest('.phone, .mini-phone')) return;
+        // Step 16: another deliberate, scoped exception — BarChart/LineChart axis ticks (the SVG
+        // <text> y-axis values, and the x-axis date/item labels marked with the shared
+        // CHART_AXIS_TEXT_ID) are 12px per the Reports chart spec, not the site's usual 15px body
+        // floor. Dense numeric ticks packed along an axis, not copy a shopkeeper reads directly —
+        // the chart's own takeaway/legend/table text all stay at the normal 15px+ and are still
+        // checked below like anything else.
+        if (el.closest('svg') || el.id === 'chart-axis-label') return;
         const hasDirectText = Array.from(el.childNodes).some(
           (n) => n.nodeType === 3 && n.textContent.trim().length > 0,
         );
@@ -889,7 +896,9 @@ async function main() {
       { name: 'buy-detail', url: `${APP_URL}${purchasePath}` },
       { name: 'stock', url: `${APP_URL}/stock` },
       { name: 'stock-detail', url: `${APP_URL}${stockItemPath}` },
+      // Step 16
       { name: 'reports', url: `${APP_URL}/reports` },
+      { name: 'reports-30d', url: `${APP_URL}/reports?period=30d` },
       { name: 'sales', url: `${APP_URL}/sales` },
       { name: 'wastage', url: `${APP_URL}/wastage` },
       { name: 'alerts', url: `${APP_URL}/alerts` },

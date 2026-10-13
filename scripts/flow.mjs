@@ -46,6 +46,7 @@ const STEP12_SCREEN_DIR = 'docs/screens/step12';
 const STEP13_SCREEN_DIR = 'docs/screens/step13';
 const STEP14_SCREEN_DIR = 'docs/screens/step14';
 const STEP15_SCREEN_DIR = 'docs/screens/step15';
+const STEP16_SCREEN_DIR = 'docs/screens/step16';
 
 function findChrome() {
   const candidates = [
@@ -931,6 +932,120 @@ async function checkAlertsAndProfileFlow(page, ownerName) {
   console.log('OK — Log out from the profile sheet lands on /login.');
 }
 
+/** Seeds a "Flour" stock item with two purchases at different prices (direct API call, same trick
+ * keepOpeningCountNotLate already uses) so Reports' price-trend picker has a second item to pick
+ * beyond whatever Fresh Paneer/Rice history already exists in this business. */
+async function seedFlourPriceHistory(page) {
+  const access = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
+  const me = await fetch(`${API_BASE}/me/`, {
+    headers: { Authorization: `Bearer ${access}` },
+  }).then((r) => r.json());
+  const businessId = me.businesses[0].id;
+  const headers = { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json' };
+
+  const stockRes = await fetch(`${API_BASE}/businesses/${businessId}/stock-items/bulk/`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ items: [{ name: 'Flour', unit: 'kg' }] }),
+  }).then((r) => r.json());
+  const flourId = stockRes[0].id;
+
+  for (const unitPrice of ['60', '70']) {
+    await fetch(`${API_BASE}/businesses/${businessId}/purchases/`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        supplier_name: 'Mill Co',
+        purchase_date_time: new Date().toISOString(),
+        lines: [
+          {
+            stock_item: flourId,
+            quantity: '10',
+            unit_price: unitPrice,
+            line_total: String(Number(unitPrice) * 10),
+          },
+        ],
+      }),
+    });
+  }
+}
+
+// Step 16: Owner -> Reports -> switch to 30 days -> charts update -> "View as table" on one chart
+// -> pick Flour in the price-trend chart's picker -> its "Open Flour" button lands on Flour's own
+// Stock item detail.
+async function checkReportsFlow(page) {
+  await seedFlourPriceHistory(page);
+
+  await page.goto(`${APP_URL}/reports`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Reports');
+  await waitForText(page, 'Where money went');
+  console.log('OK — Reports loads with real charts (period defaults to 7 days).');
+
+  await clickButton(page, '30 days');
+  await waitForText(page, 'Where money went');
+  console.log('OK — switching to 30 days re-renders the charts.');
+
+  await clickButton(page, 'View as table');
+  await waitForText(page, 'View as chart');
+  console.log('OK — "View as table" switches a chart to its table view.');
+
+  await clickButton(page, 'Flour');
+  await waitForText(page, 'Open Flour');
+  console.log('OK — picking Flour in the price-trend chart shows its "Open Flour" button.');
+
+  await clickButton(page, 'Open Flour');
+  await waitForText(page, 'Flour');
+  await waitForText(page, 'Price trend');
+  console.log('OK — "Open Flour" lands on Flour\'s Stock item detail.');
+}
+
+async function captureStep16Screens(page) {
+  await mkdir(STEP16_SCREEN_DIR, { recursive: true });
+  for (const width of [390, 1280]) {
+    await page.setViewport({ width, height: width === 390 ? 3000 : 1200 });
+    await page.goto(`${APP_URL}/reports`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Where money went');
+    await page.screenshot({ path: `${STEP16_SCREEN_DIR}/reports-${width}.png` });
+  }
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — saved Step 16 screenshots at 390px and 1280px to ${STEP16_SCREEN_DIR}/.`);
+}
+
+// Step 16: a brand-new business (no purchases, counts or sales at all) sees every Reports card as
+// a single empty state with one button, never a crash.
+async function checkReportsEmptyStateFlow(page) {
+  const name = 'Reports Empty Owner';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password);
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+  await fillStepOne(page, 'Empty Reports Biz', 'Pune', 'Cloud kitchen');
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+
+  await skipStep(page, 3, '/setup/4');
+  await skipStep(page, 4, '/setup/5');
+  await skipStep(page, 5, '/setup/6');
+  await skipStep(page, 6, '/setup/done');
+  await clickButton(page, 'Go to Home');
+  await waitForPath(page, '/home');
+
+  await page.setViewport({ width: 390, height: 3000 });
+  await page.goto(`${APP_URL}/reports`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Reports');
+  await waitForText(page, '7 days');
+  await waitForText(page, 'Reports will appear after you record purchases, stock counts and sales.');
+  await waitForText(page, 'Record purchase');
+  console.log('OK — a brand-new business sees the Reports empty state with one button, no crash.');
+
+  await mkdir(STEP16_SCREEN_DIR, { recursive: true });
+  await page.screenshot({ path: `${STEP16_SCREEN_DIR}/reports-empty-390.png` });
+
+  await logoutFromAnywhere(page);
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
@@ -1176,6 +1291,13 @@ async function main() {
     await waitForPath(page, '/home');
     await checkTeamManagementFlow(page, 'Helper One');
     await logoutFromAnywhere(page);
+
+    await login(page, mobile, password);
+    await waitForPath(page, '/home');
+    await checkReportsFlow(page);
+    await captureStep16Screens(page);
+    await logoutFromAnywhere(page);
+    await checkReportsEmptyStateFlow(page);
 
     await captureStep10Screens(page);
     await captureStep12Screens(page, mobile, password);

@@ -77,6 +77,17 @@ A second business reuses the Step 14 gap numbers to prove a flagged gap line sur
 gap_flagged alert (count_late and gap_flagged can't both appear in one business/day — a submitted
 opening count is unavoidably needed as the gap's "previous" baseline, which leaves no count-type slot
 free to be late that same day).
+
+Then the Step 16 reports flow: its own business reuses the Step 14/15 Milk gap numbers (opening 12 L,
+20 L bought at Rs 64, 1.5 L wasted, closing 8 L, 100 Tea packs sold) so money_went's gap_value and
+biggest_gaps both show Milk at Rs 160, and sales_vs_cost's cost works out to (100 x 0.2 x 64) / 2000 =
+64% of the Rs 2000 sale. A second item, Flour, gets two purchases (Rs 60 then Rs 70) with nothing else
+pointing at it, so it's the only item with 2+ price points in the period and price_trend's default
+picker (no ?item=) lands on it at +16.7% — Milk itself can't be reused for that: its gap_value has to
+stay tied to its *last* purchase price (64, same rule alerts.gap_flagged already relies on), which a
+60 -> 70 Milk history would have moved to 70 and broken the Rs 160 figure. Then a Helper gets 403, and
+a brand-new business with no purchases/counts/sales at all returns every block present but empty, with
+no 500.
 """
 
 import binascii
@@ -1116,6 +1127,7 @@ def check_purchase_flow() -> None:
         "sales.delete",
         "alerts.view",
         "alerts.check",
+        "reports.view",
     }
     if set(owner_business.get("permissions", [])) != expected_owner:
         fail(f"/me owner permissions: expected {expected_owner}, got {owner_business.get('permissions')}")
@@ -1134,6 +1146,7 @@ def check_purchase_flow() -> None:
         "sales.create",
         "alerts.view",
         "alerts.check",
+        "reports.view",
     }
     if set(manager_business.get("permissions", [])) != expected_manager:
         fail(
@@ -2202,6 +2215,232 @@ def check_alerts_flow() -> None:
     print("OK — a separate business's flagged gap line surfaces as a danger-severity gap_flagged alert.")
 
 
+def check_reports_flow() -> None:
+    _, owner_access, _ = signup_and_login("Reports Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Reports Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}, {"name": "Flour", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: stock items create expected 201, got {status} ({body})")
+    milk_id = body[0]["id"]
+    flour_id = body[1]["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {
+                    "name": "Tea pack",
+                    "selling_price": "20.00",
+                    "main_stock_item": milk_id,
+                    "uses_qty": "0.200",
+                }
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: sell item create expected 201, got {status} ({body})")
+    tea_pack_id = body[0]["id"]
+
+    opening_lines = [
+        {"stock_item": milk_id, "state": "counted", "counted_qty": "12"},
+        {"stock_item": flour_id, "state": "skipped"},
+    ]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "opening", "lines": opening_lines},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: opening count expected 201, got {status} ({body})")
+    business_date = body["business_date"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: milk purchase expected 201, got {status} ({body})")
+
+    # Flour's own 60 -> 70 price history — kept off Milk so the gap_value below stays tied to Milk's
+    # *last* purchase price (64), same rule alerts.gap_flagged already relies on; a 60 -> 70 Milk
+    # history would move that to 70 and break the Rs 160 figure.
+    older = (datetime.now(dt_timezone.utc) - timedelta(days=2)).isoformat()
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Mill Co",
+            "purchase_date_time": older,
+            "lines": [{"stock_item": flour_id, "quantity": "10", "unit_price": "60", "line_total": "600"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: flour purchase 1 expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Mill Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": flour_id, "quantity": "10", "unit_price": "70", "line_total": "700"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: flour purchase 2 expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/wastage/",
+        {"stock_item": milk_id, "quantity": "1.5", "reason": "spillage"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: wastage expected 201, got {status} ({body})")
+
+    closing_lines = [
+        {"stock_item": milk_id, "state": "counted", "counted_qty": "8"},
+        {"stock_item": flour_id, "state": "skipped"},
+    ]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": closing_lines},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: closing count expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "100"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: sale expected 201, got {status} ({body})")
+    if Decimal(body[0]["amount"]) != Decimal("2000.00"):
+        fail(f"reports flow: expected sale amount 2000.00, got {body}")
+    print("OK — Reports Test Biz seeded: Milk's 160 gap, Flour's 60 -> 70 price rise, a 2000 sale.")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/reports/summary/?period=7d", token=owner_access
+    )
+    if status != 200:
+        fail(f"reports flow: summary expected 200, got {status} ({body})")
+
+    money_went = body["money_went"]
+    if Decimal(money_went["total"]["gap_value"]) != Decimal("160.00"):
+        fail(f"reports flow: expected money_went gap_value 160.00, got {money_went['total']}")
+    if Decimal(money_went["total"]["bought"]) != Decimal("2580.00"):
+        fail(f"reports flow: expected money_went bought 2580.00, got {money_went['total']}")
+    if Decimal(money_went["total"]["wastage_value"]) != Decimal("96.00"):
+        fail(f"reports flow: expected money_went wastage_value 96.00, got {money_went['total']}")
+    print("OK — money_went totals (bought 2580, wastage 96, gap 160) add up over 7d.")
+
+    biggest_gaps = body["biggest_gaps"]["items"]
+    if len(biggest_gaps) != 1 or biggest_gaps[0]["name"] != "Milk":
+        fail(f"reports flow: expected biggest_gaps to show only Milk, got {biggest_gaps}")
+    if Decimal(biggest_gaps[0]["value"]) != Decimal("160.00"):
+        fail(f"reports flow: expected Milk's biggest_gaps value 160.00, got {biggest_gaps}")
+    print("OK — biggest_gaps shows Milk at Rs 160.")
+
+    used_vs_expected = body["used_vs_expected"]["items"]
+    if len(used_vs_expected) != 1 or used_vs_expected[0]["name"] != "Milk":
+        fail(f"reports flow: expected used_vs_expected to show only Milk, got {used_vs_expected}")
+    milk_row = used_vs_expected[0]
+    if Decimal(milk_row["used"]) != Decimal("22.5") or Decimal(milk_row["expected"]) != Decimal("20"):
+        fail(f"reports flow: expected Milk used 22.5 / expected 20, got {milk_row}")
+    print("OK — used_vs_expected shows Milk's used 22.5 against expected 20.")
+
+    price_trend = body["price_trend"]
+    if price_trend["item"] is None or price_trend["item"]["name"] != "Flour":
+        fail(f"reports flow: expected price_trend's default item to be Flour, got {price_trend['item']}")
+    prices = [Decimal(point["unit_price"]) for point in price_trend["points"]]
+    if prices != [Decimal("60.00"), Decimal("70.00")]:
+        fail(f"reports flow: expected Flour's prices [60, 70], got {prices}")
+    if Decimal(price_trend["pct_change"]) != Decimal("16.7"):
+        fail(f"reports flow: expected Flour's pct_change 16.7, got {price_trend['pct_change']}")
+    print("OK — price_trend defaults to Flour's 60 -> 70 rise, +16.7%.")
+
+    sales_vs_cost = body["sales_vs_cost"]
+    if Decimal(sales_vs_cost["total"]["sales"]) != Decimal("2000.00"):
+        fail(f"reports flow: expected sales total 2000.00, got {sales_vs_cost['total']}")
+    if Decimal(sales_vs_cost["total"]["cost"]) != Decimal("1280.00"):
+        fail(f"reports flow: expected cost total 1280.00, got {sales_vs_cost['total']}")
+    if Decimal(sales_vs_cost["cost_pct"]) != Decimal("64.0"):
+        fail(f"reports flow: expected cost_pct 64.0, got {sales_vs_cost['cost_pct']}")
+    print("OK — sales_vs_cost: (100 x 0.2 x 64) / 2000 = 64.0% cost.")
+
+    wastage_trend = body["wastage_trend"]
+    if Decimal(wastage_trend["total"]["quantity_by_unit"].get("L", "0")) != Decimal("1.5"):
+        fail(f"reports flow: expected wastage_trend L total 1.5, got {wastage_trend['total']}")
+    bucket_qty_total = sum(
+        Decimal(bucket["quantity_by_unit"].get("L", "0")) for bucket in wastage_trend["buckets"]
+    )
+    if bucket_qty_total != Decimal("1.5"):
+        fail(f"reports flow: expected wastage_trend buckets to add up to 1.5 L, got {bucket_qty_total}")
+    print("OK — wastage_trend's bucket quantities add up to the period total.")
+
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "Reports Helper", "helper")
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/reports/summary/?period=7d", token=helper_access
+    )
+    if status != 403:
+        fail(f"reports flow: helper summary expected 403, got {status}")
+    print("OK — a Helper gets 403 on the reports endpoint.")
+
+    _, fresh_owner_access, _ = signup_and_login("Reports Fresh Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Reports Empty Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=fresh_owner_access,
+    )
+    if status != 201:
+        fail(f"reports flow: fresh business create expected 201, got {status} ({body})")
+    fresh_business_id = body["id"]
+
+    status, body, _ = request(
+        "GET", f"/businesses/{fresh_business_id}/reports/summary/?period=7d", token=fresh_owner_access
+    )
+    if status != 200:
+        fail(f"reports flow: empty business summary expected 200, got {status} ({body})")
+    if Decimal(body["money_went"]["total"]["bought"]) != Decimal("0.00"):
+        fail(f"reports flow: expected empty business money_went bought 0.00, got {body['money_went']}")
+    if body["biggest_gaps"]["items"] != [] or body["used_vs_expected"]["items"] != []:
+        fail(f"reports flow: expected empty business gap lists empty, got {body}")
+    if body["price_trend"]["item"] is not None or body["price_trend"]["points"] != []:
+        fail(f"reports flow: expected empty business price_trend empty, got {body['price_trend']}")
+    if body["sales_vs_cost"]["cost_pct"] is not None:
+        fail(f"reports flow: expected empty business cost_pct null, got {body['sales_vs_cost']}")
+    print("OK — a brand-new business returns every report block present but empty, no errors.")
+
+
 def main() -> None:
     check_health()
     check_auth_flow()
@@ -2214,6 +2453,7 @@ def main() -> None:
     check_settings_flow()
     check_sales_and_gap_flow()
     check_alerts_flow()
+    check_reports_flow()
     print("\nAll smoke checks passed.")
 
 
