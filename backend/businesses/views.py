@@ -14,7 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.log import log_action
+from audit.log import jsonable, log_action
 
 from .access import owner_access_or_403
 from .business_settings import defaults_for_new_business
@@ -29,6 +29,7 @@ from .models import (
     OnboardingProgress,
     OnboardingStepStatus,
 )
+from .permissions import require_permission
 from .serializers import (
     BusinessCreateSerializer,
     BusinessSerializer,
@@ -73,16 +74,22 @@ class BusinessUpdateView(APIView):
 
     def patch(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        owner_access_or_403(business, request.user)
+        require_permission(business, request.user, "business.manage")
 
         serializer = BusinessUpdateSerializer(business, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        # Only real model fields — "dismiss_checklist" is a write-only virtual field with no
+        # matching attribute on Business, so it's naturally excluded from both snapshots.
+        changed = [f for f in serializer.validated_data if hasattr(business, f)]
+        before = {f: jsonable(getattr(business, f)) for f in changed}
         serializer.save()
+        after = {f: jsonable(getattr(business, f)) for f in changed}
         log_action(
             user=request.user,
             action="business.update",
             business=business,
-            fields=sorted(serializer.validated_data.keys()),
+            before=before,
+            after=after,
         )
         return Response(BusinessSerializer(business, context={"request": request}).data)
 

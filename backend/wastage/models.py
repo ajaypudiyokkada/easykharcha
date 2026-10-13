@@ -31,9 +31,7 @@ class WastageEntry(models.Model):
     # The item's last purchase price at the moment this entry was recorded, falling back to its
     # usual price, else null — captured once here so a later price change never silently rewrites
     # the value of an old entry.
-    unit_cost_at_entry = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )
+    unit_cost_at_entry = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
     deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

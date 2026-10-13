@@ -422,6 +422,22 @@ async function login(page, mobile, secret) {
 
 /** Drives a full signup through a finished wizard (one custom item per list step, one Manager and
  * one Helper on the team) so every list/preview has real content to check, not an empty state. */
+/** Pushes this business's opening-count deadline late in the day (same trick seedLateClosingCountAndWastage
+ * uses in reverse, further down) so the opening count buildOwnerSession is about to submit stays
+ * "not_started" (not already "late") regardless of what time of day this script happens to run —
+ * otherwise /count would silently render the *closing* form instead once the default 11 AM
+ * deadline has passed, and the count-review click below would never find its row. */
+async function keepOpeningCountNotLate(page) {
+  const access = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
+  const me = await apiRequest('/me/', { token: access });
+  const businessId = me.body.businesses[0].id;
+  await apiRequest(`/businesses/${businessId}/settings/`, {
+    method: 'PATCH',
+    token: access,
+    body: { count_deadline_hour: 23 },
+  });
+}
+
 async function buildOwnerSession(page) {
   const name = 'Responsive Check';
   const mobile = randomMobile();
@@ -520,6 +536,7 @@ async function buildOwnerSession(page) {
   const stockItemPath = await page.evaluate(() => location.pathname);
 
   // Step 10: the opening stock count, so /counts and /counts/[id] have a real page to check too.
+  await keepOpeningCountNotLate(page);
   await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Count stock');
   await typeInto(page, 'Rice quantity', '5');
@@ -804,6 +821,12 @@ async function main() {
       { name: 'alerts', url: `${APP_URL}/alerts` },
       { name: 'team', url: `${APP_URL}/team` },
       { name: 'settings', url: `${APP_URL}/settings` },
+      // Step 12
+      { name: 'settings-business', url: `${APP_URL}/settings/business` },
+      { name: 'settings-brand', url: `${APP_URL}/settings/brand` },
+      { name: 'settings-stock', url: `${APP_URL}/settings/stock` },
+      { name: 'settings-sell', url: `${APP_URL}/settings/sell` },
+      { name: 'settings-alerts', url: `${APP_URL}/settings/alerts` },
       // Step 10
       { name: 'count', url: `${APP_URL}/count` },
       { name: 'counts', url: `${APP_URL}/counts` },
@@ -902,6 +925,43 @@ async function main() {
           await waitForText(page, "Today's counts");
           await clickButton(page, `Remind ${ownerName}`);
           await waitForText(page, 'Message about the late stock count');
+        },
+      },
+      // Step 12
+      {
+        name: 'sheet-add-stock-item',
+        url: `${APP_URL}/settings/stock`,
+        open: async (page) => {
+          await waitForText(page, 'What you buy');
+          await clickButton(page, 'Add stock item');
+          await waitForText(page, 'Add stock item');
+        },
+      },
+      {
+        name: 'sheet-edit-stock-item',
+        url: `${APP_URL}/settings/stock`,
+        open: async (page) => {
+          await waitForText(page, 'What you buy');
+          await (await findVisible(page, '[aria-label="Fresh Paneer"]')).click();
+          await waitForText(page, 'Edit stock item');
+        },
+      },
+      {
+        name: 'sheet-add-sell-item',
+        url: `${APP_URL}/settings/sell`,
+        open: async (page) => {
+          await waitForText(page, 'What you sell');
+          await clickButton(page, 'Add item you sell');
+          await waitForText(page, 'Add item sold');
+        },
+      },
+      {
+        name: 'sheet-edit-sell-item',
+        url: `${APP_URL}/settings/sell`,
+        open: async (page) => {
+          await waitForText(page, 'What you sell');
+          await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
+          await waitForText(page, 'Edit item sold');
         },
       },
     ];

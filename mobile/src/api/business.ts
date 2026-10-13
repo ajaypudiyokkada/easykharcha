@@ -32,6 +32,7 @@ export type Business = {
 
 export type BusinessSettings = {
   count_deadline_hour: number;
+  closing_count_hour: number;
   target_cost_pct: string;
   wastage_alert_pct: string;
   rate_creep_pct: string;

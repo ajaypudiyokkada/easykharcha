@@ -59,6 +59,10 @@ class SellItem(models.Model):
         blank=True,
         related_name="sell_items",
     )
+    # How much of main_stock_item ONE unit sold uses, in that item's own unit (e.g. one Veg Biryani
+    # uses 0.3 kg of Rice) — lets a later step compare what was sold against what was used. Only
+    # meaningful alongside main_stock_item; enforced in the serializer/view, not a DB constraint.
+    uses_qty = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sell_items_created"

@@ -43,11 +43,20 @@ right late flag, and the detail's used_since_last_count math checks out for a kn
 expected/gap field anywhere -> wastage: a Helper sees only their own entries, a Head chef sees every
 entry with no values, a Manager sees values but gets 403 on create/delete, and the Owner soft-deletes
 one -> another business's users get 403/404 on every new endpoint.
+
+Then the Step 12 settings flow: renaming a stock item succeeds -> a case-insensitive duplicate name
+is rejected -> changing its unit is refused once it has a purchase -> deactivating it is refused while
+an active sell item still uses it as the main item -> deactivating that sell item, then the stock
+item, both succeed -> a sell item's uses_qty is saved once it has a main stock item, and rejected
+without one -> a Manager gets 403 on every one of these PATCHes -> audit rows exist for the stock and
+sell item updates.
 """
 
 import binascii
 import json
+import os
 import random
+import sqlite3
 import struct
 import sys
 import urllib.error
@@ -59,6 +68,22 @@ from decimal import Decimal
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 ORIGIN = "http://localhost:8081"
 EXPECTED_HEALTH_KEYS = {"status", "version", "database"}
+# There's no API for the audit log (it's never been queried by anything but a human so far) — reading
+# the dev sqlite file directly, read-only, is the lightest way to prove a row actually landed without
+# standing up a new endpoint just for this check.
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "backend", "db.sqlite3")
+
+
+def count_audit_rows(action: str, business_id: int) -> int:
+    conn = sqlite3.connect(f"file:{os.path.abspath(DB_PATH)}?mode=ro", uri=True)
+    try:
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM audit_auditlog WHERE action = ? AND business_id = ?",
+            (action, business_id),
+        )
+        return cursor.fetchone()[0]
+    finally:
+        conn.close()
 
 
 def fail(message: str) -> None:
@@ -842,6 +867,9 @@ def check_purchase_flow() -> None:
         "stock.view",
         "team.manage",
         "settings.manage",
+        "stockitems.manage",
+        "sellitems.manage",
+        "business.manage",
         "counts.create",
         "counts.review",
         "wastage.create",
@@ -1253,6 +1281,194 @@ def check_count_and_wastage_flow() -> None:
     print("OK — another business's users get 403/404 on every new endpoint.")
 
 
+def check_settings_flow() -> None:
+    _, owner_access, _ = signup_and_login("Settings Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Settings Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"settings flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Rice", "unit": "kg", "usual_price": "60.00"}, {"name": "Sugar", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"settings flow: stock bulk create expected 201, got {status} ({body})")
+    rice_id = next(i["id"] for i in body if i["name"] == "Rice")
+    sugar_id = next(i["id"] for i in body if i["name"] == "Sugar")
+
+    # rename
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{rice_id}/",
+        {"name": "Basmati Rice"},
+        token=owner_access,
+    )
+    if status != 200 or body.get("name") != "Basmati Rice":
+        fail(f"rename stock item: expected 200 with the new name, got {status} ({body})")
+    print("OK — renamed a stock item.")
+
+    # duplicate name, case-insensitive
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{sugar_id}/",
+        {"name": "basmati rice"},
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"rename stock item duplicate: expected rejection, got {status} ({body})")
+    print("OK — a case-insensitive duplicate name is rejected.")
+
+    # a purchase gives Basmati Rice history, so its unit can no longer change
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Settings Supplies",
+            "purchase_date_time": _now_iso(),
+            "lines": [
+                {"stock_item": rice_id, "quantity": "5", "unit_price": "60", "line_total": "300"}
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"settings flow: purchase create expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/stock-items/{rice_id}/", {"unit": "g"}, token=owner_access
+    )
+    if status not in (400, 422) or body.get("error", {}).get("code") != "STOCK_ITEM_UNIT_LOCKED":
+        fail(f"unit change after purchase: expected STOCK_ITEM_UNIT_LOCKED, got {status} ({body})")
+    print("OK — changing a stock item's unit is refused once it has a purchase.")
+
+    # a sell item depends on Basmati Rice as its main item
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {"items": [{"name": "Rice Bowl", "selling_price": "99.00", "main_stock_item": rice_id}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"settings flow: sell item create expected 201, got {status} ({body})")
+    rice_bowl_id = body[0]["id"]
+
+    # deactivating the stock item is refused while that sell item is still active
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/stock-items/{rice_id}/", {"active": False}, token=owner_access
+    )
+    if status not in (400, 422) or body.get("error", {}).get("code") != "STOCK_ITEM_IN_USE":
+        fail(f"deactivate stock item in use: expected STOCK_ITEM_IN_USE, got {status} ({body})")
+    if "Rice Bowl" not in body.get("error", {}).get("message", ""):
+        fail(f"deactivate stock item in use: expected the sell item named in the message, got {body}")
+    print("OK — deactivating a stock item in use is refused, naming the sell item in the message.")
+
+    # deactivating the sell item first, then the stock item, both succeed
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{rice_bowl_id}/",
+        {"active": False},
+        token=owner_access,
+    )
+    if status != 200 or body.get("active") is not False:
+        fail(f"deactivate sell item: expected 200 inactive, got {status} ({body})")
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/stock-items/{rice_id}/", {"active": False}, token=owner_access
+    )
+    if status != 200 or body.get("active") is not False:
+        fail(f"deactivate stock item: expected 200 inactive, got {status} ({body})")
+    print("OK — deactivating the sell item, then the stock item it used, both succeed.")
+
+    # a second pair of items to exercise uses_qty
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Flour", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"settings flow: second stock item create expected 201, got {status} ({body})")
+    flour_id = body[0]["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {"items": [{"name": "Bread", "selling_price": "40.00"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"settings flow: second sell item create expected 201, got {status} ({body})")
+    bread_id = body[0]["id"]
+
+    # uses_qty is rejected without a main stock item
+    status, body, _ = request(
+        "PATCH", f"/businesses/{business_id}/sell-items/{bread_id}/", {"uses_qty": "0.3"}, token=owner_access
+    )
+    if status not in (400, 422):
+        fail(f"uses_qty without a main item: expected rejection, got {status} ({body})")
+    print("OK — uses_qty is rejected without a main stock item.")
+
+    # setting a main stock item and uses_qty together succeeds
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{bread_id}/",
+        {"main_stock_item": flour_id, "uses_qty": "0.300"},
+        token=owner_access,
+    )
+    if status != 200 or body.get("uses_qty") != "0.300":
+        fail(f"uses_qty with a main item: expected 200 with uses_qty saved, got {status} ({body})")
+    print("OK — uses_qty is saved once a main stock item is set.")
+
+    # a Manager gets 403 on every one of these PATCHes
+    manager_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    manager_password = f"Kharcha{random.randint(1000, 9999)}!"
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/team/",
+        {
+            "name": "Settings Manager",
+            "mobile": manager_mobile,
+            "role": "manager",
+            "secret": manager_password,
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"add manager: expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": manager_mobile, "secret": manager_password}
+    )
+    if status != 200:
+        fail(f"manager login: expected 200, got {status} ({body})")
+    manager_access = body["access"]
+
+    probes = [
+        ("PATCH", f"/businesses/{business_id}/stock-items/{flour_id}/", {"name": "x"}),
+        ("PATCH", f"/businesses/{business_id}/sell-items/{bread_id}/", {"name": "x"}),
+        ("PATCH", f"/businesses/{business_id}/", {"tagline": "x"}),
+        ("PATCH", f"/businesses/{business_id}/settings/", {"target_cost_pct": "40"}),
+    ]
+    for method, path, probe_body in probes:
+        status, body, _ = request(method, path, probe_body, token=manager_access)
+        if status != 403:
+            fail(f"manager settings PATCH {path}: expected 403, got {status} ({body})")
+    print("OK — a Manager gets 403 on every Settings PATCH endpoint.")
+
+    # audit rows exist for the stock and sell item updates above
+    if count_audit_rows("stock_item.update", business_id) < 1:
+        fail("audit: expected at least one stock_item.update row for this business")
+    if count_audit_rows("sell_item.update", business_id) < 1:
+        fail("audit: expected at least one sell_item.update row for this business")
+    print("OK — audit rows exist for the stock and sell item updates.")
+
+
 def main() -> None:
     check_health()
     check_auth_flow()
@@ -1261,6 +1477,7 @@ def main() -> None:
     check_team_flow()
     check_purchase_flow()
     check_count_and_wastage_flow()
+    check_settings_flow()
     print("\nAll smoke checks passed.")
 
 

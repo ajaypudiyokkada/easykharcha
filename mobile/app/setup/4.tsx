@@ -6,6 +6,11 @@ import { ApiError, type RowError } from '../../src/api/client';
 import type { StarterPack, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
+import {
+  EMPTY_SELL_ITEM_DRAFT,
+  SellItemForm,
+  type SellItemDraft,
+} from '../../src/forms/SellItemForm';
 import { sellItemLabel } from '../../src/labels';
 import { strings } from '../../src/strings';
 import {
@@ -13,7 +18,6 @@ import {
   Body,
   Checkbox,
   Icon,
-  Muted,
   Screen,
   Small,
   StepHeader,
@@ -26,13 +30,9 @@ import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 const s = strings.setup;
 const s4 = strings.setup.step4;
 
-type OwnSellDraft = {
-  name: string;
-  sellingPrice: string;
-  mainStockItemId: number | null;
-};
+type OwnSellDraft = SellItemDraft;
 
-const EMPTY_DRAFT: OwnSellDraft = { name: '', sellingPrice: '', mainStockItemId: null };
+const EMPTY_DRAFT: OwnSellDraft = EMPTY_SELL_ITEM_DRAFT;
 
 export default function SetupStepFour() {
   const router = useRouter();
@@ -312,71 +312,12 @@ export default function SetupStepFour() {
       <View style={styles.field}>
         <Body style={styles.sectionLabel}>{s4.addOwn(label)}</Body>
 
-        <TextField
-          label={s4.nameLabel}
-          value={draft.name}
-          onChangeText={(name) => setDraft((current) => ({ ...current, name }))}
-          placeholder={s4.namePlaceholder}
-          error={draftErrors.name}
+        <SellItemForm
+          value={draft}
+          onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+          errors={draftErrors}
+          stockItems={stockItems === null ? null : linkableStockItems}
         />
-
-        <TextField
-          label={s4.priceLabel}
-          value={draft.sellingPrice}
-          onChangeText={(sellingPrice) => setDraft((current) => ({ ...current, sellingPrice }))}
-          placeholder={s4.pricePlaceholder}
-          keyboardType="decimal-pad"
-          error={draftErrors.price}
-        />
-
-        <View style={styles.field}>
-          <Small style={styles.unitLabel}>{s4.mainStockItemLabel}</Small>
-          {stockItems === null ? (
-            <ActivityIndicator color={colours.primary} />
-          ) : linkableStockItems.length === 0 ? (
-            <Muted size="sm">{s4.noStockItemsYet}</Muted>
-          ) : (
-            <View style={styles.unitRow}>
-              <Pressable
-                accessibilityRole="radio"
-                accessibilityState={{ checked: draft.mainStockItemId === null }}
-                onPress={() => setDraft((current) => ({ ...current, mainStockItemId: null }))}
-                style={[
-                  styles.unitChip,
-                  draft.mainStockItemId === null ? styles.unitChipSelected : null,
-                ]}
-              >
-                <Small
-                  style={
-                    draft.mainStockItemId === null
-                      ? styles.unitChipTextSelected
-                      : styles.unitChipText
-                  }
-                >
-                  {s4.noMainStockItem}
-                </Small>
-              </Pressable>
-              {linkableStockItems.map((item) => {
-                const selected = draft.mainStockItemId === item.id;
-                return (
-                  <Pressable
-                    key={item.id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: selected }}
-                    onPress={() =>
-                      setDraft((current) => ({ ...current, mainStockItemId: item.id }))
-                    }
-                    style={[styles.unitChip, selected ? styles.unitChipSelected : null]}
-                  >
-                    <Small style={selected ? styles.unitChipTextSelected : styles.unitChipText}>
-                      {item.name}
-                    </Small>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </View>
 
         <Pressable
           accessibilityRole="button"
@@ -462,34 +403,6 @@ const styles = StyleSheet.create({
   formErrorText: {
     flex: 1,
     color: colours.danger,
-    fontFamily: fonts.bodyExtraBold,
-  },
-  unitLabel: {
-    fontFamily: fonts.bodyExtraBold,
-  },
-  unitRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  unitChip: {
-    minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: spacing.lg,
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colours.mint,
-    borderRadius: radii.pill,
-    backgroundColor: colours.card,
-  },
-  unitChipSelected: {
-    borderColor: colours.primary,
-    backgroundColor: colours.mint,
-  },
-  unitChipText: {
-    color: colours.text,
-  },
-  unitChipTextSelected: {
-    color: colours.text,
     fontFamily: fonts.bodyExtraBold,
   },
   addButton: {

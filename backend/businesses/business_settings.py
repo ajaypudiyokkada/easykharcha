@@ -7,10 +7,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.log import log_action
+from audit.log import jsonable, log_action
 
-from .access import owner_access_or_403
 from .models import Business, BusinessSettings
+from .permissions import require_permission
 
 FIELDS = (
     "count_deadline_hour",
@@ -69,20 +69,25 @@ class BusinessSettingsView(APIView):
 
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        owner_access_or_403(business, request.user)
+        require_permission(business, request.user, "settings.manage")
         return Response(BusinessSettingsSerializer(business.settings).data)
 
     def patch(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        owner_access_or_403(business, request.user)
+        require_permission(business, request.user, "settings.manage")
 
-        serializer = BusinessSettingsSerializer(business.settings, data=request.data, partial=True)
+        settings_row = business.settings
+        serializer = BusinessSettingsSerializer(settings_row, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        changed = list(serializer.validated_data.keys())
+        before = {f: jsonable(getattr(settings_row, f)) for f in changed}
         serializer.save()
+        after = {f: jsonable(getattr(settings_row, f)) for f in changed}
         log_action(
             user=request.user,
             action="business_settings.update",
             business=business,
-            fields=sorted(serializer.validated_data.keys()),
+            before=before,
+            after=after,
         )
         return Response(serializer.data)

@@ -6,19 +6,13 @@ import { ApiError, type RowError } from '../../src/api/client';
 import type { StarterPack } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
-import { UNITS, type UnitValue } from '../../src/constants/units';
-import { strings } from '../../src/strings';
 import {
-  BottomActionBar,
-  Body,
-  Checkbox,
-  Icon,
-  Screen,
-  Small,
-  StepHeader,
-  TextField,
-  Toggle,
-} from '../../src/ui';
+  EMPTY_STOCK_ITEM_DRAFT,
+  StockItemForm,
+  type StockItemDraft,
+} from '../../src/forms/StockItemForm';
+import { strings } from '../../src/strings';
+import { BottomActionBar, Body, Checkbox, Icon, Screen, Small, StepHeader } from '../../src/ui';
 import { useMinWidth } from '../../src/hooks/useMinWidth';
 import { BREAKPOINT_DESKTOP, MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
@@ -26,25 +20,9 @@ import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 const s = strings.setup;
 const s3 = strings.setup.step3;
 
-type OwnStockDraft = {
-  name: string;
-  unit: UnitValue | '';
-  usualPrice: string;
-  supplier: string;
-  shared: boolean;
-  goesOff: boolean;
-  shelfLifeDays: string;
-};
+type OwnStockDraft = StockItemDraft;
 
-const EMPTY_DRAFT: OwnStockDraft = {
-  name: '',
-  unit: '',
-  usualPrice: '',
-  supplier: '',
-  shared: false,
-  goesOff: false,
-  shelfLifeDays: '',
-};
+const EMPTY_DRAFT: OwnStockDraft = EMPTY_STOCK_ITEM_DRAFT;
 
 export default function SetupStepThree() {
   const router = useRouter();
@@ -297,78 +275,11 @@ export default function SetupStepThree() {
       <View style={styles.field}>
         <Body style={styles.sectionLabel}>{s3.addOwn}</Body>
 
-        <TextField
-          label={s3.nameLabel}
-          value={draft.name}
-          onChangeText={(name) => setDraft((current) => ({ ...current, name }))}
-          placeholder={s3.namePlaceholder}
-          error={draftErrors.name}
+        <StockItemForm
+          value={draft}
+          onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+          errors={draftErrors}
         />
-
-        <View style={styles.field}>
-          <Small style={styles.unitLabel}>{s3.unitLabel}</Small>
-          <View style={styles.unitRow}>
-            {UNITS.map((unit) => {
-              const selected = draft.unit === unit.value;
-              return (
-                <Pressable
-                  key={unit.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: selected }}
-                  onPress={() => setDraft((current) => ({ ...current, unit: unit.value }))}
-                  style={[styles.unitChip, selected ? styles.unitChipSelected : null]}
-                >
-                  <Small style={selected ? styles.unitChipTextSelected : styles.unitChipText}>
-                    {unit.label}
-                  </Small>
-                </Pressable>
-              );
-            })}
-          </View>
-          {draftErrors.unit ? (
-            <View style={styles.formError}>
-              <Icon name="error" size={type.sm} colour={colours.danger} />
-              <Small style={styles.formErrorText}>{draftErrors.unit}</Small>
-            </View>
-          ) : null}
-        </View>
-
-        <TextField
-          label={s3.priceLabel}
-          value={draft.usualPrice}
-          onChangeText={(usualPrice) => setDraft((current) => ({ ...current, usualPrice }))}
-          placeholder={s3.pricePlaceholder}
-          keyboardType="decimal-pad"
-        />
-
-        <TextField
-          label={s3.supplierLabel}
-          value={draft.supplier}
-          onChangeText={(supplier) => setDraft((current) => ({ ...current, supplier }))}
-          placeholder={s3.supplierPlaceholder}
-        />
-
-        <Toggle
-          title={s3.sharedToggle}
-          value={draft.shared}
-          onChange={(shared) => setDraft((current) => ({ ...current, shared }))}
-        />
-
-        <Toggle
-          title={s3.goesOffToggle}
-          value={draft.goesOff}
-          onChange={(goesOff) => setDraft((current) => ({ ...current, goesOff }))}
-        />
-
-        {draft.goesOff ? (
-          <TextField
-            label={s3.shelfLifeLabel}
-            value={draft.shelfLifeDays}
-            onChangeText={(shelfLifeDays) => setDraft((current) => ({ ...current, shelfLifeDays }))}
-            placeholder={s3.shelfLifePlaceholder}
-            keyboardType="number-pad"
-          />
-        ) : null}
 
         <Pressable
           accessibilityRole="button"
@@ -452,34 +363,6 @@ const styles = StyleSheet.create({
   formErrorText: {
     flex: 1,
     color: colours.danger,
-    fontFamily: fonts.bodyExtraBold,
-  },
-  unitLabel: {
-    fontFamily: fonts.bodyExtraBold,
-  },
-  unitRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  unitChip: {
-    minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: spacing.lg,
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colours.mint,
-    borderRadius: radii.pill,
-    backgroundColor: colours.card,
-  },
-  unitChipSelected: {
-    borderColor: colours.primary,
-    backgroundColor: colours.mint,
-  },
-  unitChipText: {
-    color: colours.text,
-  },
-  unitChipTextSelected: {
-    color: colours.text,
     fontFamily: fonts.bodyExtraBold,
   },
   addButton: {

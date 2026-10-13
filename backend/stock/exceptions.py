@@ -18,3 +18,27 @@ class TooManyRows(APIException):
     status_code = 422
     default_detail = "You can add up to 100 rows at a time."
     default_code = "TOO_MANY_ROWS"
+
+
+class StockItemUnitLocked(APIException):
+    status_code = 422
+    default_detail = (
+        "This item's unit can't be changed — it already has purchases or stock counts "
+        "recorded in the old unit."
+    )
+    default_code = "STOCK_ITEM_UNIT_LOCKED"
+
+
+class StockItemInUse(APIException):
+    """Carries the names of the active sell items still pointing at this stock item as their main
+    item, folded straight into the message — there's no separate client-side lookup for this one."""
+
+    status_code = 422
+    default_code = "STOCK_ITEM_IN_USE"
+
+    def __init__(self, sell_item_names: list[str]):
+        names = ", ".join(sell_item_names)
+        super().__init__(
+            detail=f"Can't deactivate — still used as the main item for: {names}. "
+            "Deactivate those first."
+        )

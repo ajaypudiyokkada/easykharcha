@@ -28,6 +28,9 @@ export type SellItem = {
   name: string;
   selling_price: string;
   main_stock_item: number | null;
+  /** How much of main_stock_item one unit sold uses, in that item's own unit — null unless set, and
+   * only meaningful alongside main_stock_item. */
+  uses_qty: string | null;
   active: boolean;
   created_at: string;
 };

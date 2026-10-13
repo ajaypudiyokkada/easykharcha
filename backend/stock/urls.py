@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     SellItemBulkCreateView,
+    SellItemDetailView,
     SellItemListView,
     StockItemBulkCreateView,
     StockItemDetailView,
@@ -33,5 +34,10 @@ urlpatterns = [
         "businesses/<int:business_id>/sell-items/bulk/",
         SellItemBulkCreateView.as_view(),
         name="sell-item-bulk-create",
+    ),
+    path(
+        "businesses/<int:business_id>/sell-items/<int:item_id>/",
+        SellItemDetailView.as_view(),
+        name="sell-item-detail",
     ),
 ]

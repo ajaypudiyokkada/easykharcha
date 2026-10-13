@@ -47,9 +47,7 @@ class CountLineState(models.TextChoices):
 
 class CountLine(models.Model):
     count = models.ForeignKey(StockCount, on_delete=models.CASCADE, related_name="lines")
-    stock_item = models.ForeignKey(
-        StockItem, on_delete=models.PROTECT, related_name="count_lines"
-    )
+    stock_item = models.ForeignKey(StockItem, on_delete=models.PROTECT, related_name="count_lines")
     counted_qty = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     state = models.CharField(max_length=10, choices=CountLineState.choices)
     # True once the person has been asked "is this really N?" and confirmed it — lets a resubmit

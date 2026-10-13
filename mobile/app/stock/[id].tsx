@@ -7,6 +7,7 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { formatDate, formatDateTime, formatRupees } from '../../src/format';
 import { RecordPurchaseSheet } from '../../src/screens/RecordPurchaseSheet';
+import { StockItemSheet } from '../../src/screens/StockItemSheet';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
@@ -59,6 +60,7 @@ export default function StockItemDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [editSheetVisible, setEditSheetVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -97,6 +99,7 @@ export default function StockItemDetailScreen() {
 
   const timezone = business?.timezone ?? 'Asia/Kolkata';
   const canRecord = can(permissions, 'purchases.create');
+  const canEdit = can(permissions, 'stockitems.manage');
 
   const chartPoints: ChartPoint[] = item
     ? item.price_points.map((point) => ({
@@ -179,6 +182,14 @@ export default function StockItemDetailScreen() {
                 onPress={() => setSheetVisible(true)}
               />
             ) : null}
+
+            {canEdit ? (
+              <Button
+                label={s.editItem}
+                variant="secondary"
+                onPress={() => setEditSheetVisible(true)}
+              />
+            ) : null}
           </>
         )}
       </Screen>
@@ -195,6 +206,16 @@ export default function StockItemDetailScreen() {
           }}
         />
       ) : null}
+      <StockItemSheet
+        visible={editSheetVisible}
+        editingItem={item}
+        onClose={() => setEditSheetVisible(false)}
+        onSaved={(message) => {
+          setEditSheetVisible(false);
+          setToast(message);
+          load();
+        }}
+      />
       <Toast message={toast} onHide={() => setToast(null)} />
     </AppShell>
   );

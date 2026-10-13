@@ -78,6 +78,15 @@ not built yet.
   `NoAccess` (a route guard now shows this instead of silently redirecting), and a session-expired
   dialog on a failed token refresh. Sales, reports and alerts are still not built — see "Not built
   yet".
+- **Step 12 — Edit stock items and items sold, Settings screens.** PATCH on stock items and sell
+  items (rename, re-price, toggle shared/goes-off, `uses_qty` on a sell item, deactivate — never a
+  hard delete); a unit change is refused once the item has a purchase or count, and deactivating a
+  stock item is refused while an active sell item still uses it, naming it in the message. New
+  permissions `stockitems.manage`/`sellitems.manage`/`business.manage` (Owner only), all writes
+  audit-logged with before/after values. New Settings hub and five screens (Business details,
+  Brand, What you buy, What you sell, Alert rules), sharing one form component each with the setup
+  wizard (`StockItemForm`/`SellItemForm`/`BusinessForm`/`BrandForm`). Stock item detail gained an
+  "Edit item" button for the Owner.
 
 ## Permission table
 
@@ -95,6 +104,9 @@ unilaterally:
 | `stock.view` | yes | yes | no | no |
 | `team.manage` | yes | no | no | no |
 | `settings.manage` | yes | no | no | no |
+| `stockitems.manage` | yes | no | no | no |
+| `sellitems.manage` | yes | no | no | no |
+| `business.manage` | yes | no | no | no |
 | `counts.create` | yes | no | yes | yes |
 | `counts.review` | yes | yes | no | no |
 | `counts.status` | no | no | yes | no |

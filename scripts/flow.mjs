@@ -37,10 +37,12 @@ const APP_URL = 'http://localhost:8081';
 // Must match mobile/src/config.ts's EXPO_PUBLIC_LANDING_URL default — the app itself decides where
 // "/" sends a signed-out visitor, this just has to be listening wherever that actually points.
 const LANDING_URL = 'http://localhost:8082';
+const API_BASE = 'http://127.0.0.1:8000/api/v1';
 const TIMEOUT = 15_000;
 const SCREEN_DIR = 'docs/screens/step8c';
 const STEP9_SCREEN_DIR = 'docs/screens/step9';
 const STEP10_SCREEN_DIR = 'docs/screens/step10';
+const STEP12_SCREEN_DIR = 'docs/screens/step12';
 
 function findChrome() {
   const candidates = [
@@ -221,6 +223,25 @@ async function logoutFromAnywhere(page) {
   await waitForPath(page, '/login');
 }
 
+/** Pushes this business's opening-count deadline late in the day (direct API call, same trick
+ * already used elsewhere in this script and in responsive_check.mjs to force a count *late* by
+ * setting closing_count_hour to 0) — the opposite adjustment, so the opening count this flow is
+ * about to submit stays "not_started" (not already "late") regardless of what time of day this
+ * script happens to run. Without it, checkOwnerOpeningCount's assertions about the *first*
+ * submission being "done" would depend on running before the default 11 AM deadline. */
+async function keepOpeningCountNotLate(page) {
+  const access = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
+  const me = await fetch(`${API_BASE}/me/`, { headers: { Authorization: `Bearer ${access}` } }).then(
+    (r) => r.json(),
+  );
+  const businessId = me.businesses[0].id;
+  await fetch(`${API_BASE}/businesses/${businessId}/settings/`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ count_deadline_hour: 23 }),
+  });
+}
+
 async function skipStep(page, fromStep, toPath) {
   await clickButton(page, 'Skip for now');
   await waitForPath(page, toPath);
@@ -366,6 +387,7 @@ async function checkPurchaseFlow(page) {
 // so no unusual-value guard is possible) — establishes the baseline the Helper's closing count
 // below compares against.
 async function checkOwnerOpeningCount(page) {
+  await keepOpeningCountNotLate(page);
   await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Count stock');
   await typeInto(page, 'Rice quantity', '5');
@@ -561,6 +583,7 @@ async function captureStep10Screens(page) {
     await waitForPath(page, '/home');
     await page.screenshot({ path: `${STEP10_SCREEN_DIR}/owner-home-${width}.png` });
 
+    await keepOpeningCountNotLate(page);
     await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await waitForText(page, 'Count stock');
     await typeInto(page, 'Rice quantity', '5');
@@ -616,6 +639,69 @@ async function captureStep10Screens(page) {
   // Back to the main flow's own tall-mobile viewport.
   await page.setViewport({ width: 390, height: 3000 });
   console.log(`OK — saved Step 10 screenshots at 390px and 1280px to ${STEP10_SCREEN_DIR}/.`);
+}
+
+// Step 12: Owner edits a sell item's "How much does one use?", then sees the plain-language
+// message when trying to deactivate the stock item that sell item still depends on. Reuses "Fresh
+// Paneer" (stock) and "Paneer Tikka" (sell item linked to it) from User 1's wizard data above —
+// the page is already signed in as that Owner when this runs.
+async function checkSettingsFlow(page) {
+  await page.goto(`${APP_URL}/settings`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Settings');
+  console.log('OK — Owner opens Settings.');
+
+  await clickButton(page, 'What you sell');
+  await waitForPath(page, '/settings/sell');
+  await waitForText(page, 'Paneer Tikka');
+
+  await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
+  await waitForText(page, 'Edit item sold');
+  await typeInto(page, 'How much does one use? (kg)', '0.3');
+  await clickButton(page, 'Save item');
+  await waitForText(page, 'Item saved');
+  console.log(
+    'OK — Settings -> What you sell -> edited an item, set "How much does one use?", saved.',
+  );
+
+  await page.goto(`${APP_URL}/settings/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'What you buy');
+  await (await findVisible(page, '[aria-label="Fresh Paneer"]')).click();
+  await waitForText(page, 'Edit stock item');
+  await clickAndSettle(await findVisible(page, '[aria-label="Active"]'));
+  await clickButton(page, 'Save item');
+  await waitForText(page, "Can't deactivate");
+  console.log(
+    'OK — What you buy -> trying to deactivate a stock item a sell item still uses shows the plain-language message.',
+  );
+}
+
+// Required screenshots at 390px only: Settings hub, What you buy, edit sheet, Alert rules.
+async function captureStep12Screens(page, ownerMobile, ownerPassword) {
+  await mkdir(STEP12_SCREEN_DIR, { recursive: true });
+  await page.setViewport({ width: 390, height: 3000 });
+
+  await login(page, ownerMobile, ownerPassword);
+  await waitForPath(page, '/home');
+
+  await page.goto(`${APP_URL}/settings`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Settings');
+  await page.screenshot({ path: `${STEP12_SCREEN_DIR}/settings-hub-390.png` });
+
+  await page.goto(`${APP_URL}/settings/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'What you buy');
+  await page.screenshot({ path: `${STEP12_SCREEN_DIR}/what-you-buy-390.png` });
+
+  await (await findVisible(page, '[aria-label="Fresh Paneer"]')).click();
+  await waitForText(page, 'Edit stock item');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP12_SCREEN_DIR}/edit-sheet-390.png` });
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+
+  await page.goto(`${APP_URL}/settings/alerts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Alert rules');
+  await page.screenshot({ path: `${STEP12_SCREEN_DIR}/alert-rules-390.png` });
+
+  console.log(`OK — saved Step 12 screenshots at 390px to ${STEP12_SCREEN_DIR}/.`);
 }
 
 async function main() {
@@ -851,9 +937,11 @@ async function main() {
     await checkManagerHomeFlow(page, managerMobile, managerPassword);
     await logoutFromAnywhere(page);
     await checkCountReviewAndWastageFlow(page, mobile, password);
+    await checkSettingsFlow(page);
     await logoutFromAnywhere(page);
 
     await captureStep10Screens(page);
+    await captureStep12Screens(page, mobile, password);
 
     console.log('\nAll flow checks passed.');
   } catch (err) {

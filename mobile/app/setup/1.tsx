@@ -1,16 +1,16 @@
 import { Redirect, useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import type { Business } from '../../src/api/business';
 import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
-import { BUSINESS_TYPES, type BusinessTypeValue } from '../../src/constants/businessTypes';
+import { BusinessForm, type BusinessDraft } from '../../src/forms/BusinessForm';
 import { strings } from '../../src/strings';
-import { BottomActionBar, Body, Icon, Screen, StepHeader, TextField } from '../../src/ui';
+import { BottomActionBar, Body, Icon, Screen, StepHeader } from '../../src/ui';
 import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
-import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
+import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
 const s1 = strings.setup.step1;
@@ -26,12 +26,12 @@ export default function SetupStepOne() {
   const { status, businesses, authedFetch, refreshMe } = useAuth();
   const existing = getOnboardingBusiness(businesses);
 
-  const [name, setName] = useState(existing?.name ?? '');
-  const [businessType, setBusinessType] = useState<BusinessTypeValue | ''>(
-    (existing?.business_type as BusinessTypeValue) ?? '',
-  );
-  const [city, setCity] = useState(existing?.city ?? '');
-  const [tagline, setTagline] = useState(existing?.tagline ?? '');
+  const [draft, setDraft] = useState<BusinessDraft>({
+    name: existing?.name ?? '',
+    businessType: (existing?.business_type as BusinessDraft['businessType']) ?? '',
+    city: existing?.city ?? '',
+    tagline: existing?.tagline ?? '',
+  });
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -50,9 +50,9 @@ export default function SetupStepOne() {
 
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
-    if (!name.trim()) errors.name = s1.errors.nameRequired;
-    if (!businessType) errors.businessType = s1.errors.typeRequired;
-    if (!city.trim()) errors.city = s1.errors.cityRequired;
+    if (!draft.name.trim()) errors.name = s1.errors.nameRequired;
+    if (!draft.businessType) errors.businessType = s1.errors.typeRequired;
+    if (!draft.city.trim()) errors.city = s1.errors.cityRequired;
     return errors;
   }
 
@@ -77,10 +77,10 @@ export default function SetupStepOne() {
     setSubmitting(true);
     try {
       const payload = {
-        name: name.trim(),
-        business_type: businessType,
-        city: city.trim(),
-        tagline: tagline.trim(),
+        name: draft.name.trim(),
+        business_type: draft.businessType,
+        city: draft.city.trim(),
+        tagline: draft.tagline.trim(),
       };
       let business: Business;
       if (existing) {
@@ -144,57 +144,10 @@ export default function SetupStepOne() {
         </View>
       ) : null}
 
-      <TextField
-        label={s1.nameLabel}
-        value={name}
-        onChangeText={setName}
-        placeholder={s1.namePlaceholder}
-        autoComplete="organization"
-        error={fieldErrors.name}
-      />
-
-      <View style={styles.field}>
-        <Body style={styles.label}>{s1.typeLabel}</Body>
-        <View style={styles.typeGrid}>
-          {BUSINESS_TYPES.map((option) => {
-            const selected = businessType === option.value;
-            return (
-              <Pressable
-                key={option.value}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selected }}
-                onPress={() => setBusinessType(option.value)}
-                style={[styles.typeCard, selected ? styles.typeCardSelected : null]}
-              >
-                <Body style={[styles.typeCardText, selected ? styles.typeCardTextSelected : null]}>
-                  {option.label}
-                </Body>
-                {selected ? <Icon name="success" size={18} colour={colours.primary} /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-        {fieldErrors.businessType ? (
-          <View style={styles.formError}>
-            <Icon name="error" size={type.md} colour={colours.danger} />
-            <Body style={styles.formErrorText}>{fieldErrors.businessType}</Body>
-          </View>
-        ) : null}
-      </View>
-
-      <TextField
-        label={s1.cityLabel}
-        value={city}
-        onChangeText={setCity}
-        placeholder={s1.cityPlaceholder}
-        error={fieldErrors.city}
-      />
-
-      <TextField
-        label={s1.taglineLabel}
-        value={tagline}
-        onChangeText={setTagline}
-        placeholder={s1.taglinePlaceholder}
+      <BusinessForm
+        value={draft}
+        onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+        errors={fieldErrors}
       />
     </Screen>
   );
@@ -210,37 +163,6 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: fonts.headingBold,
     fontSize: type.xl,
-  },
-  field: {
-    gap: spacing.sm,
-  },
-  label: {
-    fontFamily: fonts.bodyExtraBold,
-    fontSize: type.md,
-  },
-  typeGrid: {
-    gap: spacing.sm,
-  },
-  typeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 2,
-    borderColor: colours.mint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colours.card,
-  },
-  typeCardSelected: {
-    borderColor: colours.primary,
-    backgroundColor: colours.mint,
-  },
-  typeCardText: {
-    color: colours.text,
-  },
-  typeCardTextSelected: {
-    fontFamily: fonts.bodyExtraBold,
   },
   formError: {
     flexDirection: 'row',

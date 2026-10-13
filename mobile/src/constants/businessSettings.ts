@@ -3,6 +3,7 @@
  * just re-asserts them. */
 export const DEFAULT_BUSINESS_SETTINGS = {
   count_deadline_hour: 11,
+  closing_count_hour: 20,
   target_cost_pct: 30,
   wastage_alert_pct: 5,
   rate_creep_pct: 10,

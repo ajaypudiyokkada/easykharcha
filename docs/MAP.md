@@ -1,6 +1,6 @@
 # Repo map
 
-One line per item. Current as of Step 11. Backend API prefix on every endpoint below: `/api/v1/`.
+One line per item. Current as of Step 12. Backend API prefix on every endpoint below: `/api/v1/`.
 
 ## Backend apps (backend/)
 
@@ -31,11 +31,15 @@ One line per item. Current as of Step 11. Backend API prefix on every endpoint b
 - `PATCH/DELETE businesses/<id>/team/<access_id>/` — TeamMemberDetailView — edit/remove a member
 - `GET/PATCH businesses/<id>/settings/` — BusinessSettingsView — deadlines, cost target, alert %s
 - `GET starter-packs/<business_type>/` — StarterPackView — suggested stock/sell items by type
-- `GET businesses/<id>/stock-items/` — StockItemListView
+- `GET businesses/<id>/stock-items/` — StockItemListView — `?include_inactive=1` for Settings
 - `POST businesses/<id>/stock-items/bulk/` — StockItemBulkCreateView — all-or-nothing row validation
-- `GET businesses/<id>/stock-items/<item_id>/` — StockItemDetailView — + price history, last purchase
-- `GET businesses/<id>/sell-items/` — SellItemListView
+- `GET/PATCH businesses/<id>/stock-items/<item_id>/` — StockItemDetailView — + price history, last
+  purchase; PATCH refuses a unit change once purchased/counted, refuses deactivating while an active
+  sell item uses it
+- `GET businesses/<id>/sell-items/` — SellItemListView — `?include_inactive=1` for Settings
 - `POST businesses/<id>/sell-items/bulk/` — SellItemBulkCreateView
+- `PATCH businesses/<id>/sell-items/<item_id>/` — SellItemDetailView — `uses_qty` needs a main
+  stock item
 - `GET businesses/<id>/suppliers/` — SupplierListView — distinct supplier names typed so far
 - `GET/POST businesses/<id>/purchases/` — PurchaseListCreateView — list + today/7-day summary, record
 - `GET/PATCH/DELETE businesses/<id>/purchases/<pid>/` — PurchaseDetailView — soft-delete on DELETE
@@ -65,7 +69,10 @@ One line per item. Current as of Step 11. Backend API prefix on every endpoint b
 - `count.tsx` — Blind stock count form (opening or closing)
 - `counts/index.tsx` — Count review list (Owner/Manager), remind sheet
 - `counts/[id].tsx` — Count detail, flagged items first
-- `reports.tsx`, `sales.tsx`, `alerts.tsx`, `team.tsx`, `settings.tsx` — ComingSoonScreen stubs
+- `reports.tsx`, `sales.tsx`, `alerts.tsx`, `team.tsx` — ComingSoonScreen stubs
+- `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
+  edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — list +
+  add/edit sheet (StockItemForm/SellItemForm) screens; `settings/alerts.tsx` — the 5 alert settings
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing
 
@@ -109,6 +116,10 @@ One line per item. Current as of Step 11. Backend API prefix on every endpoint b
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
 - `screens/ComingSoonScreen.tsx` — shared stub for Reports/Sales/Alerts/Team/Settings
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx` — the two shared record sheets
+- `screens/StockItemSheet.tsx`, `SellItemSheet.tsx` — Settings' add/edit sheets (list screen owns
+  the list, these own the form + save)
+- `forms/StockItemForm.tsx`, `SellItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared
+  form component each, used by both the setup wizard and Settings
 - `strings.ts` — all user-facing copy, one object per screen
 - `labels.ts` — copy that varies by business type
 - `format.ts` — ₹ and date/time formatting in the business's own timezone
@@ -133,7 +144,7 @@ One line per item. Current as of Step 11. Backend API prefix on every endpoint b
 
 | Role | Permissions |
 |---|---|
-| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, counts.create/review, wastage.create/view_all/view_value/delete |
+| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete |
 | Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value |
 | Head chef | counts.create, counts.status, wastage.create/view_all |
 | Helper | counts.create, wastage.create/view_own |

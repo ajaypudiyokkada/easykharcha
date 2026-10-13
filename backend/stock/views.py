@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.log import log_action
+from audit.log import jsonable, log_action
 from businesses.access import owner_access_or_403
 from businesses.models import Business
 from businesses.permissions import require_permission
@@ -14,13 +14,15 @@ from counts.models import CountLine, CountLineState
 from purchases.models import Purchase, PurchaseLine
 from purchases.serializers import PurchaseSerializer
 
-from .exceptions import BulkValidationError, TooManyRows
+from .exceptions import BulkValidationError, StockItemInUse, StockItemUnitLocked, TooManyRows
 from .models import SellItem, StockItem
 from .serializers import (
     SellItemRowSerializer,
     SellItemSerializer,
+    SellItemUpdateSerializer,
     StockItemRowSerializer,
     StockItemSerializer,
+    StockItemUpdateSerializer,
 )
 
 MAX_BULK_ROWS = 100
@@ -76,9 +78,14 @@ class StockItemListView(APIView):
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
         require_permission(business, request.user, "stock.view")
-        items = _with_last_count_info(
-            _with_last_purchase_info(business.stock_items.filter(active=True))
+        # Settings' "What you buy" screen needs inactive items too (to show and reactivate them);
+        # every other caller of this list only ever wants the active ones, unchanged from before.
+        base = (
+            business.stock_items.all()
+            if request.query_params.get("include_inactive")
+            else business.stock_items.filter(active=True)
         )
+        items = _with_last_count_info(_with_last_purchase_info(base))
         return Response(StockItemSerializer(items, many=True).data)
 
 
@@ -121,6 +128,51 @@ class StockItemDetailView(APIView):
                 "recent_purchases": PurchaseSerializer(recent_purchases, many=True).data,
             }
         )
+
+    def patch(self, request, business_id, item_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "stockitems.manage")
+        item = get_object_or_404(
+            _with_last_count_info(_with_last_purchase_info(business.stock_items)), id=item_id
+        )
+
+        serializer = StockItemUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if "name" in data:
+            clash = business.stock_items.exclude(id=item.id).filter(name__iexact=data["name"])
+            if clash.exists():
+                raise ValidationError({"name": "An item with this name already exists."})
+
+        if "unit" in data and data["unit"] != item.unit:
+            has_history = PurchaseLine.objects.filter(stock_item=item).exists() or (
+                CountLine.objects.filter(stock_item=item).exists()
+            )
+            if has_history:
+                raise StockItemUnitLocked()
+
+        if data.get("active") is False and item.active:
+            blocking = list(item.sell_items.filter(active=True).values_list("name", flat=True))
+            if blocking:
+                raise StockItemInUse(blocking)
+
+        changed = sorted(data.keys())
+        before = {f: jsonable(getattr(item, f)) for f in changed}
+        for field, value in data.items():
+            setattr(item, field, value)
+        item.save()
+        after = {f: jsonable(getattr(item, f)) for f in changed}
+
+        log_action(
+            user=request.user,
+            action="stock_item.update",
+            business=business,
+            item_id=item.id,
+            before=before,
+            after=after,
+        )
+        return Response(StockItemSerializer(item).data)
 
 
 class StockItemBulkCreateView(APIView):
@@ -186,7 +238,11 @@ class SellItemListView(APIView):
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
         owner_access_or_403(business, request.user)
-        items = business.sell_items.filter(active=True)
+        items = (
+            business.sell_items.all()
+            if request.query_params.get("include_inactive")
+            else business.sell_items.filter(active=True)
+        )
         return Response(SellItemSerializer(items, many=True).data)
 
 
@@ -236,6 +292,16 @@ class SellItemBulkCreateView(APIView):
                     )
                     continue
 
+            if data.get("uses_qty") is not None and stock_item is None:
+                row_errors.append(
+                    {
+                        "row": index,
+                        "field": "uses_qty",
+                        "message": "Choose a main stock item first.",
+                    }
+                )
+                continue
+
             key = data["name"].lower()
             if key in existing_names:
                 row_errors.append(
@@ -268,3 +334,64 @@ class SellItemBulkCreateView(APIView):
             user=request.user, action="sell_item.bulk_create", business=business, count=len(created)
         )
         return Response(SellItemSerializer(created, many=True).data, status=201)
+
+
+class SellItemDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, business_id, item_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        item = get_object_or_404(business.sell_items, id=item_id)
+
+        serializer = SellItemUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if "name" in data:
+            clash = business.sell_items.exclude(id=item.id).filter(name__iexact=data["name"])
+            if clash.exists():
+                raise ValidationError({"name": "An item with this name already exists."})
+
+        if "main_stock_item" in data:
+            stock_item_id = data.pop("main_stock_item")
+            if stock_item_id is None:
+                data["main_stock_item"] = None
+            else:
+                stock_item = business.stock_items.filter(id=stock_item_id).first()
+                if stock_item is None:
+                    raise ValidationError(
+                        {"main_stock_item": "Choose a stock item from this business."}
+                    )
+                if stock_item.shared:
+                    raise ValidationError(
+                        {
+                            "main_stock_item": "Shared items (used in many things) can't be "
+                            "linked here."
+                        }
+                    )
+                data["main_stock_item"] = stock_item
+
+        resulting_main_stock_item = (
+            data["main_stock_item"] if "main_stock_item" in data else item.main_stock_item
+        )
+        resulting_uses_qty = data["uses_qty"] if "uses_qty" in data else item.uses_qty
+        if resulting_uses_qty is not None and resulting_main_stock_item is None:
+            raise ValidationError({"uses_qty": "Choose a main stock item first."})
+
+        changed = sorted(data.keys())
+        before = {f: jsonable(getattr(item, f)) for f in changed}
+        for field, value in data.items():
+            setattr(item, field, value)
+        item.save()
+        after = {f: jsonable(getattr(item, f)) for f in changed}
+
+        log_action(
+            user=request.user,
+            action="sell_item.update",
+            business=business,
+            item_id=item.id,
+            before=before,
+            after=after,
+        )
+        return Response(SellItemSerializer(item).data)

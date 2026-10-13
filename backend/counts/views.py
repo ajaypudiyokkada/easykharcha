@@ -103,7 +103,9 @@ class CountFormView(APIView):
         if count_type not in CountType.values:
             raise ValidationError({"type": "Choose opening or closing."})
 
-        items = business.stock_items.filter(active=True).order_by("name").values("id", "name", "unit")
+        items = (
+            business.stock_items.filter(active=True).order_by("name").values("id", "name", "unit")
+        )
         return Response({"items": list(items)})
 
 
@@ -127,9 +129,15 @@ class CountListCreateView(APIView):
             results.append(
                 {
                     **StockCountSerializer(count).data,
-                    "items_counted": sum(1 for line in lines if line.state == CountLineState.COUNTED),
-                    "items_skipped": sum(1 for line in lines if line.state == CountLineState.SKIPPED),
-                    "items_not_sure": sum(1 for line in lines if line.state == CountLineState.NOT_SURE),
+                    "items_counted": sum(
+                        1 for line in lines if line.state == CountLineState.COUNTED
+                    ),
+                    "items_skipped": sum(
+                        1 for line in lines if line.state == CountLineState.SKIPPED
+                    ),
+                    "items_not_sure": sum(
+                        1 for line in lines if line.state == CountLineState.NOT_SURE
+                    ),
                 }
             )
         return Response(results)
@@ -176,7 +184,11 @@ class CountListCreateView(APIView):
                 continue
             if item.id in seen_ids:
                 row_errors.append(
-                    {"row": index, "field": "stock_item", "message": "Already listed in this count."}
+                    {
+                        "row": index,
+                        "field": "stock_item",
+                        "message": "Already listed in this count.",
+                    }
                 )
                 continue
             seen_ids.add(item.id)
@@ -185,7 +197,11 @@ class CountListCreateView(APIView):
 
         if seen_ids != set(active_items):
             row_errors.append(
-                {"row": 0, "field": "lines", "message": "Every stock item must be counted or skipped."}
+                {
+                    "row": 0,
+                    "field": "lines",
+                    "message": "Every stock item must be counted or skipped.",
+                }
             )
 
         if row_errors:
@@ -315,7 +331,9 @@ class CountDetailView(APIView):
 
         # Flagged items (not sure, or confirmed as an unusual value) surface first.
         result_lines.sort(
-            key=lambda line: not (line["state"] == CountLineState.NOT_SURE or line["confirmed_unusual"])
+            key=lambda line: not (
+                line["state"] == CountLineState.NOT_SURE or line["confirmed_unusual"]
+            )
         )
 
         return Response({**StockCountSerializer(count).data, "lines": result_lines})
