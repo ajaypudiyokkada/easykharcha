@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from audit.log import jsonable, log_action
 from businesses.access import owner_access_or_403
 from businesses.models import Business
-from businesses.permissions import require_permission
+from businesses.permissions import access_or_403, permissions_for, require_permission
 from counts.models import CountLine, CountLineState
 from purchases.models import Purchase, PurchaseLine
 from purchases.serializers import PurchaseSerializer
@@ -233,14 +233,25 @@ class StockItemBulkCreateView(APIView):
 
 
 class SellItemListView(APIView):
+    """Settings' "What you sell" (Owner, `sellitems.manage`, can ask for inactive items too) and the
+    Record sales sheet (Owner/Manager, `sales.view`/`sales.create`, active items only) both read
+    this — a plain permission-string OR, same pattern as TodayView's wastage.view_all/view_own."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        owner_access_or_403(business, request.user)
+        access = access_or_403(business, request.user)
+        permissions = permissions_for(access.role)
+        can_manage = "sellitems.manage" in permissions
+        can_record_sales = "sales.view" in permissions or "sales.create" in permissions
+        if not (can_manage or can_record_sales):
+            raise PermissionDenied()
+
+        include_inactive = can_manage and request.query_params.get("include_inactive")
         items = (
             business.sell_items.all()
-            if request.query_params.get("include_inactive")
+            if include_inactive
             else business.sell_items.filter(active=True)
         )
         return Response(SellItemSerializer(items, many=True).data)

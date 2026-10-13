@@ -669,6 +669,21 @@ async function seedLateClosingCountAndWastage(accessToken) {
   if (wastageRes.status !== 201) {
     throw new Error(`seed: wastage entry failed, got ${wastageRes.status} (${JSON.stringify(wastageRes.body)})`);
   }
+
+  // Step 14: one sale today, so the Sales screen's delete dialog has a real row to open.
+  const sellItems = await apiRequest(`/businesses/${businessId}/sell-items/`, { token: accessToken });
+  const today = new Date().toISOString().slice(0, 10);
+  const saleRes = await apiRequest(`/businesses/${businessId}/sales/`, {
+    method: 'POST',
+    token: accessToken,
+    body: {
+      business_date: today,
+      lines: [{ sell_item: sellItems.body[0].id, quantity: '1' }],
+    },
+  });
+  if (saleRes.status !== 201) {
+    throw new Error(`seed: sale failed, got ${saleRes.status} (${JSON.stringify(saleRes.body)})`);
+  }
 }
 
 // ---------- main ----------
@@ -1000,6 +1015,25 @@ async function main() {
           await waitForText(page, 'Team member');
           await clickButton(page, 'Remove from team');
           await waitForText(page, 'from the team?');
+        },
+      },
+      // Step 14
+      {
+        name: 'sheet-record-sales',
+        url: `${APP_URL}/sales`,
+        open: async (page) => {
+          await waitForText(page, 'Sales');
+          await clickButton(page, 'Record sales');
+          await waitForText(page, 'What did you sell?');
+        },
+      },
+      {
+        name: 'dialog-delete-sales',
+        url: `${APP_URL}/sales`,
+        open: async (page) => {
+          await waitForText(page, 'Sales');
+          await clickAndSettle(await findVisible(page, '[aria-label="Delete entry"]'));
+          await waitForText(page, 'Delete sales entry?');
         },
       },
     ];

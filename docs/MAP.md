@@ -1,6 +1,6 @@
 # Repo map
 
-One line per item. Current as of Step 12. Backend API prefix on every endpoint below: `/api/v1/`.
+One line per item. Current as of Step 14. Backend API prefix on every endpoint below: `/api/v1/`.
 
 ## Backend apps (backend/)
 
@@ -12,6 +12,7 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
 - `stock/` — stock items, sell items; models.py (StockItem, SellItem), views.py, serializers.py, exceptions.py, urls.py
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
+- `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
 
@@ -42,7 +43,8 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `GET/PATCH businesses/<id>/stock-items/<item_id>/` — StockItemDetailView — + price history, last
   purchase; PATCH refuses a unit change once purchased/counted, refuses deactivating while an active
   sell item uses it
-- `GET businesses/<id>/sell-items/` — SellItemListView — `?include_inactive=1` for Settings
+- `GET businesses/<id>/sell-items/` — SellItemListView — Owner (`sellitems.manage`, `?include_inactive=1`
+  for Settings) or Owner/Manager (`sales.view`/`sales.create`, active items only, for Record sales)
 - `POST businesses/<id>/sell-items/bulk/` — SellItemBulkCreateView
 - `PATCH businesses/<id>/sell-items/<item_id>/` — SellItemDetailView — `uses_qty` needs a main
   stock item
@@ -50,12 +52,20 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `GET/POST businesses/<id>/purchases/` — PurchaseListCreateView — list + today/7-day summary, record
 - `GET/PATCH/DELETE businesses/<id>/purchases/<pid>/` — PurchaseDetailView — soft-delete on DELETE
 - `GET businesses/<id>/counts/form/?type=` — CountFormView — blind form: id/name/unit only
-- `GET/POST businesses/<id>/counts/` — CountListCreateView — review list, submit a count
-- `GET businesses/<id>/counts/<count_id>/` — CountDetailView — flagged items first, used-since-last
+- `GET/POST businesses/<id>/counts/` — CountListCreateView — review list (Owner/Manager get a
+  `flagged_gaps` count per row), submit a count
+- `GET businesses/<id>/counts/<count_id>/` — CountDetailView — gap-flagged items first, then
+  not-sure/confirmed-unusual, then the rest; Owner/Manager lines also carry `expected_used`,
+  `gap_qty`, `gap_value`, `gap_status`, `gap_reason` (Step 14) — never sent to Head chef/Helper,
+  who can't reach this endpoint at all (no `counts.review`)
 - `POST businesses/<id>/counts/remind/` — CountRemindView — Owner-only, returns a wa.me link
 - `GET businesses/<id>/today/` — TodayView — opening/closing state, deadlines, wastage count
 - `GET/POST businesses/<id>/wastage/` — WastageListCreateView — role-scoped values
 - `DELETE businesses/<id>/wastage/<entry_id>/` — WastageDetailView — Owner-only
+- `GET/POST businesses/<id>/sales/` — SaleListCreateView — list (newest first, paginated, date-range
+  filter) + summary (sales today, items sold today, last update, last 7 days); POST takes one
+  business_date and 1-30 lines (sell_item, quantity, optional amount)
+- `DELETE businesses/<id>/sales/<sid>/` — SaleDetailView — Owner-only, soft-delete
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
@@ -74,8 +84,12 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `wastage.tsx` — Wastage list, record, delete
 - `count.tsx` — Blind stock count form (opening or closing)
 - `counts/index.tsx` — Count review list (Owner/Manager), remind sheet
-- `counts/[id].tsx` — Count detail, flagged items first
-- `reports.tsx`, `sales.tsx`, `alerts.tsx` — ComingSoonScreen stubs
+- `counts/[id].tsx` — Count detail: gap-flagged items first, then not-sure/confirmed-unusual, then
+  the rest; Owner/Manager lines show expected used and the gap (qty + Rs value), red when flagged; a
+  not_comparable line shows a one-line reason linking to What you sell or Sales for that date
+- `reports.tsx`, `alerts.tsx` — ComingSoonScreen stubs
+- `sales.tsx` — Sales (Owner/Manager): summary strip, "Record sales", a date switcher, today's sales,
+  Owner-only delete via confirmation dialog
 - `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
   — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
@@ -119,11 +133,13 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 - `auth/permissions.ts` — `can(permissions, 'x.y')`, `isLimitedRole(permissions)`
 - `auth/storage.ts` — access/refresh token persistence (SecureStore on native, localStorage on web)
 - `api/client.ts` — fetch wrapper: base URL, timeout, typed ApiError
-- `api/{auth,business,stock,purchases,counts,wastage,team}.ts` — one typed client per backend resource
+- `api/{auth,business,stock,purchases,counts,wastage,team,sales}.ts` — one typed client per backend
+  resource
 - `business/routing.ts` — where to send a signed-in user (wizard step vs /home)
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
 - `screens/ComingSoonScreen.tsx` — shared stub for Reports/Sales/Alerts/Team/Settings
-- `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx` — the two shared record sheets
+- `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx`, `RecordSalesSheet.tsx` — the shared
+  record sheets
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
   a member, change role (asks for a new secret only when crossing the Manager boundary), reset a
   PIN/password
@@ -155,8 +171,8 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 
 | Role | Permissions |
 |---|---|
-| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete |
-| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view |
+| Owner | purchases.view/create/edit/delete, stock.view, team.manage, settings.manage, stockitems.manage, sellitems.manage, business.manage, counts.create/review, wastage.create/view_all/view_value/delete, sales.view/create/delete |
+| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view, sales.view/create |
 | Head chef | counts.create, counts.status, wastage.create/view_all |
 | Helper | counts.create, wastage.create/view_own |
 
@@ -167,3 +183,4 @@ One line per item. Current as of Step 12. Backend API prefix on every endpoint b
 | target_cost_pct | 30 | 1–100 |
 | wastage_alert_pct | 5 | 0–100 |
 | rate_creep_pct | 10 | 0–100 |
+| gap_alert_pct (stock-gap flag threshold) | 10 | 0–100 |

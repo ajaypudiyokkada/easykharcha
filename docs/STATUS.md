@@ -92,6 +92,15 @@ not built yet.
   changes between Helper/Head chef are free, crossing the Manager boundary needs a new secret in the
   same PATCH. New `team.view` permission (Manager, list/detail only). `GET team/` now returns
   `last_login_at`/`added_at`. New Team list and member detail screens, replacing the Team stub.
+- **Step 14 — Sales (manual) and the stock gap.** New `Sale` model (one row per sell item per
+  business date, soft-deleted), `GET/POST sales/` + `DELETE sales/<id>/` with a summary; new
+  `sales.view`/`sales.create`/`sales.delete` permissions — see the note below. `GET counts/<id>/`
+  lines gained `expected_used`/`gap_qty`/`gap_value`/`gap_status`/`gap_reason` for Owner/Manager
+  only, comparing sales against each sell item's `uses_qty`; a line is `flagged` past the new
+  `gap_alert_pct` setting (default 10%), and flagged lines surface first in both the list and
+  detail. New Sales screen (replacing its ComingSoon stub), Record sales sheet, Count review gap
+  display, and a real Home Sales card/stat/quick action plus a setup nudge when `uses_qty` is
+  missing. `login_per_ip`'s dev rate limit raised 30 -> 50 for the larger smoke suite.
 
 ## Permission table
 
@@ -121,6 +130,9 @@ unilaterally:
 | `wastage.view_own` | no | no | no | yes |
 | `wastage.view_value` | yes | yes | no | no |
 | `wastage.delete` | yes | no | no | no |
+| `sales.view` | yes | yes | no | no |
+| `sales.create` | yes | yes | no | no |
+| `sales.delete` | yes | no | no | no |
 
 Notes for the product owner, not decided unilaterally:
 - **Manager has `counts.review` but not `counts.create`, and `wastage.view_all`/`wastage.view_value`
@@ -136,6 +148,11 @@ Notes for the product owner, not decided unilaterally:
 - **Settings** gained `closing_count_hour` (default 20, i.e. 8 PM) alongside the existing
   `count_deadline_hour` (default 11 AM, now specifically the *opening* count's deadline) — both still
   Owner-only to view or change.
+- **Step 14: `sales.view`/`sales.create` given to Manager, `sales.delete` kept Owner-only** —
+  mirrors the purchases split (Manager records, Owner is the only one who can undo a record), not
+  something decided unilaterally. Head chef and Helper get neither: sales recording was built as an
+  Owner/Manager job, the same way counts/wastage were built as a Head-chef/Helper job — worth
+  confirming that's the intended shape, not just what was easiest to build.
 
 ## Route map
 
@@ -178,6 +195,7 @@ both say so in the UI.
 - **A legacy/ code reuse plan** — `legacy/` (the earlier multi-tenant restaurant SaaS build) is kept
   intact and untouched; nothing in the current app reads from or depends on it, and no decision has
   been made about reusing any of its code. Do not delete it.
-- **Sales, reports, alerts and costing features** — purchases, stock counts and wastage are now built
-  (Steps 9–10); there's still no screen to record daily sales, or to see reports/alerts/costing-margin
-  numbers. That's the next phase of the product, not part of these 8 steps.
+- **Reports, alerts and costing features** — purchases, stock counts, wastage and (Step 14) manual
+  sales are now built; there's still no screen to see reports, alerts, or costing-margin numbers.
+- **Sales file upload (Petpooja)** — Step 14 deliberately built manual sales entry only, no upload
+  button or upload screen; a later step may add bulk/file-based sales import.

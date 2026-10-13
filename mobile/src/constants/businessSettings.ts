@@ -7,4 +7,5 @@ export const DEFAULT_BUSINESS_SETTINGS = {
   target_cost_pct: 30,
   wastage_alert_pct: 5,
   rate_creep_pct: 10,
+  gap_alert_pct: 10,
 } as const;

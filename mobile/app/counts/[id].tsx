@@ -1,17 +1,18 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { CountDetail, CountDetailLine } from '../../src/api/counts';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { formatDateTime } from '../../src/format';
+import { formatDate, formatDateTime, formatRupees } from '../../src/format';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
   AppShell,
   Body,
   Heading,
+  Icon,
   NoAccess,
   ReadError,
   Screen,
@@ -27,8 +28,19 @@ function formatQty(value: string | null, unit: string): string {
   return `${value} ${unit}`;
 }
 
+function gapReasonText(line: CountDetailLine, timezone: string): string {
+  const reason = line.gap_reason;
+  if (!reason) return '';
+  if (reason.code === 'sales_missing') {
+    const dates = (reason.dates ?? []).map((d) => formatDate(d, timezone));
+    return s.gapReason.sales_missing(dates);
+  }
+  return s.gapReason[reason.code] as string;
+}
+
 export default function CountDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
@@ -94,7 +106,7 @@ export default function CountDetailScreen() {
 
             <View style={styles.list}>
               {detail.lines.map((line) => (
-                <LineCard key={line.id} line={line} />
+                <LineCard key={line.id} line={line} timezone={timezone} router={router} />
               ))}
             </View>
           </>
@@ -104,15 +116,31 @@ export default function CountDetailScreen() {
   );
 }
 
-function LineCard({ line }: { line: CountDetailLine }) {
-  const flagged = line.state === 'not_sure' || line.confirmed_unusual;
+function LineCard({
+  line,
+  timezone,
+  router,
+}: {
+  line: CountDetailLine;
+  timezone: string;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const notSureFlagged = line.state === 'not_sure' || line.confirmed_unusual;
+  const gapFlagged = line.flagged;
   return (
-    <View style={[styles.card, flagged ? styles.cardFlagged : null]}>
+    <View
+      style={[
+        styles.card,
+        notSureFlagged ? styles.cardFlagged : null,
+        gapFlagged ? styles.cardGapFlagged : null,
+      ]}
+    >
       <View style={styles.cardHead}>
         <Heading level={3}>{line.stock_item_name}</Heading>
         {line.state === 'not_sure' ? <Badge label={s.notSureBadge} /> : null}
         {line.state === 'skipped' ? <Badge label={s.skippedBadge} /> : null}
         {line.confirmed_unusual ? <Badge label={s.confirmedBadge} /> : null}
+        {gapFlagged ? <Badge label={s.gapBadge} danger /> : null}
       </View>
       <Row label={s.countedLabel} value={formatQty(line.counted_qty, line.unit)} />
       <Row
@@ -140,6 +168,47 @@ function LineCard({ line }: { line: CountDetailLine }) {
           />
         </>
       ) : null}
+
+      {line.gap_status === 'ok' ? (
+        <>
+          <Row label={s.expectedLabel} value={formatQty(line.expected_used, line.unit)} />
+          <View style={styles.row}>
+            <Small style={styles.rowLabel}>{s.gapLabel}</Small>
+            <View style={styles.gapValueWrap}>
+              {gapFlagged ? <Icon name="warning" size={16} colour={colours.danger} /> : null}
+              <Body style={gapFlagged ? styles.gapValueFlagged : styles.rowValue}>
+                {s.gapQty(line.gap_qty ?? '—', line.unit)}
+                {line.gap_value !== null ? ` ${s.gapValue(formatRupees(line.gap_value))}` : ''}
+              </Body>
+            </View>
+          </View>
+        </>
+      ) : line.gap_status === 'not_comparable' && line.gap_reason ? (
+        line.gap_reason.code === 'uses_not_set' || line.gap_reason.code === 'sales_missing' ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.gapReasonRow}
+            onPress={() =>
+              router.push(line.gap_reason?.code === 'uses_not_set' ? '/settings/sell' : '/sales')
+            }
+          >
+            <Small style={styles.gapReasonText}>{gapReasonText(line, timezone)}</Small>
+            <Small style={styles.gapReasonLink}>
+              {line.gap_reason.code === 'uses_not_set'
+                ? s.gapReasonLinkSell
+                : s.gapReasonLinkSales(
+                    line.gap_reason.dates?.[0]
+                      ? formatDate(line.gap_reason.dates[0], timezone)
+                      : '',
+                  )}
+            </Small>
+          </Pressable>
+        ) : (
+          <View style={styles.gapReasonRow}>
+            <Small style={styles.gapReasonText}>{gapReasonText(line, timezone)}</Small>
+          </View>
+        )
+      ) : null}
     </View>
   );
 }
@@ -153,9 +222,9 @@ function Row({ label, value, emphasise }: { label: string; value: string; emphas
   );
 }
 
-function Badge({ label }: { label: string }) {
+function Badge({ label, danger }: { label: string; danger?: boolean }) {
   return (
-    <View style={styles.badge}>
+    <View style={[styles.badge, danger ? styles.badgeDanger : null]}>
       <Small style={styles.badgeText}>{label}</Small>
     </View>
   );
@@ -188,6 +257,10 @@ const styles = StyleSheet.create({
     borderColor: colours.warning,
     backgroundColor: colours.mint,
   },
+  cardGapFlagged: {
+    borderColor: colours.danger,
+    backgroundColor: colours.card,
+  },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -201,6 +274,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     borderRadius: radii.pill,
     backgroundColor: colours.warning,
+  },
+  badgeDanger: {
+    backgroundColor: colours.danger,
   },
   badgeText: {
     color: colours.card,
@@ -216,5 +292,29 @@ const styles = StyleSheet.create({
   rowValue: {},
   rowValueEmphasis: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  gapValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  gapValueFlagged: {
+    color: colours.danger,
+    fontFamily: fonts.bodyExtraBold,
+  },
+  gapReasonRow: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colours.mint,
+    gap: 2,
+  },
+  gapReasonText: {
+    color: colours.muted,
+  },
+  gapReasonLink: {
+    color: colours.primary,
+    fontFamily: fonts.bodyExtraBold,
+    textDecorationLine: 'underline',
   },
 });

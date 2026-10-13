@@ -45,6 +45,7 @@ export default function AlertRulesSettings() {
   const [rateCreepPct, setRateCreepPct] = useState(
     String(DEFAULT_BUSINESS_SETTINGS.rate_creep_pct),
   );
+  const [gapAlertPct, setGapAlertPct] = useState(String(DEFAULT_BUSINESS_SETTINGS.gap_alert_pct));
 
   const [loading, setLoading] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
@@ -61,6 +62,7 @@ export default function AlertRulesSettings() {
         setTargetCostPct(settings.target_cost_pct);
         setWastageAlertPct(settings.wastage_alert_pct);
         setRateCreepPct(settings.rate_creep_pct);
+        setGapAlertPct(settings.gap_alert_pct);
       })
       .catch(() => {
         // Keep the recommended defaults already in state — this is only a pre-fill.
@@ -113,6 +115,7 @@ export default function AlertRulesSettings() {
       setTargetCostPct(String(DEFAULT_BUSINESS_SETTINGS.target_cost_pct));
       setWastageAlertPct(String(DEFAULT_BUSINESS_SETTINGS.wastage_alert_pct));
       setRateCreepPct(String(DEFAULT_BUSINESS_SETTINGS.rate_creep_pct));
+      setGapAlertPct(String(DEFAULT_BUSINESS_SETTINGS.gap_alert_pct));
       setToast(sa.savedToast);
     } catch (err) {
       mapError(err);
@@ -133,6 +136,7 @@ export default function AlertRulesSettings() {
           target_cost_pct: targetCostPct,
           wastage_alert_pct: wastageAlertPct,
           rate_creep_pct: rateCreepPct,
+          gap_alert_pct: gapAlertPct,
         },
       });
       setToast(sa.savedToast);
@@ -199,6 +203,13 @@ export default function AlertRulesSettings() {
               onChangeText={setRateCreepPct}
               keyboardType="decimal-pad"
               hint={s6.rateRiseExample}
+            />
+            <TextField
+              label={sa.gapAlertLabel}
+              value={gapAlertPct}
+              onChangeText={setGapAlertPct}
+              keyboardType="decimal-pad"
+              hint={sa.gapAlertExample}
             />
 
             <Button

@@ -36,4 +36,5 @@ export type BusinessSettings = {
   target_cost_pct: string;
   wastage_alert_pct: string;
   rate_creep_pct: string;
+  gap_alert_pct: string;
 };

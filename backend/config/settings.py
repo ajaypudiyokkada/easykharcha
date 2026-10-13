@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "purchases",
     "counts",
     "wastage",
+    "sales",
 ]
 
 MIDDLEWARE = [
@@ -123,7 +124,9 @@ RATE_LIMITS = {
     "login_per_mobile": (10, 900),
     # Stricter than a password login's — same reasoning as PIN_LOGIN_LOCKOUT_THRESHOLD above.
     "login_per_mobile_pin": (5, 900),
-    "login_per_ip": (30, 900),
+    # Step 14's smoke suite alone makes 33 login calls across its role-switch scenarios (one shared
+    # dev IP) — raised from 30 so the full `npm run smoke` run doesn't trip its own rate limit.
+    "login_per_ip": (50, 900),
 }
 
 # Step 7: one BusinessSettings row per business, seeded with these at creation. Chosen for a small
@@ -136,6 +139,7 @@ BUSINESS_SETTINGS_DEFAULTS = {
     "target_cost_pct": 30,
     "wastage_alert_pct": 5,
     "rate_creep_pct": 10,
+    "gap_alert_pct": 10,
 }
 BUSINESS_SETTINGS_RANGES = {
     "count_deadline_hour": (0, 23),
@@ -143,6 +147,7 @@ BUSINESS_SETTINGS_RANGES = {
     "target_cost_pct": (1, 100),
     "wastage_alert_pct": (0, 100),
     "rate_creep_pct": (0, 100),
+    "gap_alert_pct": (0, 100),
 }
 
 # Dev default matches the Expo web dev server (mobile/package.json's `start` script, :8081) and the

@@ -4,11 +4,14 @@ import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-nat
 
 import type { PurchaseListResponse } from '../src/api/purchases';
 import type { TodayStatus } from '../src/api/counts';
+import type { SaleListResponse } from '../src/api/sales';
+import type { SellItem } from '../src/api/stock';
 import type { WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
 import { can, isLimitedRole } from '../src/auth/permissions';
 import { formatDateTime, formatRupees } from '../src/format';
 import { RecordPurchaseSheet } from '../src/screens/RecordPurchaseSheet';
+import { RecordSalesSheet } from '../src/screens/RecordSalesSheet';
 import { RecordWastageSheet } from '../src/screens/RecordWastageSheet';
 import { bestTextOn, ensureContrast } from '../src/theme/brand';
 import { strings } from '../src/strings';
@@ -222,7 +225,7 @@ function TodayHome() {
 }
 
 /** Owner / Manager: the existing brand header + checklist, now with real Today cards (purchases,
- * stock count state, wastage entries — no sales card yet) and working quick actions. */
+ * stock count state, wastage entries, sales) and working quick actions. */
 function OwnerHome() {
   const router = useRouter();
   const { user, businesses, authedFetch, refreshMe, logout } = useAuth();
@@ -232,9 +235,12 @@ function OwnerHome() {
   const [purchaseSummary, setPurchaseSummary] = useState<PurchaseListResponse['summary'] | null>(
     null,
   );
+  const [salesSummary, setSalesSummary] = useState<SaleListResponse['summary'] | null>(null);
+  const [needsUsesQtySetup, setNeedsUsesQtySetup] = useState(false);
   const [today, setToday] = useState<TodayStatus | null>(null);
   const [purchaseSheetVisible, setPurchaseSheetVisible] = useState(false);
   const [wasteSheetVisible, setWasteSheetVisible] = useState(false);
+  const [salesSheetVisible, setSalesSheetVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const permissions = business.permissions;
@@ -242,7 +248,10 @@ function OwnerHome() {
   const canRecordPurchase = can(permissions, 'purchases.create');
   const canRecordWastage = can(permissions, 'wastage.create');
   const canStartCount = can(permissions, 'counts.create');
+  const canSeeSales = can(permissions, 'sales.view');
+  const canRecordSales = can(permissions, 'sales.create');
   const timezone = business.timezone;
+  const isOwner = business.role === 'owner';
 
   const loadToday = useCallback(() => {
     if (canSeePurchases) {
@@ -250,17 +259,33 @@ function OwnerHome() {
         .then((response) => setPurchaseSummary(response.summary))
         .catch(() => {});
     }
+    if (canSeeSales) {
+      const today_ = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+      authedFetch<SaleListResponse>(
+        `/businesses/${business.id}/sales/?date_from=${today_}&date_to=${today_}`,
+      )
+        .then((response) => setSalesSummary(response.summary))
+        .catch(() => {});
+    }
+    if (isOwner) {
+      authedFetch<SellItem[]>(`/businesses/${business.id}/sell-items/`)
+        .then((items) =>
+          setNeedsUsesQtySetup(
+            items.some((item) => item.main_stock_item !== null && item.uses_qty === null),
+          ),
+        )
+        .catch(() => {});
+    }
     authedFetch<TodayStatus>(`/businesses/${business.id}/today/`)
       .then(setToday)
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business.id, canSeePurchases]);
+  }, [business.id, canSeePurchases, canSeeSales, isOwner, timezone]);
 
   useEffect(() => {
     loadToday();
   }, [loadToday]);
 
-  const isOwner = business.role === 'owner';
   const skippedSteps = business.skipped_steps;
   const checklistDismissed = Boolean(business.checklist_dismissed_at);
   const showChecklist = isOwner && skippedSteps.length > 0 && !checklistDismissed;
@@ -385,16 +410,43 @@ function OwnerHome() {
           </View>
         ) : null}
 
-        {canSeePurchases && purchaseSummary ? (
+        {isOwner && needsUsesQtySetup ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.setupCard}
+            onPress={() => router.push('/settings/sell')}
+          >
+            <View style={styles.setupIcon}>
+              <Icon name="info" size={20} colour={colours.card} />
+            </View>
+            <View style={styles.entryMain}>
+              <Body style={styles.attentionTitle}>{s.setUsesQtyTitle}</Body>
+              <Small style={styles.entryMeta}>{s.setUsesQtyBody}</Small>
+            </View>
+            <Icon name="chevronRight" size={20} colour={colours.muted} />
+          </Pressable>
+        ) : null}
+
+        {(canSeePurchases && purchaseSummary) || (canSeeSales && salesSummary) ? (
           <View style={styles.statRow}>
-            <Card style={styles.statCard}>
-              <Small style={styles.statLabel}>{s.boughtToday}</Small>
-              <Heading level={3}>{formatRupees(purchaseSummary.bought_today)}</Heading>
-            </Card>
-            <Card style={styles.statCard}>
-              <Small style={styles.statLabel}>{s.last7Days}</Small>
-              <Heading level={3}>{formatRupees(purchaseSummary.last_7_days)}</Heading>
-            </Card>
+            {canSeePurchases && purchaseSummary ? (
+              <Card style={styles.statCard}>
+                <Small style={styles.statLabel}>{s.boughtToday}</Small>
+                <Heading level={3}>{formatRupees(purchaseSummary.bought_today)}</Heading>
+              </Card>
+            ) : null}
+            {canSeeSales && salesSummary ? (
+              <Card style={styles.statCard}>
+                <Small style={styles.statLabel}>{s.salesToday}</Small>
+                <Heading level={3}>{formatRupees(salesSummary.sales_today)}</Heading>
+              </Card>
+            ) : null}
+            {canSeePurchases && purchaseSummary ? (
+              <Card style={styles.statCard}>
+                <Small style={styles.statLabel}>{s.last7Days}</Small>
+                <Heading level={3}>{formatRupees(purchaseSummary.last_7_days)}</Heading>
+              </Card>
+            ) : null}
           </View>
         ) : null}
 
@@ -421,6 +473,13 @@ function OwnerHome() {
           </View>
         ) : null}
 
+        {canSeeSales && salesSummary ? (
+          <Card>
+            <Small style={styles.statLabel}>{strings.sales.title}</Small>
+            <Heading level={3}>{s.itemsSoldToday(salesSummary.items_sold_today)}</Heading>
+          </Card>
+        ) : null}
+
         <View>
           <Small style={styles.sectionLabel}>{s.quickActions}</Small>
           <View style={styles.actionsGrid}>
@@ -445,7 +504,13 @@ function OwnerHome() {
                 onPress={() => setWasteSheetVisible(true)}
               />
             ) : null}
-            <DisabledAction label={s.recordSales} />
+            {canRecordSales ? (
+              <ActionCard
+                label={s.recordSales}
+                icon="sales"
+                onPress={() => setSalesSheetVisible(true)}
+              />
+            ) : null}
           </View>
         </View>
 
@@ -477,6 +542,15 @@ function OwnerHome() {
           loadToday();
         }}
       />
+      <RecordSalesSheet
+        visible={salesSheetVisible}
+        onClose={() => setSalesSheetVisible(false)}
+        onSaved={() => {
+          setSalesSheetVisible(false);
+          setToast(strings.salesForm.savedToast);
+          loadToday();
+        }}
+      />
       <Toast message={toast} onHide={() => setToast(null)} />
     </AppShell>
   );
@@ -496,15 +570,6 @@ function ActionCard({
       <Icon name={icon} size={24} colour={colours.primary} />
       <Body style={styles.actionLabel}>{label}</Body>
     </Pressable>
-  );
-}
-
-function DisabledAction({ label }: { label: string }) {
-  return (
-    <View style={[styles.actionCard, styles.actionCardDisabled]}>
-      <Body style={styles.actionLabelDisabled}>{label}</Body>
-      <Small style={styles.comingSoonBadge}>{strings.home.comingSoonBadge}</Small>
-    </View>
   );
 }
 
@@ -616,6 +681,23 @@ const styles = StyleSheet.create({
   },
   attentionTitle: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  setupCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 2,
+    borderColor: colours.primary,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+  },
+  setupIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.md,
+    backgroundColor: colours.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionsGrid: {
     flexDirection: 'row',

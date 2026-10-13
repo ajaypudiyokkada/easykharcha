@@ -57,6 +57,16 @@ role changes need no secret -> changing to Manager without a secret is rejected,
 one is given -> removing a member drops their access to the business but their account still exists
 -> the Owner can't reset or remove their own Owner access -> a Manager gets 403 on reset, role
 change, and remove, but can still view the team list.
+
+Then the Step 14 sales/stock-gap flow: an opening count (Milk, 12 L) -> a purchase (20 L at Rs 64)
+and wastage (1.5 L) in between -> a closing count (8 L) -> used_since_last_count 22.5 -> a sell item
+("Tea pack", uses 0.2 L milk) sells 100 units in the window -> count review shows expected_used 20,
+gap_qty 2.5, gap_value Rs 160, status ok, flagged (12.5% over the 10% default) -> a second sell item
+using milk with no uses_qty makes the gap not_comparable/uses_not_set -> deactivating it and then
+deleting the window's only sale makes it not_comparable/sales_missing with that date -> a Manager can
+record sales but gets 403 on delete -> a Helper gets 403 on every sales endpoint -> a future-dated
+sale is rejected -> the Owner deletes a sale and the summary updates -> Helper/Head chef count
+endpoints carry no expected/gap field (enforced by the existing 403 on count review).
 """
 
 import binascii
@@ -69,7 +79,7 @@ import sys
 import urllib.error
 import urllib.request
 import zlib
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
@@ -1091,6 +1101,9 @@ def check_purchase_flow() -> None:
         "wastage.view_all",
         "wastage.view_value",
         "wastage.delete",
+        "sales.view",
+        "sales.create",
+        "sales.delete",
     }
     if set(owner_business.get("permissions", [])) != expected_owner:
         fail(f"/me owner permissions: expected {expected_owner}, got {owner_business.get('permissions')}")
@@ -1105,6 +1118,8 @@ def check_purchase_flow() -> None:
         "wastage.view_all",
         "wastage.view_value",
         "team.view",
+        "sales.view",
+        "sales.create",
     }
     if set(manager_business.get("permissions", [])) != expected_manager:
         fail(
@@ -1330,8 +1345,6 @@ def check_count_and_wastage_flow() -> None:
     )
     if status != 200:
         fail(f"count review detail: expected 200, got {status} ({body})")
-    if "expected" in json.dumps(body) or "gap" in json.dumps(body):
-        fail(f"count review detail: should never have an expected/gap field, got {body}")
     if body["lines"][0]["stock_item"] != milk_id:
         fail(f"count review detail: expected the flagged item (Milk) first, got {body['lines'][0]}")
     milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
@@ -1344,6 +1357,15 @@ def check_count_and_wastage_flow() -> None:
     if Decimal(milk_line["used_since_last_count"]) != Decimal("-22"):
         fail(f"count review detail: expected used_since_last_count -22, got {milk_line}")
     print("OK — count review detail's used_since_last_count is correct for a known case.")
+
+    # Step 14: this business has no sell item linking to Milk, so its gap is not_comparable
+    # (not_sold) rather than computed — and a Helper/Head chef still can't reach this endpoint at
+    # all (403, already asserted above), so they never see a gap field either.
+    if milk_line.get("gap_status") != "not_comparable" or milk_line.get("gap_reason", {}).get("code") != "not_sold":
+        fail(f"count review detail: expected Milk's gap not_comparable/not_sold, got {milk_line}")
+    if milk_line.get("expected_used") is not None or milk_line.get("gap_qty") is not None:
+        fail(f"count review detail: not_comparable lines should have null gap fields, got {milk_line}")
+    print("OK — a stock item with no linked sell item shows a not_comparable gap (not_sold).")
 
     # Manager also has count review access
     status, _, _ = request(
@@ -1685,6 +1707,237 @@ def check_settings_flow() -> None:
     print("OK — audit rows exist for the stock and sell item updates.")
 
 
+def check_sales_and_gap_flow() -> None:
+    _, owner_access, _ = signup_and_login("Sales Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Sales Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: stock bulk create expected 201, got {status} ({body})")
+    milk_id = body[0]["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {
+                    "name": "Tea pack",
+                    "selling_price": "20.00",
+                    "main_stock_item": milk_id,
+                    "uses_qty": "0.200",
+                }
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: sell item create expected 201, got {status} ({body})")
+    tea_pack_id = body[0]["id"]
+
+    # opening count: Milk 12 L (the "previous" count the gap window starts from)
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "opening", "lines": [{"stock_item": milk_id, "state": "counted", "counted_qty": "12"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: opening count expected 201, got {status} ({body})")
+    business_date = body["business_date"]
+
+    # bought 20 L at Rs 64/L (sets the last purchase price used for gap_value) and wasted 1.5 L,
+    # both between the opening and closing counts
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: purchase expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/wastage/",
+        {"stock_item": milk_id, "quantity": "1.5", "reason": "spillage"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: wastage expected 201, got {status} ({body})")
+
+    # closing count: Milk 8 L -> used_since_last_count = 12 + 20 - 1.5 - 8 = 22.5
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": milk_id, "state": "counted", "counted_qty": "8"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: closing count expected 201, got {status} ({body})")
+    closing_count_id = body["id"]
+    print("OK — opening count (12 L), a purchase (20 L) and wastage (1.5 L), then a closing count (8 L).")
+
+    # 100 Tea packs sold today (the window's only date) -> expected_used 20, gap_qty 2.5
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "100"}]},
+        token=owner_access,
+    )
+    if status != 201 or len(body) != 1:
+        fail(f"sales create: expected 201 with 1 line, got {status} ({body})")
+    sale_id = body[0]["id"]
+    if Decimal(body[0]["amount"]) != Decimal("2000.00"):
+        fail(f"sales create: expected amount to default to quantity x price (2000.00), got {body[0]}")
+    print("OK — recorded 100 Tea packs sold; amount defaulted to quantity x selling price.")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+    )
+    if status != 200:
+        fail(f"sales flow: count review detail expected 200, got {status} ({body})")
+    milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
+    if Decimal(milk_line["used_since_last_count"]) != Decimal("22.5"):
+        fail(f"sales flow: expected used_since_last_count 22.5, got {milk_line}")
+    if Decimal(milk_line["expected_used"]) != Decimal("20"):
+        fail(f"sales flow: expected expected_used 20, got {milk_line}")
+    if Decimal(milk_line["gap_qty"]) != Decimal("2.5"):
+        fail(f"sales flow: expected gap_qty 2.5, got {milk_line}")
+    if Decimal(milk_line["gap_value"]) != Decimal("160.00"):
+        fail(f"sales flow: expected gap_value 160.00, got {milk_line}")
+    if milk_line["gap_status"] != "ok" or milk_line["flagged"] is not True:
+        fail(f"sales flow: expected gap_status ok and flagged true (12.5% > 10%), got {milk_line}")
+    print("OK — count review shows expected_used 20, gap_qty 2.5, gap_value Rs 160, ok, flagged.")
+
+    # a second active sell item using Milk with no uses_qty -> not_comparable / uses_not_set
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {"items": [{"name": "Milk Shake", "selling_price": "40.00", "main_stock_item": milk_id}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: second sell item create expected 201, got {status} ({body})")
+    milk_shake_id = body[0]["id"]
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+    )
+    milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
+    if milk_line["gap_status"] != "not_comparable" or milk_line["gap_reason"]["code"] != "uses_not_set":
+        fail(f"sales flow: expected not_comparable/uses_not_set, got {milk_line}")
+    if milk_line["expected_used"] is not None or milk_line["gap_qty"] is not None:
+        fail(f"sales flow: not_comparable should have null gap fields, got {milk_line}")
+    print("OK — a second sell item on Milk with no uses_qty makes the gap not_comparable (uses_not_set).")
+
+    # deactivate it, then delete the window's only sale -> not_comparable / sales_missing
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{milk_shake_id}/",
+        {"active": False},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"sales flow: deactivate Milk Shake expected 200, got {status} ({body})")
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/sales/{sale_id}/", token=owner_access
+    )
+    if status != 204:
+        fail(f"sales flow: delete sale expected 204, got {status} ({body})")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+    )
+    milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
+    if milk_line["gap_status"] != "not_comparable" or milk_line["gap_reason"]["code"] != "sales_missing":
+        fail(f"sales flow: expected not_comparable/sales_missing, got {milk_line}")
+    if milk_line["gap_reason"].get("dates") != [business_date]:
+        fail(f"sales flow: expected sales_missing dates [{business_date}], got {milk_line['gap_reason']}")
+    print("OK — deleting the window's only sale makes the gap not_comparable (sales_missing), with the date.")
+
+    # a Manager can record sales but gets 403 on delete; a Helper gets 403 on every sales endpoint
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Sales Manager", "manager")
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "Sales Helper", "helper")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "3"}]},
+        token=manager_access,
+    )
+    if status != 201:
+        fail(f"sales flow: manager create expected 201, got {status} ({body})")
+    manager_sale_id = body[0]["id"]
+    status, _, _ = request(
+        "DELETE", f"/businesses/{business_id}/sales/{manager_sale_id}/", token=manager_access
+    )
+    if status != 403:
+        fail(f"sales flow: manager delete expected 403, got {status}")
+    print("OK — a Manager can record sales but gets 403 on delete.")
+
+    status, _, _ = request("GET", f"/businesses/{business_id}/sales/", token=helper_access)
+    if status != 403:
+        fail(f"sales flow: helper list expected 403, got {status}")
+    status, _, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "1"}]},
+        token=helper_access,
+    )
+    if status != 403:
+        fail(f"sales flow: helper create expected 403, got {status}")
+    print("OK — a Helper gets 403 on every sales endpoint.")
+
+    # a future-dated sale is rejected
+    # +2 days, not +1 — a safety margin against UTC/IST date-boundary skew right at midnight.
+    future_date = (datetime.now(dt_timezone.utc) + timedelta(days=2)).date().isoformat()
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": future_date, "lines": [{"sell_item": tea_pack_id, "quantity": "1"}]},
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"sales flow: future-dated sale expected rejection, got {status} ({body})")
+    print("OK — a future-dated sale is rejected.")
+
+    # the Owner deletes the Manager's sale and the summary updates
+    status, body, _ = request("GET", f"/businesses/{business_id}/sales/", token=owner_access)
+    if status != 200:
+        fail(f"sales flow: list expected 200, got {status} ({body})")
+    before_items = Decimal(body["summary"]["items_sold_today"])
+    status, _, _ = request(
+        "DELETE", f"/businesses/{business_id}/sales/{manager_sale_id}/", token=owner_access
+    )
+    if status != 204:
+        fail(f"sales flow: owner delete expected 204, got {status}")
+    status, body, _ = request("GET", f"/businesses/{business_id}/sales/", token=owner_access)
+    after_items = Decimal(body["summary"]["items_sold_today"])
+    if after_items != before_items - Decimal("3"):
+        fail(f"sales flow: summary should drop by 3 items after delete, {before_items} -> {after_items}")
+    ids = [s["id"] for s in body["results"]]
+    if manager_sale_id in ids:
+        fail(f"sales flow: deleted sale still in the list: {ids}")
+    print("OK — the Owner soft-deletes a sale and the summary updates.")
+
+
 def main() -> None:
     check_health()
     check_auth_flow()
@@ -1695,6 +1948,7 @@ def main() -> None:
     check_purchase_flow()
     check_count_and_wastage_flow()
     check_settings_flow()
+    check_sales_and_gap_flow()
     print("\nAll smoke checks passed.")
 
 

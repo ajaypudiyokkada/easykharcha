@@ -124,6 +124,9 @@ class BusinessSettings(models.Model):
     target_cost_pct = models.DecimalField(max_digits=5, decimal_places=2)
     wastage_alert_pct = models.DecimalField(max_digits=5, decimal_places=2)
     rate_creep_pct = models.DecimalField(max_digits=5, decimal_places=2)
+    # Step 14: how far used_since_last_count may diverge from sales-expected usage (as a % of
+    # expected_used) before a stock gap line is flagged in count review.
+    gap_alert_pct = models.DecimalField(max_digits=5, decimal_places=2)
 
     def __str__(self) -> str:
         return f"Settings for {self.business_id}"

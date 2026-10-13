@@ -18,6 +18,7 @@ FIELDS = (
     "target_cost_pct",
     "wastage_alert_pct",
     "rate_creep_pct",
+    "gap_alert_pct",
 )
 
 
@@ -57,6 +58,12 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
         decimal_places=2,
         min_value=Decimal(_range("rate_creep_pct")[0]),
         max_value=Decimal(_range("rate_creep_pct")[1]),
+    )
+    gap_alert_pct = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        min_value=Decimal(_range("gap_alert_pct")[0]),
+        max_value=Decimal(_range("gap_alert_pct")[1]),
     )
 
     class Meta:

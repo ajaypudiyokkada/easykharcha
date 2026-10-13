@@ -25,6 +25,21 @@ export type CountListEntry = StockCount & {
   items_counted: number;
   items_skipped: number;
   items_not_sure: number;
+  /** Step 14, Owner/Manager only. */
+  flagged_gaps: number;
+};
+
+export type GapStatus = 'ok' | 'not_comparable';
+
+export type GapReasonCode = 'no_previous_count' | 'not_sold' | 'uses_not_set' | 'sales_missing';
+
+/** Why a line's gap can't be computed — `count` for uses_not_set (how many sell items on this item
+ * still need "how much does one use?" set), `dates` for sales_missing (the exact business dates in
+ * the window with no sale recorded at all). */
+export type GapReason = {
+  code: GapReasonCode;
+  count?: number;
+  dates?: string[];
 };
 
 export type CountDetailLine = {
@@ -39,6 +54,14 @@ export type CountDetailLine = {
   quantity_bought_since: string | null;
   quantity_wasted_since: string | null;
   used_since_last_count: string | null;
+  /** Step 14, Owner/Manager only — the server omits none of these for Helper/Head chef, since they
+   * can never reach this endpoint (no counts.review permission) in the first place. */
+  expected_used: string | null;
+  gap_qty: string | null;
+  gap_value: string | null;
+  gap_status: GapStatus;
+  gap_reason: GapReason | null;
+  flagged: boolean;
 };
 
 export type CountDetail = StockCount & { lines: CountDetailLine[] };

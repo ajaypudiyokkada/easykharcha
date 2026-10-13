@@ -44,6 +44,7 @@ const STEP9_SCREEN_DIR = 'docs/screens/step9';
 const STEP10_SCREEN_DIR = 'docs/screens/step10';
 const STEP12_SCREEN_DIR = 'docs/screens/step12';
 const STEP13_SCREEN_DIR = 'docs/screens/step13';
+const STEP14_SCREEN_DIR = 'docs/screens/step14';
 
 function findChrome() {
   const candidates = [
@@ -775,6 +776,95 @@ async function captureStep12Screens(page, ownerMobile, ownerPassword) {
   console.log(`OK — saved Step 12 screenshots at 390px to ${STEP12_SCREEN_DIR}/.`);
 }
 
+// Step 14: Owner records sales for two already-linked items (Paneer Tikka, which Step 12's
+// checkSettingsFlow gave a uses_qty of 0.3 on Fresh Paneer; Veg biryani, which uses nothing) ->
+// the list and summary update -> the closing count's gap for Fresh Paneer is flagged (nothing sold
+// explains all of it) while Rice's is not_comparable (nothing sells it at all) -> required
+// screenshots -> deletes one sale via the confirmation dialog.
+async function checkSalesFlow(page) {
+  await page.goto(`${APP_URL}/sales`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Sales');
+  console.log('OK — /sales shows the Sales screen.');
+
+  await clickButton(page, 'Record sales');
+  await waitForText(page, 'What did you sell?');
+
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Paneer Tikka'));
+  await typeInto(page, 'How many', '2');
+
+  await clickButton(page, 'Add another item');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Veg biryani', { last: true }));
+  await typeInto(page, 'How many', '1', { last: true });
+
+  await clickButton(page, 'Save sales');
+  await waitForText(page, 'Sales saved');
+  console.log('OK — recorded sales with 2 lines (Paneer Tikka, Veg biryani); toast confirms the save.');
+
+  await waitForText(page, 'Paneer Tikka');
+  await waitForText(page, 'Veg biryani');
+  const salesText = await page.evaluate(() => document.body.innerText);
+  if (!salesText.includes('Sales today')) {
+    fail('sales: expected the "Sales today" summary card after recording sales');
+  }
+  console.log('OK — the new sales appear in the list and the summary updates.');
+
+  await page.goto(`${APP_URL}/counts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, "Today's counts");
+  await (await findVisible(page, '[aria-label="Closing count · Helper One"]')).click();
+  await waitForText(page, 'Count detail');
+  await waitForText(page, 'Expected used');
+  const detailText = await page.evaluate(() => document.body.innerText);
+  if (!detailText.toLowerCase().includes('gap')) {
+    fail('count review detail: expected a flagged gap for Fresh Paneer');
+  }
+  if (!detailText.includes('Nothing sold tracks this item yet.')) {
+    fail('count review detail: expected a not_comparable reason for an item nothing sells (Rice)');
+  }
+  console.log('OK — count review shows expected used, a flagged gap, and a not_comparable reason.');
+
+  await captureStep14Screens(page);
+
+  await page.goto(`${APP_URL}/sales`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Sales');
+  await clickAndSettle(await findVisible(page, '[aria-label="Delete entry"]'));
+  await waitForText(page, 'Delete sales entry?');
+  await clickButton(page, 'Delete entry', { last: true });
+  await waitForText(page, 'Sales entry deleted');
+  console.log('OK — deleted a sale via the confirmation dialog.');
+}
+
+// Required screenshots at 390px only: Sales, Record sales, Count review detail (flagged gap +
+// not_comparable row), Home. Run from inside checkSalesFlow, before the sale it just recorded is
+// deleted, same ordering checkPurchaseFlow/captureStep9Screens already uses.
+async function captureStep14Screens(page) {
+  await mkdir(STEP14_SCREEN_DIR, { recursive: true });
+  await page.setViewport({ width: 390, height: 3000 });
+
+  // Waits for content that only renders once its data has actually loaded — not the static heading,
+  // which mounts immediately and would let the screenshot race the fetch and catch the skeleton.
+  await page.goto(`${APP_URL}/sales`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Veg biryani');
+  await page.screenshot({ path: `${STEP14_SCREEN_DIR}/sales-390.png` });
+
+  await clickButton(page, 'Record sales');
+  await waitForText(page, 'What did you sell?');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP14_SCREEN_DIR}/record-sales-390.png` });
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+
+  await page.goto(`${APP_URL}/counts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, "Today's counts");
+  await (await findVisible(page, '[aria-label="Closing count · Helper One"]')).click();
+  await waitForText(page, 'Expected used');
+  await page.screenshot({ path: `${STEP14_SCREEN_DIR}/count-review-detail-390.png` });
+
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Quick actions');
+  await page.screenshot({ path: `${STEP14_SCREEN_DIR}/home-390.png` });
+
+  console.log(`OK — saved Step 14 screenshots at 390px to ${STEP14_SCREEN_DIR}/.`);
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
@@ -1009,6 +1099,7 @@ async function main() {
     await logoutFromAnywhere(page);
     await checkCountReviewAndWastageFlow(page, mobile, password);
     await checkSettingsFlow(page);
+    await checkSalesFlow(page);
     await checkTeamManagementFlow(page, 'Helper One');
     await logoutFromAnywhere(page);
 

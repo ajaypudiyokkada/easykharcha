@@ -78,7 +78,9 @@ export default function CountReview() {
   // it), so this checks the same thing the server actually checks, not a role name used as a
   // permission substitute.
   const isOwner = business?.role === 'owner';
-  const flaggedCount = (counts ?? []).find((count) => count.items_not_sure > 0);
+  const flaggedCount = (counts ?? []).find(
+    (count) => count.flagged_gaps > 0 || count.items_not_sure > 0,
+  );
 
   async function openRemind(count: CountListEntry) {
     if (!business) return;
@@ -138,6 +140,7 @@ export default function CountReview() {
                       {formatDateTime(count.submitted_at, business?.timezone ?? 'Asia/Kolkata')} ·{' '}
                       {s.itemsCounted(count.items_counted)}
                       {count.items_not_sure > 0 ? ` · ${s.notSureCount(count.items_not_sure)}` : ''}
+                      {count.flagged_gaps > 0 ? ` · ${s.flaggedGapsCount(count.flagged_gaps)}` : ''}
                     </Small>
                   </View>
                   {count.is_late ? (

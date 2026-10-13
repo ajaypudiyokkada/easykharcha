@@ -30,6 +30,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "wastage.view_all",
             "wastage.view_value",
             "wastage.delete",
+            "sales.view",
+            "sales.create",
+            "sales.delete",
         }
     ),
     AccessRole.MANAGER: frozenset(
@@ -41,6 +44,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "wastage.view_all",
             "wastage.view_value",
             "team.view",
+            "sales.view",
+            "sales.create",
         }
     ),
     AccessRole.HEAD_CHEF: frozenset(
