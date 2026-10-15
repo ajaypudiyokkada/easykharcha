@@ -8,7 +8,7 @@ import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { strings } from '../../src/strings';
-import { Banner, Body, Button, Heading, Icon, Muted, Screen, Small } from '../../src/ui';
+import { Banner, Body, Button, Heading, Icon, Muted, Screen, Small, Wordmark } from '../../src/ui';
 import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 
@@ -73,6 +73,7 @@ export default function SetupDone() {
 
   return (
     <Screen maxWidth={WIZARD_CONTENT_WIDTH}>
+      <Wordmark size="auth" style={styles.wordmark} />
       <Heading level={1}>{s.title}</Heading>
 
       {completeError ? <Banner kind="error">{completeError}</Banner> : null}
@@ -119,6 +120,9 @@ export default function SetupDone() {
 }
 
 const styles = StyleSheet.create({
+  wordmark: {
+    marginBottom: spacing.sm,
+  },
   loading: {
     flex: 1,
     alignItems: 'center',

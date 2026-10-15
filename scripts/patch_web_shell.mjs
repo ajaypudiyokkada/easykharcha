@@ -30,7 +30,8 @@ async function main() {
   const extraHead = [
     `<meta name="theme-color" content="${THEME_COLOR}" />`,
     '<link rel="manifest" href="/manifest.json" />',
-    '<link rel="icon" href="/icons/icon-192.png" />',
+    '<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />',
+    '<link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png" />',
     '<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />',
     `<style>html, body { background-color: ${BACKGROUND_COLOR}; }</style>`,
   ].join('\n    ');

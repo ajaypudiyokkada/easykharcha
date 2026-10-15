@@ -31,3 +31,4 @@ export { Body, Heading, Muted, Small } from './Text';
 export { TextField, type TextFieldProps } from './TextField';
 export { Toast } from './Toast';
 export { Toggle } from './Toggle';
+export { Wordmark, type WordmarkSize } from './Wordmark';

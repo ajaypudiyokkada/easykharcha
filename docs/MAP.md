@@ -184,7 +184,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `npm run flow` → `scripts/flow.mjs` — full browser walk: signup→wizard→all 4 roles→core actions
 - `npm run responsive` → `scripts/responsive_check.mjs` — every route + sheet/dialog at 7 widths
 - `npm run responsive:selftest` — proves the clipping check can actually fail
-- `npm run icons` → `scripts/generate_icons.mjs` — app icon set from the source SVG
+- `npm run icons` → `scripts/generate_icons.mjs` — favicon/PWA icon set from `docs/images/ek_logo_icon.png`
 - `npm run pwa-check` → `scripts/pwa_check.mjs` — manifest/service-worker sanity check
 - `npm run build:web` / `serve:web` → `scripts/patch_web_shell.mjs` / `serve_web.mjs` — static web export
 - `scripts/lib/landing_server.mjs` — throwaway static server for landing/index.html, used by flow/responsive

@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthContext';
@@ -15,6 +15,27 @@ import { MIN_TOUCH_TARGET, NAV_SIDE_BREAKPOINT } from './constants';
 import { Icon, type IconName } from './Icon';
 import { Sheet } from './Sheet';
 import { Body, Small } from './Text';
+import { Wordmark } from './Wordmark';
+
+const BUSINESS_MARK_SIZE = 28;
+
+/** The signed-in business's own logo, or (no logo yet) its first initial in a circle — this app's
+ * own brand (the EasyKharcha wordmark) never appears in a business workspace's chrome; this is what
+ * takes its place in the phone top bar and, alongside the wordmark, the desktop side menu. */
+function BusinessMark({ name, logo }: { name: string; logo: string | null }) {
+  if (logo) {
+    return (
+      <Image source={{ uri: logo }} accessibilityLabel={name} style={styles.businessMarkImage} />
+    );
+  }
+  return (
+    <View style={styles.businessMarkInitial}>
+      <Small style={styles.businessMarkInitialText}>
+        {name.trim().charAt(0).toUpperCase() || '?'}
+      </Small>
+    </View>
+  );
+}
 
 export type NavKey =
   'home' | 'stock' | 'buy' | 'reports' | 'sales' | 'wastage' | 'alerts' | 'team' | 'settings';
@@ -126,7 +147,15 @@ export function AppShell({ active, children }: Props) {
     return (
       <View style={styles.wideRoot}>
         <View style={styles.sideNav}>
-          <Body style={styles.sideBrand}>{business?.name ?? 'EasyKharcha'}</Body>
+          <Wordmark size="bar" style={styles.sideWordmark} />
+          {business ? (
+            <View style={styles.sideBrand}>
+              <BusinessMark name={business.name} logo={business.logo} />
+              <Body style={styles.sideBrandName} numberOfLines={1}>
+                {business.name}
+              </Body>
+            </View>
+          ) : null}
           {user ? (
             <Pressable
               accessibilityRole="button"
@@ -160,9 +189,18 @@ export function AppShell({ active, children }: Props) {
   return (
     <View style={styles.root}>
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Body style={styles.topBarBrand} numberOfLines={1}>
-          {business?.name ?? 'EasyKharcha'}
-        </Body>
+        {business ? (
+          <View style={styles.topBarBrand}>
+            <BusinessMark name={business.name} logo={business.logo} />
+            <Body style={styles.topBarBrandName} numberOfLines={1}>
+              {business.name}
+            </Body>
+          </View>
+        ) : (
+          <Body style={styles.topBarBrandName} numberOfLines={1}>
+            {strings.app.wordmark}
+          </Body>
+        )}
         {user ? (
           <Pressable
             accessibilityRole="button"
@@ -279,8 +317,33 @@ const styles = StyleSheet.create({
   },
   topBarBrand: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minWidth: 0,
+  },
+  topBarBrandName: {
+    flex: 1,
+    minWidth: 0,
     fontFamily: fonts.headingBold,
     fontSize: type.lg,
+  },
+  businessMarkImage: {
+    width: BUSINESS_MARK_SIZE,
+    height: BUSINESS_MARK_SIZE,
+    borderRadius: radii.sm,
+  },
+  businessMarkInitial: {
+    width: BUSINESS_MARK_SIZE,
+    height: BUSINESS_MARK_SIZE,
+    borderRadius: radii.sm,
+    backgroundColor: colours.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  businessMarkInitialText: {
+    color: colours.card,
+    fontFamily: fonts.bodyExtraBold,
   },
   avatarBtn: {
     width: MIN_TOUCH_TARGET,
@@ -356,11 +419,22 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.xs,
   },
+  sideWordmark: {
+    marginLeft: spacing.sm,
+    marginBottom: spacing.lg,
+  },
   sideBrand: {
-    fontFamily: fonts.headingBold,
-    fontSize: type.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingHorizontal: spacing.sm,
     marginBottom: spacing.md,
+  },
+  sideBrandName: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: fonts.headingBold,
+    fontSize: type.lg,
   },
   sideUserBlock: {
     flexDirection: 'row',

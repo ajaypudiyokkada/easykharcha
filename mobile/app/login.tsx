@@ -15,6 +15,7 @@ import {
   Screen,
   Small,
   TextField,
+  Wordmark,
 } from '../src/ui';
 import { AUTH_CARD_WIDTH, MIN_TOUCH_TARGET } from '../src/ui/constants';
 import { colours, fonts, spacing } from '../src/theme/tokens';
@@ -88,6 +89,7 @@ export default function Login() {
         />
       }
     >
+      <Wordmark size="auth" style={styles.wordmark} />
       <Heading level={1}>{s.title}</Heading>
 
       {params.banner === 'created' ? <Banner kind="success">{s.createdBanner}</Banner> : null}
@@ -126,6 +128,9 @@ export default function Login() {
 }
 
 const styles = StyleSheet.create({
+  wordmark: {
+    marginBottom: spacing.sm,
+  },
   loading: {
     flex: 1,
     alignItems: 'center',

@@ -17,6 +17,7 @@ import {
   Screen,
   Small,
   TextField,
+  Wordmark,
 } from '../src/ui';
 import { AUTH_CARD_WIDTH, MIN_TOUCH_TARGET } from '../src/ui/constants';
 import { colours, fonts, spacing, type } from '../src/theme/tokens';
@@ -115,6 +116,7 @@ export default function Signup() {
         />
       }
     >
+      <Wordmark size="auth" style={styles.wordmark} />
       <Heading level={1}>{s.title}</Heading>
 
       {formError ? (
@@ -219,6 +221,9 @@ function LegalLink({ label, url }: { label: string; url: string }) {
 }
 
 const styles = StyleSheet.create({
+  wordmark: {
+    marginBottom: spacing.sm,
+  },
   field: {
     gap: spacing.sm,
   },

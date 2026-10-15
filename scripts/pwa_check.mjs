@@ -160,6 +160,18 @@ async function checkManifest(page) {
   if (!sizes('any').includes('512x512')) fail('manifest is missing a 512x512 "any" icon.');
   if (!sizes('maskable').includes('512x512')) fail('manifest is missing a 512x512 "maskable" icon.');
   console.log('OK — manifest.json has all required fields and icon sizes.');
+
+  // Step 16a: the manifest listing the right sizes isn't proof the files themselves exist — each
+  // one has to actually load.
+  for (const icon of manifest.icons ?? []) {
+    const status = await page.evaluate((src) => fetch(src).then((r) => r.status), icon.src);
+    if (status !== 200) fail(`manifest icon ${icon.src} returned ${status}, expected 200.`);
+  }
+  for (const path of ['/icons/favicon-32.png', '/icons/favicon-48.png', '/icons/apple-touch-icon.png']) {
+    const status = await page.evaluate((src) => fetch(src).then((r) => r.status), path);
+    if (status !== 200) fail(`${path} returned ${status}, expected 200.`);
+  }
+  console.log('OK — every manifest icon and the favicon/apple-touch-icon files all load.');
 }
 
 async function checkServiceWorkerActivated(page) {
@@ -177,7 +189,13 @@ async function signup(page, name, mobile, password) {
   await typeInto(page, 'Your name', name);
   await typeInto(page, 'Mobile number', mobile);
   await typeInto(page, 'Password', password);
-  await clickAndSettle(await findVisible(page, '[role="checkbox"]'));
+  const consentBox = await findVisible(page, '[role="checkbox"]');
+  // At this viewport height, the consent row's natural (unscrolled) position already satisfies
+  // Puppeteer's "is it within the viewport bounds" check, so its own click() won't scroll any
+  // further — even though that position sits directly under the sticky BottomActionBar. A real
+  // person scrolls past it without a second thought; headless clicks need telling to.
+  await consentBox.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await clickAndSettle(consentBox);
   await clickButton(page, 'Create account');
   await waitForPath(page, '/login');
 }
@@ -192,8 +210,15 @@ async function main() {
     await page.setViewport({ width: 390, height: 844 });
 
     // === First online load: lets the service worker install and cache the shell ===
-    await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-    await waitForText(page, 'EasyKharcha');
+    // Step 8c made "/" send a signed-out visitor to the public landing page (a real cross-origin
+    // navigation) — going there directly would leave every check below running against the wrong
+    // origin's manifest/service worker. /login is the same app shell (same origin, same SW scope)
+    // without that redirect, and is the real door a signed-out visitor reaches the app through
+    // anyway (the landing page's own "Log in"/"Start free" links).
+    await page.goto(`${APP_URL}/login`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    // The wordmark that used to make this literal text true is an image now (Step 16a) — its alt
+    // text doesn't count as visible body text, so check for the screen's own real heading instead.
+    await waitForText(page, 'Business owner login');
 
     await checkManifest(page);
     await checkServiceWorkerActivated(page);
@@ -201,7 +226,7 @@ async function main() {
     // === Check 3: offline + reload still opens the app shell ===
     await page.setOfflineMode(true);
     await page.reload({ waitUntil: 'load', timeout: TIMEOUT });
-    await waitForText(page, 'EasyKharcha');
+    await waitForText(page, 'Business owner login');
     console.log('OK — reloading while offline still opens the cached app shell.');
     await page.setOfflineMode(false);
 

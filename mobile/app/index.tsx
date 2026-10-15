@@ -7,8 +7,8 @@ import { nextRouteAfterAuth } from '../src/business/routing';
 import { links } from '../src/config';
 import { useOnlineStatus } from '../src/hooks/useOnlineStatus';
 import { strings } from '../src/strings';
-import { OfflineRetry } from '../src/ui';
-import { colours } from '../src/theme/tokens';
+import { OfflineRetry, Wordmark } from '../src/ui';
+import { colours, spacing } from '../src/theme/tokens';
 
 const s = strings.app.landingOffline;
 
@@ -39,6 +39,7 @@ export default function Index() {
   if (status === 'bootstrapping') {
     return (
       <View style={styles.loading}>
+        <Wordmark size="startup" style={styles.startupLogo} />
         <ActivityIndicator color={colours.primary} />
       </View>
     );
@@ -84,5 +85,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colours.background,
+  },
+  startupLogo: {
+    marginBottom: spacing.xl,
   },
 });

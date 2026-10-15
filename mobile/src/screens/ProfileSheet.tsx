@@ -11,6 +11,7 @@ import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { Icon } from '../ui/Icon';
 import { Sheet } from '../ui/Sheet';
 import { Body, Small } from '../ui/Text';
+import { Wordmark } from '../ui/Wordmark';
 
 const s = strings.profileSheet;
 
@@ -38,6 +39,7 @@ export function ProfileSheet({ visible, onClose }: Props) {
   return (
     <>
       <Sheet visible={visible && !switcherVisible} onClose={onClose} title={s.title}>
+        <Wordmark size="bar" style={styles.wordmark} />
         <View style={styles.identity}>
           <Avatar name={user.name} size={56} />
           <Body style={styles.name}>{user.name}</Body>
@@ -97,6 +99,10 @@ export function ProfileSheet({ visible, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
+  wordmark: {
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
   identity: {
     alignItems: 'center',
     gap: spacing.xs,

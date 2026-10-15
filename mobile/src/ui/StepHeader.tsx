@@ -5,6 +5,7 @@ import { colours, fonts, radii, spacing, type } from '../theme/tokens';
 import { MIN_TOUCH_TARGET, PROGRESS_BAR_HEIGHT } from './constants';
 import { Icon } from './Icon';
 import { Small } from './Text';
+import { Wordmark } from './Wordmark';
 
 type Props = {
   current: number;
@@ -20,6 +21,7 @@ export function StepHeader({ current, total, onBack, onSaveForLater }: Props) {
 
   return (
     <View style={styles.stepper}>
+      <Wordmark size="bar" style={styles.wordmark} />
       <View style={styles.top}>
         {onBack ? (
           <Pressable
@@ -63,6 +65,9 @@ const styles = StyleSheet.create({
     borderColor: colours.mint,
     borderRadius: radii.lg,
     padding: spacing.lg,
+  },
+  wordmark: {
+    marginBottom: spacing.md,
   },
   top: {
     flexDirection: 'row',

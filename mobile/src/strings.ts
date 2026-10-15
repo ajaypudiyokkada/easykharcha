@@ -19,6 +19,7 @@ export const strings = {
       goHome: 'Go to Home',
     },
     backToWebsite: 'Back to website',
+    wordmark: 'EasyKharcha',
     readError: {
       title: "We couldn't load this",
       body: 'Please try again.',
