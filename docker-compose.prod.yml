@@ -1,0 +1,103 @@
+# Production stack for a single Ubuntu droplet — Caddy is the only container exposed to the internet
+# (ports 80/443); everything else talks over the compose network only. See deploy/README.md for the
+# first-time server setup and deploy.sh for how this gets built and started.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: deploy/.env.production
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ (not $), and env_file's values, not a top-level .env docker compose would otherwise
+      # interpolate this from — POSTGRES_USER/POSTGRES_DB only exist in deploy/.env.production, which
+      # is loaded into the container's own environment, not into compose's interpolation context.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: deploy/.env.production
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8000/api/v1/health/', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  web-app:
+    build:
+      context: .
+      dockerfile: mobile/Dockerfile
+      args:
+        EXPO_PUBLIC_API_URL: https://api.easykharcha.com
+        EXPO_PUBLIC_LANDING_URL: https://easykharcha.com
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+
+  landing:
+    build:
+      context: ./landing
+      args:
+        APP_URL: https://app.easykharcha.com
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - static_files:/srv/static:ro
+      - media_files:/srv/media:ro
+    depends_on:
+      - backend
+      - web-app
+      - landing
+    logging: *default-logging
+
+volumes:
+  db_data:
+  static_files:
+  media_files:
+  caddy_data:
+  caddy_config:

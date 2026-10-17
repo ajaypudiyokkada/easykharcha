@@ -1,0 +1,20 @@
+# Used by the mobile image's build (context: repo root, see docker-compose.prod.yml — it's the only
+# one that needs anything outside its own directory, for scripts/patch_web_shell.mjs). backend/ and
+# landing/ build from their own directories with their own .dockerignore instead.
+.git
+legacy/
+docs/
+backend/
+landing/
+mobile/node_modules/
+mobile/dist/
+mobile/.expo/
+**/__pycache__/
+*.pyc
+*.sqlite3
+media/
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/

@@ -23,6 +23,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"] if DEBUG else [])
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
@@ -60,6 +61,11 @@ AUTH_USER_MODEL = "accounts.User"
 # entirely, the same way DATABASE_URL overrides the dev sqlite default above.
 MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "media"))
 MEDIA_URL = "/media/"
+
+# Collected at image build time (Step 17's backend/Dockerfile) into a volume Caddy serves directly —
+# Django itself never serves these in production.
+STATIC_URL = "/static/"
+STATIC_ROOT = env.str("STATIC_ROOT", default=str(BASE_DIR / "staticfiles"))
 
 # Argon2 first (used for every new hash); the rest are Django's own defaults, kept only so a password
 # hashed by a prior algorithm would still verify — there are none yet, since this user model is new.
@@ -178,3 +184,34 @@ if DEBUG:
         r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}:(8081|8082)$",
         r"^http://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}:(8081|8082)$",
     ]
+
+# Step 17: production-only. None of this is reachable with the DEBUG default (True), so local dev and
+# `npm run smoke`/`flow` (which make dozens of rapid signup/login calls) are unaffected.
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+# LocMemCache (Django's default, used above implicitly until now) is per-process — fine for one
+# `runserver`, not for gunicorn's 2 worker processes in production, which don't share memory and would
+# each enforce accounts/ratelimit.py's login/signup limits independently. A file cache on the
+# container's own filesystem is shared by every worker in the same container, with nothing extra to
+# run (no Redis) — light on a 1 vCPU / 2 GB droplet.
+CACHE_BACKEND = env.str("CACHE_BACKEND", default="django.core.cache.backends.locmem.LocMemCache")
+CACHES = {"default": {"BACKEND": CACHE_BACKEND}}
+if "filebased" in CACHE_BACKEND:
+    CACHES["default"]["LOCATION"] = env.str("CACHE_LOCATION", default="/tmp/easykharcha_cache")
+
+if not DEBUG:
+    # Caddy terminates TLS and forwards plain HTTP internally — this is how Django knows the original
+    # request was actually HTTPS (for secure cookies, HSTS, request.is_secure()).
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=2592000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = False
+
+    # A general safety net across the whole API, independent of and in addition to the
+    # signup/login-specific limits in accounts/views.py — shares the same cache above, so it's
+    # consistent across both gunicorn workers too.
+    REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = ["rest_framework.throttling.AnonRateThrottle"]
+    REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"anon": env.str("API_RATE_LIMIT", default="30/min")}
