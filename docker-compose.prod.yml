@@ -54,11 +54,14 @@ services:
       context: .
       dockerfile: mobile/Dockerfile
       args:
-        EXPO_PUBLIC_API_URL: https://api.easykharcha.com
+        EXPO_PUBLIC_API_URL: https://api.easykharcha.com/api/v1
         EXPO_PUBLIC_LANDING_URL: https://easykharcha.com
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      # 127.0.0.1, not localhost — alpine's wget resolves "localhost" to ::1 first, and nginx (the
+      # default.conf shipped in the mobile/landing images) only listens on IPv4, so the IPv6 attempt
+      # fails and wget reports the container unhealthy even though it's serving fine on IPv4.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -71,7 +74,7 @@ services:
         APP_URL: https://app.easykharcha.com
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
       interval: 30s
       timeout: 5s
       retries: 3

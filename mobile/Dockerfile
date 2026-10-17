@@ -13,7 +13,7 @@ RUN npm --prefix mobile ci
 COPY mobile/ mobile/
 COPY scripts/patch_web_shell.mjs scripts/patch_web_shell.mjs
 
-ARG EXPO_PUBLIC_API_URL=https://api.easykharcha.com
+ARG EXPO_PUBLIC_API_URL=https://api.easykharcha.com/api/v1
 ARG EXPO_PUBLIC_LANDING_URL=https://easykharcha.com
 ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL} \
     EXPO_PUBLIC_LANDING_URL=${EXPO_PUBLIC_LANDING_URL}
