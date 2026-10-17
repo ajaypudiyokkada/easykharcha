@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+!deploy/.env.production.example
+
+# Build artefacts
+staticfiles/
 
 # Python
 __pycache__/

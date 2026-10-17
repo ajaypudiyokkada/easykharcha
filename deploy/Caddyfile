@@ -1,0 +1,40 @@
+(security) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}
+
+easykharcha.com {
+	import security
+	reverse_proxy landing:80
+}
+
+www.easykharcha.com {
+	redir https://easykharcha.com{uri} permanent
+}
+
+app.easykharcha.com {
+	import security
+	reverse_proxy web-app:80
+}
+
+api.easykharcha.com {
+	import security
+
+	handle_path /static/* {
+		root * /srv/static
+		file_server
+	}
+
+	handle_path /media/* {
+		root * /srv/media
+		file_server
+	}
+
+	handle {
+		reverse_proxy backend:8000
+	}
+}
