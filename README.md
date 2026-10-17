@@ -1,11 +1,47 @@
 # EasyKharcha
 
-A simple app for single-owner small businesses in India to track what they buy, use and sell.
+A simple app for single-owner small businesses in India to track what they buy, use and sell — stock,
+daily counts, wastage, sales and purchases, with alerts when something looks off.
 
-All 8 build steps are done. See [`docs/STATUS.md`](docs/STATUS.md) for exactly what's built and what's
-explicitly not (OTP, forgot-password, stock/sales/costing features, and more).
+See [`docs/STATUS.md`](docs/STATUS.md) for exactly what's built and what's explicitly not (OTP,
+forgot-password, and more). Working rules and the design tokens live in [`CLAUDE.md`](CLAUDE.md).
 
-Working rules and the design tokens live in [`CLAUDE.md`](CLAUDE.md).
+## Folder map
+
+```
+backend/    Django + DRF API
+mobile/     Expo / React Native web app
+landing/    static public landing page
+docs/       specs, design notes and status, written as steps add them
+legacy/     an earlier, unrelated product — not used by the current app
+```
+
+## Running it
+
+```powershell
+npm run dev
+```
+
+See "Quick start" below for one-time setup. Other npm commands, all run from the repo root:
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | backend + app + landing page together |
+| `npm run check` | backend lint/format/check + mobile lint/format/typecheck |
+| `npm run check:backend` / `npm run check:mobile` | either half on its own |
+| `npm run smoke` | backend API test (needs just the backend running) |
+| `npm run flow` | browser end-to-end test (needs backend + mobile dev server) |
+| `npm run responsive` | checks every screen at seven widths |
+| `npm run build:web` / `npm run serve:web` | production web export + local server |
+| `npm run pwa-check` | offline/service-worker test against the production build |
+| `npm run icons` | regenerates PWA/favicon icons |
+
+## Git workflow
+
+GitHub ([ajaypudiyokkada/easykharcha](https://github.com/ajaypudiyokkada/easykharcha), private) is the
+repo of record. Nothing is committed straight to `main`: every step is a branch
+(`step-<NN>-<short-name>`) off an up-to-date `main`, pushed and opened as a pull request for review and
+merge. Full detail in [`CLAUDE.md`](CLAUDE.md#git-workflow).
 
 ## Quick start
 
