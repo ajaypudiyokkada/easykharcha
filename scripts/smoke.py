@@ -133,6 +133,10 @@ def _now_iso() -> str:
     return datetime.now(dt_timezone.utc).isoformat()
 
 
+def _days_ago_iso(days: int) -> str:
+    return (datetime.now(dt_timezone.utc) - timedelta(days=days)).isoformat()
+
+
 def request(
     method: str,
     path: str,
@@ -2215,6 +2219,162 @@ def check_alerts_flow() -> None:
     print("OK — a separate business's flagged gap line surfaces as a danger-severity gap_flagged alert.")
 
 
+def check_expiry_alerts_flow() -> None:
+    """Step 18: expiry_soon. One business, three stock items covering the worked cases:
+    (a) Tomatoes — bought 10 kg 4 days ago, counted 4 kg today -> danger (its only batch, 1 day past
+        its 3-day shelf life).
+    (b) Paneer — an old 4 kg batch from 7 days ago plus a fresh 10 kg batch bought today, counted 14
+        kg (both still on hand) -> the FIFO walk has to dig past the fresh batch into the old one to
+        cover the count, so the old batch is what gets flagged, not the fresh one.
+    (c) Milk — goes_off but no shelf_life_days set -> never alerts, however old its purchase.
+    All three share one closing count (one call, one line per item), since compute_alerts looks at
+    each item's own latest count independently.
+    """
+    _, owner_access, _ = signup_and_login("Expiry Alert Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Expiry Alert Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Tomatoes", "unit": "kg", "goes_off": True, "shelf_life_days": 3},
+                {"name": "Paneer", "unit": "kg", "goes_off": True, "shelf_life_days": 3},
+                {"name": "Milk", "unit": "L", "goes_off": True},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: stock bulk create expected 201, got {status} ({body})")
+    tomatoes_id = next(i["id"] for i in body if i["name"] == "Tomatoes")
+    paneer_id = next(i["id"] for i in body if i["name"] == "Paneer")
+    milk_id = next(i["id"] for i in body if i["name"] == "Milk")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Veg Market",
+            "purchase_date_time": _days_ago_iso(4),
+            "lines": [
+                {"stock_item": tomatoes_id, "quantity": "10", "unit_price": "50", "line_total": "500"}
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: tomatoes purchase expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _days_ago_iso(7),
+            "lines": [
+                {"stock_item": paneer_id, "quantity": "4", "unit_price": "100", "line_total": "400"}
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: paneer old purchase expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [
+                {"stock_item": paneer_id, "quantity": "10", "unit_price": "100", "line_total": "1000"}
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: paneer fresh purchase expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _days_ago_iso(10),
+            "lines": [{"stock_item": milk_id, "quantity": "5", "unit_price": "20", "line_total": "100"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: milk purchase expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "closing",
+            "lines": [
+                {"stock_item": tomatoes_id, "state": "counted", "counted_qty": "4"},
+                {"stock_item": paneer_id, "state": "counted", "counted_qty": "14"},
+                {"stock_item": milk_id, "state": "counted", "counted_qty": "2"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"expiry flow: closing count expected 201, got {status} ({body})")
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    if status != 200:
+        fail(f"expiry flow: alerts list expected 200, got {status} ({body})")
+    by_item = {a["numbers"]["item_name"]: a for a in body["results"] if a["type"] == "expiry_soon"}
+
+    if set(by_item) != {"Tomatoes", "Paneer"}:
+        fail(f"expiry flow: expected expiry_soon for Tomatoes and Paneer only, got {set(by_item)}")
+    print("OK — expiry_soon fires for Tomatoes and Paneer, and never for Milk (no shelf_life_days).")
+
+    tomatoes_alert = by_item["Tomatoes"]
+    if tomatoes_alert["severity"] != "danger":
+        fail(f"expiry flow: expected Tomatoes severity danger, got {tomatoes_alert}")
+    if Decimal(tomatoes_alert["numbers"]["at_risk_qty"]) != Decimal("4.000"):
+        fail(f"expiry flow: expected Tomatoes at_risk_qty 4.000, got {tomatoes_alert}")
+    if tomatoes_alert["numbers"]["days_left"] != -1:
+        fail(f"expiry flow: expected Tomatoes days_left -1, got {tomatoes_alert}")
+    print(
+        "OK — (a) a 3-day-shelf-life item bought 4 days ago, counted down to its only batch, "
+        "is a danger alert."
+    )
+
+    paneer_alert = by_item["Paneer"]
+    if paneer_alert["severity"] != "danger":
+        fail(f"expiry flow: expected Paneer severity danger, got {paneer_alert}")
+    if Decimal(paneer_alert["numbers"]["at_risk_qty"]) != Decimal("4.000"):
+        fail(
+            "expiry flow: expected Paneer at_risk_qty 4.000 (the OLD batch, not the fresh 10 kg), "
+            f"got {paneer_alert}"
+        )
+    print(
+        "OK — (b) counting past a fresh purchase into an older batch flags that older batch, "
+        "not the fresh one."
+    )
+
+    # (d) Head chef has no alerts.view at all (same gate as every other alert type) — 403, so they
+    # structurally never see any alert, money or otherwise.
+    _, head_chef_access, _ = _add_team_member(business_id, owner_access, "Expiry Head Chef", "head_chef")
+    status, _, _ = request("GET", f"/businesses/{business_id}/alerts/", token=head_chef_access)
+    if status != 403:
+        fail(f"expiry flow: head chef alerts list expected 403, got {status}")
+    print("OK — (d) a Head chef gets 403 on alerts, same as every other alert type — never sees money.")
+
+
 def check_reports_flow() -> None:
     _, owner_access, _ = signup_and_login("Reports Owner")
     status, body, _ = request(
@@ -2453,6 +2613,7 @@ def main() -> None:
     check_settings_flow()
     check_sales_and_gap_flow()
     check_alerts_flow()
+    check_expiry_alerts_flow()
     check_reports_flow()
     print("\nAll smoke checks passed.")
 

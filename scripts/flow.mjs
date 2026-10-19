@@ -774,6 +774,16 @@ async function captureStep12Screens(page, ownerMobile, ownerPassword) {
   await waitForText(page, 'Settings');
   await page.screenshot({ path: `${STEP12_SCREEN_DIR}/settings-hub-390.png` });
 
+  // Step 18: the "Expiry alerts" row is a real setting now, not a disabled "Coming soon" row.
+  const expiryRowText = await page.evaluate(() => {
+    const el = document.querySelector('[aria-label="Expiry alerts"]');
+    return el ? el.innerText : null;
+  });
+  if (!expiryRowText || expiryRowText.includes('Coming soon')) {
+    fail(`settings hub: expected "Expiry alerts" to be a real row, got ${JSON.stringify(expiryRowText)}`);
+  }
+  console.log('OK — Step 18: the Settings hub\'s "Expiry alerts" row is no longer "Coming soon".');
+
   await page.goto(`${APP_URL}/settings/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'What you buy');
   await page.screenshot({ path: `${STEP12_SCREEN_DIR}/what-you-buy-390.png` });
@@ -786,7 +796,15 @@ async function captureStep12Screens(page, ownerMobile, ownerPassword) {
 
   await page.goto(`${APP_URL}/settings/alerts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Alert rules');
+  await waitForText(page, 'Expiry warning (days ahead)');
   await page.screenshot({ path: `${STEP12_SCREEN_DIR}/alert-rules-390.png` });
+
+  // Step 18: the expiry-warning-days field saves along with the rest of Alert rules — the same
+  // settings row the Settings hub's "Expiry alerts" row now links to.
+  await typeInto(page, 'Expiry warning (days ahead)', '3');
+  await clickButton(page, 'Save rules');
+  await waitForText(page, 'Alert rules saved');
+  console.log('OK — Step 18: the expiry warning days field saves with the other alert settings.');
 
   console.log(`OK — saved Step 12 screenshots at 390px to ${STEP12_SCREEN_DIR}/.`);
 }
@@ -920,6 +938,13 @@ async function checkAlertsAndProfileFlow(page, ownerName) {
     fail('a checked alert should no longer appear in the Alerts list');
   }
   console.log('OK — the checked alert no longer appears in the list.');
+
+  // Step 18: the new expiry_soon type is wired into the filter row even with zero of them in this
+  // business's data — alerts-390.png above already shows it, no separate screenshot needed.
+  if (!alertsText.includes('Expiry 0')) {
+    fail(`alerts: expected an "Expiry 0" filter chip (Step 18), got: ${alertsText}`);
+  }
+  console.log('OK — Step 18: the Alerts screen\'s filter row includes "Expiry".');
 
   await clickAndSettle(await findVisible(page, '[aria-label="Open profile menu"]'));
   await waitForText(page, 'Profile');

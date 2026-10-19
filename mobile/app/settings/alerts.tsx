@@ -46,6 +46,9 @@ export default function AlertRulesSettings() {
     String(DEFAULT_BUSINESS_SETTINGS.rate_creep_pct),
   );
   const [gapAlertPct, setGapAlertPct] = useState(String(DEFAULT_BUSINESS_SETTINGS.gap_alert_pct));
+  const [expiryWarnDays, setExpiryWarnDays] = useState(
+    String(DEFAULT_BUSINESS_SETTINGS.expiry_warn_days),
+  );
 
   const [loading, setLoading] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export default function AlertRulesSettings() {
         setWastageAlertPct(settings.wastage_alert_pct);
         setRateCreepPct(settings.rate_creep_pct);
         setGapAlertPct(settings.gap_alert_pct);
+        setExpiryWarnDays(String(settings.expiry_warn_days));
       })
       .catch(() => {
         // Keep the recommended defaults already in state — this is only a pre-fill.
@@ -116,6 +120,7 @@ export default function AlertRulesSettings() {
       setWastageAlertPct(String(DEFAULT_BUSINESS_SETTINGS.wastage_alert_pct));
       setRateCreepPct(String(DEFAULT_BUSINESS_SETTINGS.rate_creep_pct));
       setGapAlertPct(String(DEFAULT_BUSINESS_SETTINGS.gap_alert_pct));
+      setExpiryWarnDays(String(DEFAULT_BUSINESS_SETTINGS.expiry_warn_days));
       setToast(sa.savedToast);
     } catch (err) {
       mapError(err);
@@ -137,6 +142,7 @@ export default function AlertRulesSettings() {
           wastage_alert_pct: wastageAlertPct,
           rate_creep_pct: rateCreepPct,
           gap_alert_pct: gapAlertPct,
+          expiry_warn_days: Number(expiryWarnDays),
         },
       });
       setToast(sa.savedToast);
@@ -210,6 +216,13 @@ export default function AlertRulesSettings() {
               onChangeText={setGapAlertPct}
               keyboardType="decimal-pad"
               hint={sa.gapAlertMechanism(gapAlertPct)}
+            />
+            <TextField
+              label={sa.expiryWarnDaysLabel}
+              value={expiryWarnDays}
+              onChangeText={setExpiryWarnDays}
+              keyboardType="number-pad"
+              hint={sa.expiryWarnDaysMechanism(expiryWarnDays)}
             />
 
             <Button

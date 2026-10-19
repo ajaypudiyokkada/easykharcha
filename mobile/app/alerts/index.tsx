@@ -30,6 +30,7 @@ const FILTERS: { key: AlertType | 'all' }[] = [
   { key: 'price_rise' },
   { key: 'wastage_high' },
   { key: 'gap_flagged' },
+  { key: 'expiry_soon' },
 ];
 
 function alertIconFor(type: AlertType): IconName {
@@ -40,6 +41,8 @@ function alertIconFor(type: AlertType): IconName {
       return 'reports';
     case 'wastage_high':
       return 'wastage';
+    case 'expiry_soon':
+      return 'clock';
     case 'gap_flagged':
     default:
       return 'alert';

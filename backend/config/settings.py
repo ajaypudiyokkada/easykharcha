@@ -152,6 +152,7 @@ BUSINESS_SETTINGS_DEFAULTS = {
     "wastage_alert_pct": 5,
     "rate_creep_pct": 10,
     "gap_alert_pct": 10,
+    "expiry_warn_days": 2,
 }
 BUSINESS_SETTINGS_RANGES = {
     "count_deadline_hour": (0, 23),
@@ -160,6 +161,7 @@ BUSINESS_SETTINGS_RANGES = {
     "wastage_alert_pct": (0, 100),
     "rate_creep_pct": (0, 100),
     "gap_alert_pct": (0, 100),
+    "expiry_warn_days": (1, 30),
 }
 
 # Dev default matches the Expo web dev server (mobile/package.json's `start` script, :8081) and the
