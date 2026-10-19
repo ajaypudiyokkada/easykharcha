@@ -7,6 +7,9 @@ export type StockItem = {
   shared: boolean;
   goes_off: boolean;
   shelf_life_days: number | null;
+  /** Free text, "" means Ungrouped — canonicalised case-insensitively against this business's
+   * other stock-item groups by the backend (see backend/stock/views.py's _canonical_group). */
+  group: string;
   active: boolean;
   created_at: string;
   /** From this item's purchase history — null until it's been bought at least once. */
@@ -31,6 +34,8 @@ export type SellItem = {
   /** How much of main_stock_item one unit sold uses, in that item's own unit — null unless set, and
    * only meaningful alongside main_stock_item. */
   uses_qty: string | null;
+  /** Its own namespace, not shared with stock-item groups. */
+  group: string;
   active: boolean;
   created_at: string;
 };

@@ -3,25 +3,33 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError, type RowError } from '../../src/api/client';
-import type { StarterPack, StockItem } from '../../src/api/stock';
+import type { SellItem, StarterPack, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
+import { groupItems } from '../../src/forms/groupItems';
+import { itemDraftStorage } from '../../src/forms/itemDraftStorage';
 import {
   EMPTY_SELL_ITEM_DRAFT,
   SellItemForm,
   type SellItemDraft,
 } from '../../src/forms/SellItemForm';
+import type { StockItemDraft } from '../../src/forms/StockItemForm';
+import { validateSellItemDraft } from '../../src/forms/validateSellItem';
+import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { sellItemLabel } from '../../src/labels';
 import { strings } from '../../src/strings';
 import {
+  Banner,
   BottomActionBar,
   Body,
   Checkbox,
+  GroupedList,
   Icon,
   Screen,
   Small,
   StepHeader,
   TextField,
+  Toast,
 } from '../../src/ui';
 import { useMinWidth } from '../../src/hooks/useMinWidth';
 import { BREAKPOINT_DESKTOP, MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
@@ -29,10 +37,6 @@ import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
 const s4 = strings.setup.step4;
-
-type OwnSellDraft = SellItemDraft;
-
-const EMPTY_DRAFT: OwnSellDraft = EMPTY_SELL_ITEM_DRAFT;
 
 export default function SetupStepFour() {
   const router = useRouter();
@@ -46,16 +50,18 @@ export default function SetupStepFour() {
   const [starterErrors, setStarterErrors] = useState<Record<string, string>>({});
 
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null);
-
-  const [ownItems, setOwnItems] = useState<OwnSellDraft[]>([]);
-  const [ownItemErrors, setOwnItemErrors] = useState<Record<number, string>>({});
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [draft, setDraft] = useState<OwnSellDraft>(EMPTY_DRAFT);
-  const [draftErrors, setDraftErrors] = useState<{ name?: string; price?: string }>({});
+  const [items, setItems] = useState<SellItem[] | null>(null);
+  const [addFieldErrors, setAddFieldErrors] = useState<ReturnType<typeof validateSellItemDraft>>(
+    {},
+  );
+  const [addFormError, setAddFormError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [skipping, setSkipping] = useState(false);
+
+  const draftScope = onboardingBusiness ? `sell.${onboardingBusiness.id}` : null;
 
   useEffect(() => {
     if (!onboardingBusiness) return;
@@ -65,9 +71,66 @@ export default function SetupStepFour() {
     authedFetch<StockItem[]>(`/businesses/${onboardingBusiness.id}/stock-items/`)
       .then(setStockItems)
       .catch(() => setStockItems([]));
+    authedFetch<SellItem[]>(`/businesses/${onboardingBusiness.id}/sell-items/`)
+      .then(setItems)
+      .catch(() => setItems([]));
     // Fetches once for the business this screen is onboarding.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingBusiness?.id, onboardingBusiness?.business_type]);
+
+  const instant = useInstantAdd<SellItem, SellItemDraft>({
+    items: items ?? [],
+    setItems: (updater) => setItems((current) => updater(current ?? [])),
+    emptyDraft: EMPTY_SELL_ITEM_DRAFT,
+    toOptimistic: (draft) => ({
+      id: 0,
+      name: draft.name.trim(),
+      selling_price: draft.sellingPrice.trim(),
+      main_stock_item: draft.mainStockItemId,
+      uses_qty: draft.usesQty.trim() || null,
+      group: draft.group.trim(),
+      active: true,
+      created_at: new Date().toISOString(),
+    }),
+    save: async (draft) => {
+      const results = await authedFetch<SellItem[]>(
+        `/businesses/${onboardingBusiness!.id}/sell-items/bulk/`,
+        {
+          method: 'POST',
+          body: {
+            items: [
+              {
+                name: draft.name.trim(),
+                selling_price: draft.sellingPrice.trim(),
+                main_stock_item: draft.mainStockItemId ?? undefined,
+                group: draft.group.trim() || undefined,
+              },
+            ],
+          },
+        },
+      );
+      return results[0];
+    },
+  });
+
+  useEffect(() => {
+    if (!draftScope) return;
+    itemDraftStorage.load<SellItemDraft>(draftScope).then((saved) => {
+      if (saved) instant.setDraftState(saved);
+    });
+    // Only on mount for this business.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftScope]);
+
+  useEffect(() => {
+    if (!draftScope) return;
+    const isEmpty = JSON.stringify(instant.draft) === JSON.stringify(EMPTY_SELL_ITEM_DRAFT);
+    if (isEmpty) {
+      itemDraftStorage.clear(draftScope);
+    } else {
+      itemDraftStorage.save(draftScope, instant.draft);
+    }
+  }, [draftScope, instant.draft]);
 
   if (status === 'bootstrapping') {
     return (
@@ -88,42 +151,69 @@ export default function SetupStepFour() {
 
   const label = sellItemLabel(business.business_type);
   const linkableStockItems = (stockItems ?? []).filter((item) => !item.shared);
+  const allItems = items ?? [];
+  const existingGroups = [...new Set(allItems.map((item) => item.group).filter(Boolean))];
+  const addedGroups = groupItems(allItems);
 
-  function resetDraft() {
-    setDraft(EMPTY_DRAFT);
-    setDraftErrors({});
-    setEditingIndex(null);
-  }
-
-  function handleAddOrUpdateItem() {
-    const errors: { name?: string; price?: string } = {};
-    if (!draft.name.trim()) errors.name = s4.errors.nameRequired;
-    if (!draft.sellingPrice.trim()) errors.price = s4.errors.priceRequired;
-    setDraftErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-
-    const item: OwnSellDraft = { ...draft, name: draft.name.trim() };
-    setOwnItems((current) => {
-      if (editingIndex !== null) {
-        const next = [...current];
-        next[editingIndex] = item;
-        return next;
-      }
-      return [...current, item];
+  async function handleAddStockItem(stockDraft: StockItemDraft): Promise<StockItem> {
+    const results = await authedFetch<StockItem[]>(`/businesses/${business.id}/stock-items/bulk/`, {
+      method: 'POST',
+      body: {
+        items: [
+          {
+            name: stockDraft.name.trim(),
+            unit: stockDraft.unit,
+            usual_price: stockDraft.usualPrice.trim() || undefined,
+            supplier: stockDraft.supplier.trim() || undefined,
+            shared: stockDraft.shared,
+            goes_off: stockDraft.goesOff,
+            shelf_life_days:
+              stockDraft.goesOff && stockDraft.shelfLifeDays.trim()
+                ? Number(stockDraft.shelfLifeDays)
+                : undefined,
+            group: stockDraft.group.trim() || undefined,
+          },
+        ],
+      },
     });
-    resetDraft();
+    const created = results[0];
+    setStockItems((current) => [created, ...(current ?? [])]);
+    return created;
   }
 
-  function handleEditItem(index: number) {
-    setDraft(ownItems[index]);
-    setEditingIndex(index);
-    setDraftErrors({});
+  async function handleAdd() {
+    setAddFormError(null);
+    const errors = validateSellItemDraft(instant.draft, allItems);
+    setAddFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    try {
+      await instant.add();
+      setAddFieldErrors({});
+      setToast(s4.addedToast);
+      if (draftScope) await itemDraftStorage.clear(draftScope);
+    } catch (err) {
+      if (err instanceof ApiError && err.rowErrors && err.rowErrors[0]) {
+        setAddFormError(err.rowErrors[0].message);
+      } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
+        setAddFormError(s4.errors.network);
+      } else if (err instanceof ApiError) {
+        setAddFormError(err.message || s4.errors.generic);
+      } else {
+        setAddFormError(s4.errors.generic);
+      }
+    }
   }
 
-  function handleRemoveItem(index: number) {
-    setOwnItems((current) => current.filter((_, i) => i !== index));
-    setOwnItemErrors({});
-    if (editingIndex === index) resetDraft();
+  async function handleRemove(item: SellItem) {
+    setItems((current) => (current ?? []).filter((i) => i.id !== item.id));
+    try {
+      await authedFetch(`/businesses/${business.id}/sell-items/${item.id}/`, {
+        method: 'PATCH',
+        body: { active: false },
+      });
+    } catch {
+      setItems((current) => [...(current ?? []), item]);
+    }
   }
 
   function validateStarterPrices(): boolean {
@@ -140,42 +230,29 @@ export default function SetupStepFour() {
     return true;
   }
 
-  function buildPayload() {
-    const starterRows = (starterPack?.sell_items ?? [])
-      .filter((item) => tickedStarter[item.name])
+  function buildStarterPayload() {
+    const existingNames = new Set(allItems.map((item) => item.name.toLowerCase()));
+    return (starterPack?.sell_items ?? [])
+      .filter((item) => tickedStarter[item.name] && !existingNames.has(item.name.toLowerCase()))
       .map((item) => ({
         name: item.name,
         selling_price: (starterPrices[item.name] ?? '').trim(),
       }));
-    const ownRows = ownItems.map((item) => ({
-      name: item.name,
-      selling_price: item.sellingPrice.trim(),
-      main_stock_item: item.mainStockItemId ?? undefined,
-    }));
-    return { starterRows, ownRows, items: [...starterRows, ...ownRows] };
   }
 
-  function applyRowErrors(rowErrors: RowError[], starterCount: number) {
+  function applyRowErrors(rowErrors: RowError[]) {
     const nextStarterErrors: Record<string, string> = {};
-    const nextOwnErrors: Record<number, string> = {};
-    const tickedNames = (starterPack?.sell_items ?? [])
-      .filter((item) => tickedStarter[item.name])
-      .map((item) => item.name);
+    const tickedNames = buildStarterPayload().map((item) => item.name);
     for (const err of rowErrors) {
-      const index = err.row - 1;
-      if (index < starterCount) {
-        nextStarterErrors[tickedNames[index]] = err.message;
-      } else {
-        nextOwnErrors[index - starterCount] = err.message;
-      }
+      const name = tickedNames[err.row - 1];
+      if (name) nextStarterErrors[name] = err.message;
     }
     setStarterErrors(nextStarterErrors);
-    setOwnItemErrors(nextOwnErrors);
   }
 
-  function mapSubmitError(err: unknown, starterCount: number) {
+  function mapSubmitError(err: unknown) {
     if (err instanceof ApiError && err.rowErrors) {
-      applyRowErrors(err.rowErrors, starterCount);
+      applyRowErrors(err.rowErrors);
       setSubmitError(s4.errors.generic);
     } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
       setSubmitError(s4.errors.network);
@@ -189,20 +266,21 @@ export default function SetupStepFour() {
   async function save(): Promise<boolean> {
     setSubmitError(null);
     setStarterErrors({});
-    setOwnItemErrors({});
     if (!validateStarterPrices()) return false;
-    const { starterRows, items } = buildPayload();
-    if (items.length === 0) {
+    const starterRows = buildStarterPayload();
+    if (starterRows.length === 0 && allItems.length === 0) {
       setSubmitError(s4.errors.minimumOne);
       return false;
     }
 
     setSubmitting(true);
     try {
-      await authedFetch(`/businesses/${business.id}/sell-items/bulk/`, {
-        method: 'POST',
-        body: { items },
-      });
+      if (starterRows.length > 0) {
+        await authedFetch(`/businesses/${business.id}/sell-items/bulk/`, {
+          method: 'POST',
+          body: { items: starterRows },
+        });
+      }
       await authedFetch(`/businesses/${business.id}/onboarding/4/`, {
         method: 'PATCH',
         body: { status: 'done' },
@@ -214,7 +292,7 @@ export default function SetupStepFour() {
       await refreshMe();
       return true;
     } catch (err) {
-      mapSubmitError(err, starterRows.length);
+      mapSubmitError(err);
       return false;
     } finally {
       setSubmitting(false);
@@ -244,7 +322,7 @@ export default function SetupStepFour() {
       await refreshMe();
       router.push('/setup/5');
     } catch (err) {
-      mapSubmitError(err, 0);
+      mapSubmitError(err);
     } finally {
       setSkipping(false);
     }
@@ -272,6 +350,7 @@ export default function SetupStepFour() {
       />
 
       <Body style={styles.title}>{s4.title}</Body>
+      <Small style={styles.subtitle}>{s4.stepIntro}</Small>
 
       {submitError ? (
         <View style={styles.formError}>
@@ -309,70 +388,63 @@ export default function SetupStepFour() {
         </View>
       ) : null}
 
-      <View style={styles.field}>
-        <Body style={styles.sectionLabel}>{s4.addOwn(label)}</Body>
-
-        <SellItemForm
-          value={draft}
-          onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
-          errors={draftErrors}
-          stockItems={stockItems === null ? null : linkableStockItems}
-        />
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={handleAddOrUpdateItem}
-          style={styles.addButton}
-        >
-          <Body style={styles.addButtonText}>
-            {editingIndex !== null ? s4.updateItem : s4.addItem}
-          </Body>
-        </Pressable>
-      </View>
-
-      {ownItems.length > 0 ? (
+      {addedGroups.length > 0 ? (
         <View style={styles.field}>
           <Body style={styles.sectionLabel}>{s4.addedItems}</Body>
-          <View style={twoColumns ? styles.itemGrid : styles.field}>
-            {ownItems.map((item, index) => {
-              const linked = linkableStockItems.find((s) => s.id === item.mainStockItemId);
+          <GroupedList
+            groups={addedGroups}
+            getKey={(item) => item.id}
+            renderItem={(item) => {
+              const linked = linkableStockItems.find((stock) => stock.id === item.main_stock_item);
               return (
-                <View
-                  key={`${item.name}-${index}`}
-                  style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}
-                >
+                <View style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}>
                   <View style={styles.itemRowCopy}>
                     <Body style={styles.itemRowName}>{item.name}</Body>
                     <Small style={styles.itemRowMeta}>
-                      ₹{item.sellingPrice}
+                      ₹{item.selling_price}
                       {linked ? ` · ${linked.name}` : ''}
                     </Small>
-                    {ownItemErrors[index] ? (
-                      <Small style={styles.formErrorText}>{ownItemErrors[index]}</Small>
-                    ) : null}
                   </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`${s4.edit} ${item.name}`}
-                    onPress={() => handleEditItem(index)}
-                    style={styles.itemAction}
-                  >
-                    <Icon name="edit" size={18} colour={colours.primary} />
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
                     accessibilityLabel={`${s4.remove} ${item.name}`}
-                    onPress={() => handleRemoveItem(index)}
+                    onPress={() => handleRemove(item)}
                     style={styles.itemAction}
                   >
                     <Icon name="delete" size={18} colour={colours.danger} />
                   </Pressable>
                 </View>
               );
-            })}
-          </View>
+            }}
+          />
         </View>
       ) : null}
+
+      <View style={styles.field}>
+        <Body style={styles.sectionLabel}>{s4.addOwn(label)}</Body>
+
+        {addFormError ? <Banner kind="error">{addFormError}</Banner> : null}
+        <SellItemForm
+          value={instant.draft}
+          onChange={instant.setDraft}
+          errors={addFieldErrors}
+          stockItems={stockItems === null ? null : linkableStockItems}
+          onAddStockItem={handleAddStockItem}
+          existingGroups={existingGroups}
+          nameFieldRef={instant.nameFieldRef}
+        />
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={handleAdd}
+          style={[styles.addButton, instant.saving ? styles.addButtonDisabled : null]}
+          disabled={instant.saving}
+        >
+          <Body style={styles.addButtonText}>{s4.addItem}</Body>
+        </Pressable>
+      </View>
+
+      <Toast message={toast} onHide={() => setToast(null)} />
     </Screen>
   );
 }
@@ -387,6 +459,9 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: fonts.headingBold,
     fontSize: type.xl,
+  },
+  subtitle: {
+    color: colours.muted,
   },
   sectionLabel: {
     fontFamily: fonts.bodyExtraBold,
@@ -406,21 +481,19 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodyExtraBold,
   },
   addButton: {
-    minHeight: 48,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: colours.primary,
     borderRadius: radii.pill,
   },
+  addButtonDisabled: {
+    opacity: 0.6,
+  },
   addButtonText: {
     color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
-  },
-  itemGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
   },
   itemRow: {
     flexDirection: 'row',
@@ -432,7 +505,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   // Two per row at 900px+ — a percentage width, not a fixed pixel one, so it still shrinks cleanly
-  // with the wrapping `itemGrid` gap rather than overflowing it.
+  // with the wrapping gap rather than overflowing it.
   itemRowHalf: {
     flexBasis: '48%',
     minWidth: 0,

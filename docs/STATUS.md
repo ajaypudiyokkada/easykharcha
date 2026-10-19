@@ -120,6 +120,14 @@ not built yet.
   stub; Home's Money section gained a "Reports" link onto the 7-day period. A 12px axis-tick text
   exemption added to `scripts/responsive_check.mjs`, matching the landing-mockup one. `signup_per_ip`
   raised 20 -> 30 for the larger smoke suite.
+- **Step 19 — Item setup: clearer, instant, groupable, robust.** New `StockItem.group`/
+  `SellItem.group` (free text, case-insensitively canonicalised per business). The sell-item form's
+  "uses" picker explains itself, is searchable/grouped, and can add a brand-new stock item inline
+  without leaving the form. Adding a stock/sell item (wizard or Settings) now saves instantly
+  (optimistic, rolled back on failure) instead of batching to one submit; Settings' old add-sheet is
+  edit-only now, matching the wizard's always-inline add form. Client+server validation tightened
+  (shelf life required once "goes off" is on, `uses_qty` must be a real positive number, comma-
+  decimals and whitespace-only names rejected) — see `forms/validate*.ts` and `stock/serializers.py`.
 
 ## Permission table
 

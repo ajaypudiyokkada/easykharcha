@@ -55,6 +55,29 @@ def _with_last_count_info(queryset):
     )
 
 
+def _group_resolver(queryset) -> dict[str, str]:
+    """Seeds a lowercase-group -> canonical-casing map from this business's existing rows (of this
+    same item type) once per request. `_canonical_group` both reads *and writes* this same dict as
+    it resolves each row, so two differently-cased spellings of a brand-new group *within the same
+    bulk call* still fold together — querying the database per row wouldn't catch that, since
+    nothing in the batch is actually saved until the loop finishes."""
+    return {
+        group.lower(): group
+        for group in queryset.exclude(group="").values_list("group", flat=True).distinct()
+    }
+
+
+def _canonical_group(seen_groups: dict[str, str], typed_group: str) -> str:
+    """Case-insensitive match against `seen_groups` (existing rows, plus every group already
+    resolved earlier in this same request) — typing "dairy" when "Dairy" exists (on disk or
+    earlier in this same batch) groups the item under the existing "Dairy" heading instead of
+    splitting into a second, differently-cased one. Blank stays blank ("Ungrouped")."""
+    if not typed_group:
+        return ""
+    canonical = seen_groups.setdefault(typed_group.lower(), typed_group)
+    return canonical
+
+
 def _row_errors_from(row_number: int, errors: dict) -> list[dict]:
     flattened = []
     for field, messages in errors.items():
@@ -145,6 +168,11 @@ class StockItemDetailView(APIView):
             if clash.exists():
                 raise ValidationError({"name": "An item with this name already exists."})
 
+        if data.get("group"):
+            data["group"] = _canonical_group(
+                _group_resolver(business.stock_items.exclude(id=item.id)), data["group"]
+            )
+
         if "unit" in data and data["unit"] != item.unit:
             has_history = PurchaseLine.objects.filter(stock_item=item).exists() or (
                 CountLine.objects.filter(stock_item=item).exists()
@@ -186,6 +214,7 @@ class StockItemBulkCreateView(APIView):
         existing_names = {
             name.lower() for name in business.stock_items.values_list("name", flat=True)
         }
+        seen_groups = _group_resolver(business.stock_items)
         seen_in_call: set[str] = set()
         row_errors: list[dict] = []
         cleaned = []
@@ -212,6 +241,7 @@ class StockItemBulkCreateView(APIView):
                 )
                 continue
             seen_in_call.add(key)
+            data["group"] = _canonical_group(seen_groups, data["group"])
             cleaned.append(data)
 
         if row_errors:
@@ -269,6 +299,7 @@ class SellItemBulkCreateView(APIView):
         existing_names = {
             name.lower() for name in business.sell_items.values_list("name", flat=True)
         }
+        seen_groups = _group_resolver(business.sell_items)
         seen_in_call: set[str] = set()
         row_errors: list[dict] = []
         cleaned = []
@@ -330,6 +361,7 @@ class SellItemBulkCreateView(APIView):
                 continue
             seen_in_call.add(key)
             data["main_stock_item"] = stock_item
+            data["group"] = _canonical_group(seen_groups, data["group"])
             cleaned.append(data)
 
         if row_errors:
@@ -363,6 +395,11 @@ class SellItemDetailView(APIView):
             clash = business.sell_items.exclude(id=item.id).filter(name__iexact=data["name"])
             if clash.exists():
                 raise ValidationError({"name": "An item with this name already exists."})
+
+        if data.get("group"):
+            data["group"] = _canonical_group(
+                _group_resolver(business.sell_items.exclude(id=item.id)), data["group"]
+            )
 
         if "main_stock_item" in data:
             stock_item_id = data.pop("main_stock_item")

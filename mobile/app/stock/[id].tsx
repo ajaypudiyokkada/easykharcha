@@ -206,16 +206,21 @@ export default function StockItemDetailScreen() {
           }}
         />
       ) : null}
-      <StockItemSheet
-        visible={editSheetVisible}
-        editingItem={item}
-        onClose={() => setEditSheetVisible(false)}
-        onSaved={(message) => {
-          setEditSheetVisible(false);
-          setToast(message);
-          load();
-        }}
-      />
+      {item ? (
+        <StockItemSheet
+          visible={editSheetVisible}
+          editingItem={item}
+          // This detail page only ever loads the one item, not the whole business list — the
+          // server's own name/group checks (stock/views.py) still catch anything this misses.
+          existingItems={[]}
+          onClose={() => setEditSheetVisible(false)}
+          onSaved={(message) => {
+            setEditSheetVisible(false);
+            setToast(message);
+            load();
+          }}
+        />
+      ) : null}
       <Toast message={toast} onHide={() => setToast(null)} />
     </AppShell>
   );

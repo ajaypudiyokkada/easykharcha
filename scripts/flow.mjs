@@ -47,6 +47,7 @@ const STEP13_SCREEN_DIR = 'docs/screens/step13';
 const STEP14_SCREEN_DIR = 'docs/screens/step14';
 const STEP15_SCREEN_DIR = 'docs/screens/step15';
 const STEP16_SCREEN_DIR = 'docs/screens/step16';
+const STEP19_SCREEN_DIR = 'docs/screens/step19';
 
 function findChrome() {
   const candidates = [
@@ -398,6 +399,9 @@ async function checkOwnerOpeningCount(page) {
   await typeInto(page, 'Rice quantity', '5');
   await typeInto(page, 'Cooking oil quantity', '5');
   await typeInto(page, 'Fresh Paneer quantity', '5');
+  // Step 19: Greek Yoghurt was added via the sell-item form's "+ Add a new item" picker earlier —
+  // it's a real active stock item now too, so it needs counting like any other.
+  await typeInto(page, 'Greek Yoghurt quantity', '5');
   await clickButton(page, 'Save count');
   await waitForText(page, 'Count saved. Thank you.');
   console.log('OK — the Owner submits the opening stock count.');
@@ -462,6 +466,7 @@ async function checkHelperTodayFlow(page, helperMobile, helperPin) {
   await typeInto(page, 'Rice quantity', '50');
   await typeInto(page, 'Cooking oil quantity', '5');
   await typeInto(page, 'Fresh Paneer quantity', '5');
+  await typeInto(page, 'Greek Yoghurt quantity', '5');
   await clickButton(page, 'Save count');
   await waitForText(page, 'That looks very different from usual.');
   await waitForText(page, 'Is 50 kg right?');
@@ -1102,19 +1107,32 @@ async function main() {
     await clickAndSettle(await findVisible(page, '[aria-label="Cooking oil. L"]'));
     console.log('OK — ticked two starter stock items.');
 
+    await mkdir(STEP19_SCREEN_DIR, { recursive: true });
     await typeInto(page, 'Name', 'Fresh Paneer');
     await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
     await clickAndSettle(await findVisible(page, '[aria-label="Goes off"]'));
     await typeInto(page, 'Shelf life in days', '3');
+    await typeInto(page, 'Group (optional)', 'Dairy');
     await clickButton(page, 'Add item');
     await waitForText(page, 'Fresh Paneer');
-    console.log('OK — added one own stock item with Goes off + shelf life.');
+    console.log('OK — added one own stock item with Goes off + shelf life, under a "Dairy" group.');
+
+    // Step 19: the added-items list shows a real "Dairy" heading for Fresh Paneer — it saved and
+    // appeared instantly on Add, no extra Save tap (the ticked starter items above are still only
+    // local ticks, saved in the one batch call when this step's own Next/Save is pressed).
+    await waitForText(page, 'Dairy (1)');
+    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/stock-groups-390.png` });
+    console.log('OK — Step 19: the stock list groups items under real headings, including "Dairy".');
 
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/4');
     console.log('OK — step 3 saved, moved to /setup/4.');
 
     await waitForText(page, 'Add your own');
+    await waitForText(page, "Pick from the items you've added. Missing one? Add it here.");
+    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/sell-item-picker-390.png` });
+    console.log('OK — Step 19: the "uses" picker explains itself and lists what was already added.');
+
     await clickAndSettle(await findVisible(page, '[aria-label="Veg biryani"]'));
     // minCount: 2 — the starter item's inline price box only mounts once the tick above is
     // reflected in a render; without waiting for both fields to exist, this can resolve to the
@@ -1124,10 +1142,27 @@ async function main() {
 
     await typeInto(page, 'Name', 'Paneer Tikka', { last: true });
     await typeInto(page, 'Selling price', '180', { last: true });
+
+    // Step 19: instead of picking an existing stock item, add a brand new one from inside the
+    // picker itself — no leaving the sell-item form, no lost typing.
+    await clickButton(page, '+ Add a new item');
+    await waitForText(page, 'Add a stock item');
+    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/add-from-picker-390.png` });
+    await typeInto(page, 'Name', 'Greek Yoghurt', { last: true });
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
+    // The inline panel's own "Add item" button is the first one in the DOM — the outer sell-item
+    // form's "Add item" (its own Save/submit) comes after it, lower on the page.
+    await clickButton(page, 'Add item');
+    await waitForText(page, 'Greek Yoghurt');
+    console.log('OK — Step 19: "+ Add a new item" opens an inline stock-item form and selects the result.');
+
+    // Re-pick Fresh Paneer as this sell item's actual main stock item — Greek Yoghurt above was
+    // only to prove the inline add-and-select works, not the link this item is meant to carry (a
+    // later scenario deactivates Fresh Paneer and expects it to still be in use).
     await clickAndSettle(await findVisibleByText(page, 'radio', 'Fresh Paneer'));
     await clickButton(page, 'Add item');
     await waitForText(page, 'Paneer Tikka');
-    console.log('OK — added one own sell item linked to a stock item.');
+    console.log('OK — added one own sell item linked to a stock item added from the picker itself.');
 
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/5');
@@ -1244,6 +1279,15 @@ async function main() {
     await waitForPath(page, '/setup/3');
 
     await skipStep(page, 3, '/setup/4');
+
+    // Step 19: no stock items exist at all (step 3 was skipped) — the "uses" picker shows its
+    // empty state (the same "+ Add a new item" affordance) instead of an empty list.
+    await page.setViewport({ width: 390, height: 1400 });
+    await waitForText(page, 'Add stock items first to link one. You can do this later.');
+    await waitForText(page, '+ Add a new item');
+    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/sell-item-picker-empty-390.png` });
+    console.log('OK — Step 19: with no stock items yet, the picker shows its empty state.');
+
     await skipStep(page, 4, '/setup/5');
     await skipStep(page, 5, '/setup/6');
     await skipStep(page, 6, '/setup/done');

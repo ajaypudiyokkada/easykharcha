@@ -12,6 +12,7 @@ export { Checkbox } from './Checkbox';
 export { ConfirmDialog } from './ConfirmDialog';
 export * from './constants';
 export { EmptyState } from './EmptyState';
+export { GroupedList } from './GroupedList';
 export { Icon, type IconName } from './Icon';
 export { MobileField } from './MobileField';
 export { NoAccess } from './NoAccess';

@@ -677,9 +677,12 @@ async function seedLateClosingCountAndWastage(accessToken) {
     throw new Error(`seed: wastage entry failed, got ${wastageRes.status} (${JSON.stringify(wastageRes.body)})`);
   }
 
-  // Step 14: one sale today, so the Sales screen's delete dialog has a real row to open.
+  // Step 14: one sale today, so the Sales screen's delete dialog has a real row to open. IST is
+  // UTC+5:30 — plain `new Date().toISOString()` gives the UTC date, which still lags a whole
+  // calendar day behind IST for the first 5.5 hours after midnight IST; the business's own "today"
+  // (and where the Sales screen looks for it) is always IST-local, not UTC.
   const sellItems = await apiRequest(`/businesses/${businessId}/sell-items/`, { token: accessToken });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const saleRes = await apiRequest(`/businesses/${businessId}/sales/`, {
     method: 'POST',
     token: accessToken,
@@ -1020,16 +1023,8 @@ async function main() {
           await waitForText(page, 'Message about the late stock count');
         },
       },
-      // Step 12
-      {
-        name: 'sheet-add-stock-item',
-        url: `${APP_URL}/settings/stock`,
-        open: async (page) => {
-          await waitForText(page, 'What you buy');
-          await clickButton(page, 'Add stock item');
-          await waitForText(page, 'Add stock item');
-        },
-      },
+      // Step 12 — Step 19 moved "Add" inline onto the page itself (the plain `settings-stock`/
+      // `settings-sell` route checks above already cover that); only editing is still a sheet.
       {
         name: 'sheet-edit-stock-item',
         url: `${APP_URL}/settings/stock`,
@@ -1037,15 +1032,6 @@ async function main() {
           await waitForText(page, 'What you buy');
           await (await findVisible(page, '[aria-label="Fresh Paneer"]')).click();
           await waitForText(page, 'Edit stock item');
-        },
-      },
-      {
-        name: 'sheet-add-sell-item',
-        url: `${APP_URL}/settings/sell`,
-        open: async (page) => {
-          await waitForText(page, 'What you sell');
-          await clickButton(page, 'Add item you sell');
-          await waitForText(page, 'Add item sold');
         },
       },
       {
