@@ -70,11 +70,14 @@ Every API error comes back as `{"error": {"code": "...", "message": "..."}}`, se
 ## Git workflow
 
 GitHub is the repo of record: https://github.com/ajaypudiyokkada/easykharcha (private). Never commit
-to `main`. Each step starts with `git switch main && git pull --ff-only`, then a branch named
-`step-<NN>-<short-name>` (e.g. `step-16-reports`). Commit locally as checks pass. At the end of a
-step, `git push -u origin <branch>` and open a PR with `gh pr create` — title "Step NN: <name>", body
-= the report-back summary (check/smoke/flow/responsive results). Never merge a PR, push to `main`, or
-force-push — the user merges. After a merge, the next step starts the same `switch`/`pull` again.
+directly to `main` mid-step. Each step starts with `git switch main && git pull --ff-only`, then a
+branch named `step-<NN>-<short-name>` (e.g. `step-16-reports`). Commit locally as checks pass. At the
+end of a step, push the branch and merge it into `main` (via `gh pr create` + `gh pr merge` where
+`gh` is available, otherwise a plain `git merge --no-ff` + `git push origin main`) once checks pass —
+Claude does this now, not the user; still never force-push or rewrite `main`'s history. Resolve merge
+conflicts directly (binary screenshot conflicts: pick either side, then regenerate via `npm run flow`
+afterward; doc conflicts: keep both sides' content, merged sensibly). After merging, re-run
+`npm run check`, `npm run smoke` and `npm run flow` once against the merged result before moving on.
 Commit messages: one short summary line, then a few lines of why.
 
 ## How to work in this repo (read before anything else)
