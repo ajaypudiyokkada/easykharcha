@@ -39,9 +39,12 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   member's PIN/password, blacklists their refresh tokens, clears lockout; refused for the caller's
   own Owner access, never logs the secret
 - `GET/PATCH businesses/<id>/settings/` — BusinessSettingsView — deadlines, cost target, alert %s
-- `GET starter-packs/<business_type>/` — StarterPackView — suggested stock/sell items by type
+- `GET starter-packs/<business_type>/` — StarterPackView — suggested stock/sell items by type; Step
+  20 added `group`/`goes_off`/`shelf_life_days` to every stock item, for all 9 business types
 - `GET businesses/<id>/stock-items/` — StockItemListView — `?include_inactive=1` for Settings
-- `POST businesses/<id>/stock-items/bulk/` — StockItemBulkCreateView — all-or-nothing row validation
+- `POST businesses/<id>/stock-items/bulk/` — StockItemBulkCreateView — all-or-nothing row validation,
+  unless the body sets `skip_existing: true` (Step 20), which quietly drops already-there/duplicate
+  names instead of erroring — what the starter-stock picker's Continue sends
 - `GET/PATCH businesses/<id>/stock-items/<item_id>/` — StockItemDetailView — + price history, last
   purchase; PATCH refuses a unit change once purchased/counted, refuses deactivating while an active
   sell item uses it
@@ -108,7 +111,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
   edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — Step 19:
   an inline add form (instant-save, GroupedList) + a Sheet for editing an existing item only
-  (StockItemForm/SellItemForm); `settings/alerts.tsx` — the 6 alert settings (Step 18 added
+  (StockItemForm/SellItemForm); Step 20 added `settings/stock.tsx`'s "Add from starter list" button,
+  opening `StarterStockPickerSheet`; `settings/alerts.tsx` — the 6 alert settings (Step 18 added
   expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing
@@ -128,7 +132,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `constants.ts` — breakpoints (BREAKPOINT_TABLET=600, NAV_SIDE_BREAKPOINT=840), touch/control sizes
 - `EmptyState.tsx` — "nothing here yet" block with optional action
 - `GroupedList.tsx` — Step 19: collapsible group headings (Ungrouped last) over a flat item list —
-  Settings' stock/sell lists, the wizard's "added items" list, the sell-item form's "uses" picker
+  Settings' stock/sell lists, the wizard's "added items" list, the sell-item form's "uses" picker;
+  Step 20 added optional `countLabel`/`headerAccessory` props for the starter-stock picker's "N of
+  M" + Select all
 - `Icon.tsx` — named lucide-react-native icon registry (IconName union)
 - `MobileField.tsx` — TextField with a fixed "+91" prefix
 - `NoAccess.tsx` — "you don't have access" block
@@ -177,6 +183,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   PIN/password
 - `screens/StockItemSheet.tsx`, `SellItemSheet.tsx` — Settings' add/edit sheets (list screen owns
   the list, these own the form + save)
+- `screens/StarterStockPicker.tsx` — Step 20: the grouped/searchable starter-stock picker (setup/3
+  and Settings); `StarterStockPickerSheet.tsx` wraps it in a Sheet with its own Continue button for
+  the Settings entry point
 - `forms/StockItemForm.tsx`, `SellItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared
   form component each, used by both the setup wizard and Settings
 - `strings.ts` — all user-facing copy, one object per screen

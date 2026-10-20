@@ -211,6 +211,12 @@ class StockItemBulkCreateView(APIView):
         owner_access_or_403(business, request.user)
         rows = _rows_from_request(request)
 
+        # A starter-pack picker sends its whole tick list in one call, and re-running it (e.g. the
+        # owner goes back and forward in setup, or reopens "Add from starter list") would otherwise
+        # hard-fail on whatever it already added last time — skip_existing makes that call
+        # idempotent by quietly dropping already-there rows instead of erroring the whole batch.
+        skip_existing = bool(request.data.get("skip_existing"))
+
         existing_names = {
             name.lower() for name in business.stock_items.values_list("name", flat=True)
         }
@@ -226,19 +232,15 @@ class StockItemBulkCreateView(APIView):
                 continue
             data = serializer.validated_data
             key = data["name"].lower()
-            if key in existing_names:
-                row_errors.append(
-                    {
-                        "row": index,
-                        "field": "name",
-                        "message": "An item with this name already exists.",
-                    }
+            if key in existing_names or key in seen_in_call:
+                if skip_existing:
+                    continue
+                message = (
+                    "An item with this name already exists."
+                    if key in existing_names
+                    else "Duplicate name in this list."
                 )
-                continue
-            if key in seen_in_call:
-                row_errors.append(
-                    {"row": index, "field": "name", "message": "Duplicate name in this list."}
-                )
+                row_errors.append({"row": index, "field": "name", "message": message})
                 continue
             seen_in_call.add(key)
             data["group"] = _canonical_group(seen_groups, data["group"])

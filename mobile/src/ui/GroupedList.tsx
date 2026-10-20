@@ -14,6 +14,11 @@ type Props<T> = {
   /** Collapsed by default once there are more than this many groups, so a business with a dozen
    * groups doesn't open onto one long scroll of everything expanded. */
   collapseAboveGroups?: number;
+  /** Overrides the default `(items.length)` header count — e.g. a picker showing "3 of 9" ticked. */
+  countLabel?: (group: string, items: T[]) => string;
+  /** Extra control in the header row, before the collapse chevron — e.g. a "Select all" button.
+   * Rendered as its own Pressable, so tapping it doesn't also toggle the section collapsed. */
+  headerAccessory?: (group: string, items: T[]) => React.ReactNode;
 };
 
 /** Collapsible group headings (Ungrouped last — groupItems() already orders it that way), shared
@@ -21,33 +26,48 @@ type Props<T> = {
  * form's "what it uses" picker — Step 19's one grouped-list component, used everywhere a grouped
  * item list shows up (count/purchase/wastage item pickers still use their own plain lists; see
  * docs/STATUS.md for why that's deliberately out of this pass). */
-export function GroupedList<T>({ groups, getKey, renderItem, collapseAboveGroups = 4 }: Props<T>) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
-    groups.length > collapseAboveGroups
-      ? Object.fromEntries(groups.map(({ group }) => [group, true]))
-      : {},
-  );
+export function GroupedList<T>({
+  groups,
+  getKey,
+  renderItem,
+  collapseAboveGroups = 4,
+  countLabel,
+  headerAccessory,
+}: Props<T>) {
+  // Per-group *overrides* only — collapsed-by-default is recomputed from the current `groups`
+  // every render instead of being decided once at mount, so a group that only appears once a
+  // search narrows the list down (e.g. to one match) opens on its own instead of staying collapsed
+  // from before the search even started. A group the owner has explicitly tapped keeps whatever
+  // they chose, regardless of how the list around it changes afterwards.
+  const [collapsedOverride, setCollapsedOverride] = useState<Record<string, boolean>>({});
+  const defaultCollapsed = groups.length > collapseAboveGroups;
 
   return (
     <View style={styles.wrap}>
       {groups.map(({ group, items }) => {
-        const isCollapsed = Boolean(collapsed[group]);
+        const isCollapsed = collapsedOverride[group] ?? defaultCollapsed;
+        const count = countLabel ? countLabel(group, items) : String(items.length);
         return (
           <View key={group} style={styles.section}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${group} (${items.length})`}
-              onPress={() => setCollapsed((current) => ({ ...current, [group]: !isCollapsed }))}
+              accessibilityLabel={`${group} (${count})`}
+              onPress={() =>
+                setCollapsedOverride((current) => ({ ...current, [group]: !isCollapsed }))
+              }
               style={styles.header}
             >
               <Small style={styles.headerText}>
-                {group} ({items.length})
+                {group} ({count})
               </Small>
-              <Icon
-                name={isCollapsed ? 'chevronRight' : 'chevronDown'}
-                size={18}
-                colour={colours.muted}
-              />
+              <View style={styles.headerRight}>
+                {headerAccessory ? headerAccessory(group, items) : null}
+                <Icon
+                  name={isCollapsed ? 'chevronRight' : 'chevronDown'}
+                  size={18}
+                  colour={colours.muted}
+                />
+              </View>
             </Pressable>
             {!isCollapsed ? (
               <View style={styles.list}>
@@ -81,6 +101,11 @@ const styles = StyleSheet.create({
   headerText: {
     color: colours.muted,
     fontFamily: fonts.bodyExtraBold,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   list: {
     gap: spacing.sm,

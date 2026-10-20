@@ -134,6 +134,14 @@ not built yet.
   (shelf life required once "goes off" is on, `uses_qty` must be a real positive number, comma-
   decimals and whitespace-only names rejected) — see `forms/validate*.ts` and `stock/serializers.py`.
   The "goes off" toggle itself was later renamed "Perishable item" in the UI (same field/behaviour).
+- **Step 20 — Grouped starter-stock catalogue.** `backend/businesses/starter_packs.json`'s
+  `stock_items` now carry `group`/`goes_off`/`shelf_life_days` for all 9 business types (no model
+  change — `StockItem` already had these from Step 19). New `StarterStockPicker` (collapsible
+  groups, per-group "N of M" + Select all, search, inline "Add your own") replaces setup/3's flat
+  tick-list and is also reachable from Settings' "What you buy" ("Add from starter list" sheet).
+  Nothing saves until Continue/Next — one bulk request, with a new `skip_existing` flag on
+  `stock-items/bulk/` that quietly drops already-there rows instead of erroring the batch, so
+  repeating the same picker selection is a no-op. Steps 4–6 of the wizard are unchanged.
 
 ## Permission table
 

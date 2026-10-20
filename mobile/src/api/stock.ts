@@ -40,7 +40,15 @@ export type SellItem = {
   created_at: string;
 };
 
+export type StarterPackStockItem = {
+  name: string;
+  unit: string;
+  group: string;
+  goes_off?: boolean;
+  shelf_life_days?: number | null;
+};
+
 export type StarterPack = {
-  stock_items: { name: string; unit: string }[];
+  stock_items: StarterPackStockItem[];
   sell_items: { name: string }[];
 };

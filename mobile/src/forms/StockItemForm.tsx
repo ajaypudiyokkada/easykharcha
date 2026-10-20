@@ -61,6 +61,10 @@ type Props = {
   /** Attached to the name field so a caller (see hooks/useInstantAdd.ts) can refocus it after a
    * successful add, ready for the next item with no extra tap. */
   nameFieldRef?: React.Ref<TextInput>;
+  /** Step 20's starter-pack picker "Add your own": name, unit and group only — a catalogue entry
+   * has no price/supplier/shared/perishable guess worth asking for up front, so those stay editable
+   * later from Stock instead. */
+  minimal?: boolean;
 };
 
 /** The stock-item fields shared by setup/3's "add your own" and Settings' "What you buy" add/edit
@@ -74,6 +78,7 @@ export function StockItemForm({
   showActive,
   existingGroups,
   nameFieldRef,
+  minimal,
 }: Props) {
   const groupSuggestions =
     existingGroups && existingGroups.length > 0 ? existingGroups : s3.groupSuggestions;
@@ -113,43 +118,47 @@ export function StockItemForm({
         {errors?.unit ? <Small style={styles.errorText}>{errors.unit}</Small> : null}
       </View>
 
-      <TextField
-        label={s3.priceLabel}
-        value={value.usualPrice}
-        onChangeText={(usualPrice) => onChange({ usualPrice })}
-        placeholder={s3.pricePlaceholder}
-        keyboardType="decimal-pad"
-        error={errors?.usualPrice}
-      />
+      {!minimal ? (
+        <>
+          <TextField
+            label={s3.priceLabel}
+            value={value.usualPrice}
+            onChangeText={(usualPrice) => onChange({ usualPrice })}
+            placeholder={s3.pricePlaceholder}
+            keyboardType="decimal-pad"
+            error={errors?.usualPrice}
+          />
 
-      <TextField
-        label={s3.supplierLabel}
-        value={value.supplier}
-        onChangeText={(supplier) => onChange({ supplier })}
-        placeholder={s3.supplierPlaceholder}
-      />
+          <TextField
+            label={s3.supplierLabel}
+            value={value.supplier}
+            onChangeText={(supplier) => onChange({ supplier })}
+            placeholder={s3.supplierPlaceholder}
+          />
 
-      <Toggle
-        title={s3.sharedToggle}
-        value={value.shared}
-        onChange={(shared) => onChange({ shared })}
-      />
+          <Toggle
+            title={s3.sharedToggle}
+            value={value.shared}
+            onChange={(shared) => onChange({ shared })}
+          />
 
-      <Toggle
-        title={s3.goesOffToggle}
-        value={value.goesOff}
-        onChange={(goesOff) => onChange({ goesOff })}
-      />
+          <Toggle
+            title={s3.goesOffToggle}
+            value={value.goesOff}
+            onChange={(goesOff) => onChange({ goesOff })}
+          />
 
-      {value.goesOff ? (
-        <TextField
-          label={s3.shelfLifeLabel}
-          value={value.shelfLifeDays}
-          onChangeText={(shelfLifeDays) => onChange({ shelfLifeDays })}
-          placeholder={s3.shelfLifePlaceholder}
-          keyboardType="number-pad"
-          error={errors?.shelfLifeDays}
-        />
+          {value.goesOff ? (
+            <TextField
+              label={s3.shelfLifeLabel}
+              value={value.shelfLifeDays}
+              onChangeText={(shelfLifeDays) => onChange({ shelfLifeDays })}
+              placeholder={s3.shelfLifePlaceholder}
+              keyboardType="number-pad"
+              error={errors?.shelfLifeDays}
+            />
+          ) : null}
+        </>
       ) : null}
 
       <View style={styles.field}>

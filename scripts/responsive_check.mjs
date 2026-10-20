@@ -465,13 +465,16 @@ async function buildOwnerSession(page) {
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/3');
 
-  await waitForText(page, 'Rice');
+  // Step 20: the starter picker's groups are collapsed by default (cloud kitchen has 9) — expand
+  // "Groceries & dry goods" to reach Rice, same as flow.mjs's main scenario.
+  await waitForText(page, 'Pick from common items');
+  await clickAndSettle(await findVisible(page, '[aria-label^="Groceries & dry goods ("]'));
   await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
   await typeInto(page, 'Name', 'Fresh Paneer');
   await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
-  await clickButton(page, 'Add item');
+  await clickButton(page, 'Add to list');
   await waitForText(page, 'Fresh Paneer');
-  await clickButton(page, 'Next');
+  await clickButton(page, '2 selected — Next');
   await waitForPath(page, '/setup/4');
 
   await waitForText(page, 'Add your own');

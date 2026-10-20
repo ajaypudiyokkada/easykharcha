@@ -48,6 +48,7 @@ const STEP14_SCREEN_DIR = 'docs/screens/step14';
 const STEP15_SCREEN_DIR = 'docs/screens/step15';
 const STEP16_SCREEN_DIR = 'docs/screens/step16';
 const STEP19_SCREEN_DIR = 'docs/screens/step19';
+const STEP20_SCREEN_DIR = 'docs/screens/step20';
 
 function findChrome() {
   const candidates = [
@@ -582,9 +583,10 @@ async function captureStep10Screens(page) {
     await waitForPath(page, '/setup/2');
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/3');
-    await waitForText(page, 'Rice');
+    await waitForText(page, 'Pick from common items');
+    await clickAndSettle(await findVisible(page, '[aria-label^="Groceries & dry goods ("]'));
     await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
-    await clickButton(page, 'Next');
+    await clickButton(page, '1 selected — Next');
     await waitForPath(page, '/setup/4');
     await clickButton(page, 'Skip for now');
     await waitForPath(page, '/setup/5');
@@ -1127,32 +1129,54 @@ async function main() {
     await waitForPath(page, '/setup/3');
     console.log('OK — step 2 saved, moved to /setup/3.');
 
-    await waitForText(page, 'Rice');
-    await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
-    await clickAndSettle(await findVisible(page, '[aria-label="Cooking oil. L"]'));
-    console.log('OK — ticked two starter stock items.');
+    // Step 20: the starter-pack picker — grouped, collapsed by default (cloud kitchen has 9
+    // groups), with a search box and a "Can't find it? Add your own" quick add. Nothing here saves
+    // until this step's own Next.
+    await mkdir(STEP20_SCREEN_DIR, { recursive: true });
+    await waitForText(page, 'Pick from common items');
+    await page.screenshot({ path: `${STEP20_SCREEN_DIR}/picker-collapsed-390.png` });
+    console.log('OK — Step 20: the starter picker opens with its groups collapsed.');
 
-    await mkdir(STEP19_SCREEN_DIR, { recursive: true });
+    // Expand two different groups and tick one item from each — Rice (Groceries & dry goods) and
+    // Cooking oil (Oils & sauces) — proving a selection spans groups, not just one.
+    await clickAndSettle(await findVisible(page, '[aria-label^="Groceries & dry goods ("]'));
+    await page.screenshot({ path: `${STEP20_SCREEN_DIR}/picker-expanded-390.png` });
+    await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
+    await clickAndSettle(await findVisible(page, '[aria-label^="Oils & sauces ("]'));
+    await clickAndSettle(await findVisible(page, '[aria-label="Cooking oil. L"]'));
+    console.log('OK — ticked two starter stock items across two different groups.');
+
+    await typeInto(page, 'Search', 'egg');
+    await waitForText(page, 'Eggs');
+    await page.screenshot({ path: `${STEP20_SCREEN_DIR}/picker-search-390.png` });
+    console.log('OK — Step 20: the search box filters the picker across every group.');
+
+    // "Can't find it? Add your own" — name/unit/group only, added to the local selection, not
+    // saved until this step's own Next (unlike Step 19's old always-inline-save add form).
     await typeInto(page, 'Name', 'Fresh Paneer');
     await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
-    await clickAndSettle(await findVisible(page, '[aria-label="Perishable item"]'));
-    await typeInto(page, 'Shelf life in days', '3');
     await typeInto(page, 'Group (optional)', 'Dairy');
-    await clickButton(page, 'Add item');
+    await clickButton(page, 'Add to list');
+    await waitForText(page, 'Added by you');
     await waitForText(page, 'Fresh Paneer');
-    console.log('OK — added one own stock item marked Perishable item + shelf life, under a "Dairy" group.');
+    console.log('OK — added one own stock item (name/unit/group only) to the selection.');
 
-    // Step 19: the added-items list shows a real "Dairy" heading for Fresh Paneer — it saved and
-    // appeared instantly on Add, no extra Save tap (the ticked starter items above are still only
-    // local ticks, saved in the one batch call when this step's own Next/Save is pressed).
-    await waitForText(page, 'Dairy (1)');
-    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/stock-groups-390.png` });
-    console.log('OK — Step 19: the stock list groups items under real headings, including "Dairy".');
-
-    await clickButton(page, 'Next');
+    // The sticky bar's label now carries the selection count — 2 ticked + 1 added by hand.
+    await clickButton(page, '3 selected — Next');
     await waitForPath(page, '/setup/4');
-    console.log('OK — step 3 saved, moved to /setup/4.');
+    console.log('OK — step 3 saved: ticked items + the custom one, all in one bulk request.');
 
+    // Confirm the bulk save actually landed and groups the items for real, the same list screen
+    // Step 19 proved this on — going back from /setup/4 shows them as "Added items" now, grouped
+    // under real headings including "Dairy" for Fresh Paneer.
+    await page.goto(`${APP_URL}/setup/3`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForText(page, 'Added items');
+    await waitForText(page, 'Dairy (1)');
+    console.log('OK — Step 20: the saved items come back grouped under real headings, including "Dairy".');
+    await page.goto(`${APP_URL}/setup/4`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+    await waitForPath(page, '/setup/4');
+
+    await mkdir(STEP19_SCREEN_DIR, { recursive: true });
     await waitForText(page, 'Add your own');
     await waitForText(page, "Pick from the items you've added. Missing one? Add it here.");
     await page.screenshot({ path: `${STEP19_SCREEN_DIR}/sell-item-picker-390.png` });
