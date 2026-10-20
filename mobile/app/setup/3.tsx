@@ -366,7 +366,7 @@ export default function SetupStepThree() {
                   <Small style={styles.itemRowMeta}>
                     {item.unit}
                     {item.shared ? ' · shared' : ''}
-                    {item.goes_off ? ' · goes off' : ''}
+                    {item.goes_off ? ' · perishable' : ''}
                   </Small>
                 </View>
                 <Pressable

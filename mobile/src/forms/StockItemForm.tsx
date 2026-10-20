@@ -64,7 +64,7 @@ type Props = {
 };
 
 /** The stock-item fields shared by setup/3's "add your own" and Settings' "What you buy" add/edit
- * sheet — name, unit, usual price, supplier, shared, goes off (+ shelf life), group, and
+ * sheet — name, unit, usual price, supplier, shared, perishable (+ shelf life), group, and
  * optionally active. No Save/Add button here — the caller owns that, since the two contexts save
  * differently. */
 export function StockItemForm({

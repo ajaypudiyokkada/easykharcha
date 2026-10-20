@@ -1110,12 +1110,12 @@ async function main() {
     await mkdir(STEP19_SCREEN_DIR, { recursive: true });
     await typeInto(page, 'Name', 'Fresh Paneer');
     await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
-    await clickAndSettle(await findVisible(page, '[aria-label="Goes off"]'));
+    await clickAndSettle(await findVisible(page, '[aria-label="Perishable item"]'));
     await typeInto(page, 'Shelf life in days', '3');
     await typeInto(page, 'Group (optional)', 'Dairy');
     await clickButton(page, 'Add item');
     await waitForText(page, 'Fresh Paneer');
-    console.log('OK — added one own stock item with Goes off + shelf life, under a "Dairy" group.');
+    console.log('OK — added one own stock item marked Perishable item + shelf life, under a "Dairy" group.');
 
     // Step 19: the added-items list shows a real "Dairy" heading for Fresh Paneer — it saved and
     // appeared instantly on Add, no extra Save tap (the ticked starter items above are still only

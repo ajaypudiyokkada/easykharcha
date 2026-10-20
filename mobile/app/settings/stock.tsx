@@ -263,7 +263,7 @@ function StockRow({ item, onPress }: { item: StockItem; onPress: () => void }) {
         <Small style={styles.rowMeta}>
           {item.unit}
           {item.shared ? ' · shared' : ''}
-          {item.goes_off ? ' · goes off' : ''}
+          {item.goes_off ? ' · perishable' : ''}
         </Small>
       </View>
     </Pressable>
