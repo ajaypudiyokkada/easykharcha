@@ -18,7 +18,8 @@ web first. Development is on Windows with PowerShell — every command and scrip
   Keep it fast.
 - **Don't add scope.** Build exactly what the current step asks for, nothing it doesn't mention. Flag
   gaps and open questions instead of guessing past them.
-- **Don't push to git.** Local commits are fine when asked for; nothing leaves this machine on its own.
+- **Git workflow.** See the "Git workflow" section below — every step goes through GitHub now, never
+  straight to `main`.
 
 ## Colour, font and spacing tokens
 
@@ -65,6 +66,16 @@ a restructure. See `README.md` for which one is actually in use right now.
 
 Every API error comes back as `{"error": {"code": "...", "message": "..."}}`, set up once in
 `backend/config/exceptions.py` as the DRF exception handler. No endpoint builds its own error shape.
+
+## Git workflow
+
+GitHub is the repo of record: https://github.com/ajaypudiyokkada/easykharcha (private). Never commit
+to `main`. Each step starts with `git switch main && git pull --ff-only`, then a branch named
+`step-<NN>-<short-name>` (e.g. `step-16-reports`). Commit locally as checks pass. At the end of a
+step, `git push -u origin <branch>` and open a PR with `gh pr create` — title "Step NN: <name>", body
+= the report-back summary (check/smoke/flow/responsive results). Never merge a PR, push to `main`, or
+force-push — the user merges. After a merge, the next step starts the same `switch`/`pull` again.
+Commit messages: one short summary line, then a few lines of why.
 
 ## How to work in this repo (read before anything else)
 - Read docs/MAP.md first. It says where every screen, endpoint, component
