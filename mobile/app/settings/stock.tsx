@@ -10,6 +10,7 @@ import { groupItems } from '../../src/forms/groupItems';
 import { EMPTY_STOCK_ITEM_DRAFT, StockItemForm } from '../../src/forms/StockItemForm';
 import { validateStockItemDraft } from '../../src/forms/validateStockItem';
 import { useInstantAdd } from '../../src/hooks/useInstantAdd';
+import { StarterStockPickerSheet } from '../../src/screens/StarterStockPickerSheet';
 import { StockItemSheet } from '../../src/screens/StockItemSheet';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
@@ -47,6 +48,7 @@ export default function StockItemsSettings() {
   );
   const [addFormError, setAddFormError] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
+  const [starterListOpen, setStarterListOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -184,6 +186,11 @@ export default function StockItemsSettings() {
             onPress={handleAdd}
             loading={instant.saving}
           />
+          <Button
+            label={ss.addFromStarterList}
+            variant="secondary"
+            onPress={() => setStarterListOpen(true)}
+          />
         </View>
 
         <TextField
@@ -240,6 +247,20 @@ export default function StockItemsSettings() {
           onClose={() => setEditingItem(null)}
           onSaved={(message) => {
             setEditingItem(null);
+            setToast(message);
+            load();
+          }}
+        />
+      ) : null}
+      {business ? (
+        <StarterStockPickerSheet
+          visible={starterListOpen}
+          onClose={() => setStarterListOpen(false)}
+          businessId={business.id}
+          businessType={business.business_type}
+          existingItems={all}
+          onSaved={(message) => {
+            setStarterListOpen(false);
             setToast(message);
             load();
           }}

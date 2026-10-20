@@ -583,6 +583,98 @@ def check_item_setup_flow() -> None:
     )
 
 
+def check_starter_pack_flow() -> None:
+    """Step 20: the grouped starter-stock catalogue and the bulk endpoint's skip_existing flag the
+    new picker relies on to make "tick some, hit Continue" repeatable without erroring."""
+    owner_mobile, owner_access, _ = signup_and_login("Starter Pack Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Starter Pack Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"starter pack flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, pack, _ = request(
+        "GET", "/starter-packs/restaurant_cafe/", token=owner_access
+    )
+    if status != 200 or not pack.get("stock_items"):
+        fail(f"starter pack flow: starter-packs GET expected 200 with items, got {status} ({pack})")
+    groups = {item["group"] for item in pack["stock_items"]}
+    if len(groups) < 2:
+        fail(f"starter pack flow: expected items across multiple groups, got {groups}")
+    print("OK — the starter pack is grouped, not a flat list.")
+
+    # Tick two items from two different groups, same shape the picker's Continue sends.
+    first_group = next(iter(groups))
+    second_group = next(g for g in groups if g != first_group)
+    picked = [
+        next(item for item in pack["stock_items"] if item["group"] == first_group),
+        next(item for item in pack["stock_items"] if item["group"] == second_group),
+    ]
+    payload = {
+        "items": [
+            {
+                "name": item["name"],
+                "unit": item["unit"],
+                "group": item["group"],
+                "goes_off": item.get("goes_off", False),
+                "shelf_life_days": item.get("shelf_life_days"),
+            }
+            for item in picked
+        ],
+        "skip_existing": True,
+    }
+    status, created, _ = request(
+        "POST", f"/businesses/{business_id}/stock-items/bulk/", payload, token=owner_access
+    )
+    if status != 201 or len(created) != 2:
+        fail(f"starter pack flow: bulk save expected 201 with 2 items, got {status} ({created})")
+    print("OK — ticking items across two groups creates both in one bulk request.")
+
+    status, items, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
+    seen_groups = {item["group"] for item in items}
+    if first_group not in seen_groups or second_group not in seen_groups:
+        fail(f"starter pack flow: expected both groups in the stock list, got {seen_groups}")
+    print("OK — the saved items come back grouped under the same headings.")
+
+    # Repeating the exact same bulk call (as the picker would if Continue is tapped twice, or the
+    # owner reopens "Add from starter list") skips the duplicates instead of erroring.
+    status, repeat_created, _ = request(
+        "POST", f"/businesses/{business_id}/stock-items/bulk/", payload, token=owner_access
+    )
+    if status != 201 or repeat_created != []:
+        fail(
+            f"starter pack flow: repeat bulk with skip_existing expected 201 with nothing new, "
+            f"got {status} ({repeat_created})"
+        )
+    status, items_after, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
+    if len(items_after) != len(items):
+        fail(
+            f"starter pack flow: repeat bulk created duplicates — had {len(items)}, "
+            f"now {len(items_after)}"
+        )
+    print("OK — repeating the same bulk save with skip_existing is a no-op, not a duplicate.")
+
+    # Without skip_existing, the same repeat is still a clear row error — existing callers (the
+    # inline add-your-own) keep their original behaviour.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": payload["items"]},
+        token=owner_access,
+    )
+    if status not in (400, 422) or not body.get("row_errors"):
+        fail(f"starter pack flow: repeat without skip_existing expected a row error, got {status} ({body})")
+    print("OK — without skip_existing, a duplicate name is still a row error as before.")
+
+
 def check_team_flow() -> None:
     owner_mobile, owner_access, _ = signup_and_login("Team Owner")
     status, body, _ = request(
@@ -2932,6 +3024,7 @@ def main() -> None:
     check_business_flow()
     check_stock_flow()
     check_item_setup_flow()
+    check_starter_pack_flow()
     check_team_flow()
     check_team_reset_flow()
     check_purchase_flow()
