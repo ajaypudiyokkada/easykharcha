@@ -2515,7 +2515,9 @@ def check_expiry_alerts_flow() -> None:
     (b) Paneer — an old 4 kg batch from 7 days ago plus a fresh 10 kg batch bought today, counted 14
         kg (both still on hand) -> the FIFO walk has to dig past the fresh batch into the old one to
         cover the count, so the old batch is what gets flagged, not the fresh one.
-    (c) Milk — goes_off but no shelf_life_days set -> never alerts, however old its purchase.
+    (c) Milk — not marked "Perishable item" at all (Step 19 requires a shelf life whenever that's
+        on, so "perishable with no shelf life" isn't a reachable state via the API any more) ->
+        never alerts, however old its purchase.
     All three share one closing count (one call, one line per item), since compute_alerts looks at
     each item's own latest count independently.
     """
@@ -2537,7 +2539,7 @@ def check_expiry_alerts_flow() -> None:
             "items": [
                 {"name": "Tomatoes", "unit": "kg", "goes_off": True, "shelf_life_days": 3},
                 {"name": "Paneer", "unit": "kg", "goes_off": True, "shelf_life_days": 3},
-                {"name": "Milk", "unit": "L", "goes_off": True},
+                {"name": "Milk", "unit": "L"},
             ]
         },
         token=owner_access,
@@ -2555,7 +2557,12 @@ def check_expiry_alerts_flow() -> None:
             "supplier_name": "Veg Market",
             "purchase_date_time": _days_ago_iso(4),
             "lines": [
-                {"stock_item": tomatoes_id, "quantity": "10", "unit_price": "50", "line_total": "500"}
+                {
+                    "stock_item": tomatoes_id,
+                    "quantity": "10",
+                    "unit_price": "50",
+                    "line_total": "500",
+                }
             ],
         },
         token=owner_access,
@@ -2584,7 +2591,12 @@ def check_expiry_alerts_flow() -> None:
             "supplier_name": "Dairy Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": paneer_id, "quantity": "10", "unit_price": "100", "line_total": "1000"}
+                {
+                    "stock_item": paneer_id,
+                    "quantity": "10",
+                    "unit_price": "100",
+                    "line_total": "1000",
+                }
             ],
         },
         token=owner_access,
@@ -2598,7 +2610,9 @@ def check_expiry_alerts_flow() -> None:
         {
             "supplier_name": "Dairy Co",
             "purchase_date_time": _days_ago_iso(10),
-            "lines": [{"stock_item": milk_id, "quantity": "5", "unit_price": "20", "line_total": "100"}],
+            "lines": [
+                {"stock_item": milk_id, "quantity": "5", "unit_price": "20", "line_total": "100"}
+            ],
         },
         token=owner_access,
     )
@@ -2628,7 +2642,9 @@ def check_expiry_alerts_flow() -> None:
 
     if set(by_item) != {"Tomatoes", "Paneer"}:
         fail(f"expiry flow: expected expiry_soon for Tomatoes and Paneer only, got {set(by_item)}")
-    print("OK — expiry_soon fires for Tomatoes and Paneer, and never for Milk (no shelf_life_days).")
+    print(
+        "OK — expiry_soon fires for Tomatoes and Paneer, and never for Milk (no shelf_life_days)."
+    )
 
     tomatoes_alert = by_item["Tomatoes"]
     if tomatoes_alert["severity"] != "danger":
@@ -2657,11 +2673,15 @@ def check_expiry_alerts_flow() -> None:
 
     # (d) Head chef has no alerts.view at all (same gate as every other alert type) — 403, so they
     # structurally never see any alert, money or otherwise.
-    _, head_chef_access, _ = _add_team_member(business_id, owner_access, "Expiry Head Chef", "head_chef")
+    _, head_chef_access, _ = _add_team_member(
+        business_id, owner_access, "Expiry Head Chef", "head_chef"
+    )
     status, _, _ = request("GET", f"/businesses/{business_id}/alerts/", token=head_chef_access)
     if status != 403:
         fail(f"expiry flow: head chef alerts list expected 403, got {status}")
-    print("OK — (d) a Head chef gets 403 on alerts, same as every other alert type — never sees money.")
+    print(
+        "OK — (d) a Head chef gets 403 on alerts, same as every other alert type — never sees money."
+    )
 
 
 def check_reports_flow() -> None:
