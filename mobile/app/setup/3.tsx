@@ -2,27 +2,38 @@ import { Redirect, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { ApiError, type RowError } from '../../src/api/client';
-import type { StarterPack } from '../../src/api/stock';
+import { ApiError } from '../../src/api/client';
+import type { StarterPack, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
+import { groupItems } from '../../src/forms/groupItems';
 import {
   EMPTY_STOCK_ITEM_DRAFT,
   StockItemForm,
   type StockItemDraft,
 } from '../../src/forms/StockItemForm';
+import { itemDraftStorage } from '../../src/forms/itemDraftStorage';
+import { validateStockItemDraft } from '../../src/forms/validateStockItem';
+import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { strings } from '../../src/strings';
-import { BottomActionBar, Body, Checkbox, Icon, Screen, Small, StepHeader } from '../../src/ui';
+import {
+  Banner,
+  BottomActionBar,
+  Body,
+  Checkbox,
+  GroupedList,
+  Icon,
+  Screen,
+  Small,
+  StepHeader,
+  Toast,
+} from '../../src/ui';
 import { useMinWidth } from '../../src/hooks/useMinWidth';
 import { BREAKPOINT_DESKTOP, MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
 const s3 = strings.setup.step3;
-
-type OwnStockDraft = StockItemDraft;
-
-const EMPTY_DRAFT: OwnStockDraft = EMPTY_STOCK_ITEM_DRAFT;
 
 export default function SetupStepThree() {
   const router = useRouter();
@@ -34,24 +45,101 @@ export default function SetupStepThree() {
   const [tickedStarter, setTickedStarter] = useState<Record<string, boolean>>({});
   const [starterErrors, setStarterErrors] = useState<Record<string, string>>({});
 
-  const [ownItems, setOwnItems] = useState<OwnStockDraft[]>([]);
-  const [ownItemErrors, setOwnItemErrors] = useState<Record<number, string>>({});
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [draft, setDraft] = useState<OwnStockDraft>(EMPTY_DRAFT);
-  const [draftErrors, setDraftErrors] = useState<{ name?: string; unit?: string }>({});
+  const [items, setItems] = useState<StockItem[] | null>(null);
+  const [addFieldErrors, setAddFieldErrors] = useState<ReturnType<typeof validateStockItemDraft>>(
+    {},
+  );
+  const [addFormError, setAddFormError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [skipping, setSkipping] = useState(false);
+
+  const draftScope = onboardingBusiness ? `stock.${onboardingBusiness.id}` : null;
 
   useEffect(() => {
     if (!onboardingBusiness) return;
     authedFetch<StarterPack>(`/starter-packs/${onboardingBusiness.business_type}/`)
       .then(setStarterPack)
       .catch(() => setStarterPack({ stock_items: [], sell_items: [] }));
+    authedFetch<StockItem[]>(`/businesses/${onboardingBusiness.id}/stock-items/`)
+      .then(setItems)
+      .catch(() => setItems([]));
     // Fetches once for the business this screen is onboarding — business_type doesn't change here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingBusiness?.business_type]);
+
+  const instant = useInstantAdd<StockItem, StockItemDraft>({
+    items: items ?? [],
+    setItems: (updater) => setItems((current) => updater(current ?? [])),
+    emptyDraft: EMPTY_STOCK_ITEM_DRAFT,
+    toOptimistic: (draft) => ({
+      id: 0,
+      name: draft.name.trim(),
+      unit: draft.unit || 'piece',
+      usual_price: draft.usualPrice.trim() || null,
+      supplier: draft.supplier.trim(),
+      shared: draft.shared,
+      goes_off: draft.goesOff,
+      shelf_life_days:
+        draft.goesOff && draft.shelfLifeDays.trim() ? Number(draft.shelfLifeDays) : null,
+      group: draft.group.trim(),
+      active: true,
+      created_at: new Date().toISOString(),
+      last_unit_price: null,
+      last_purchased_at: null,
+      last_counted_qty: null,
+      last_counted_at: null,
+    }),
+    save: async (draft) => {
+      const results = await authedFetch<StockItem[]>(
+        `/businesses/${onboardingBusiness!.id}/stock-items/bulk/`,
+        {
+          method: 'POST',
+          body: {
+            items: [
+              {
+                name: draft.name.trim(),
+                unit: draft.unit,
+                usual_price: draft.usualPrice.trim() || undefined,
+                supplier: draft.supplier.trim() || undefined,
+                shared: draft.shared,
+                goes_off: draft.goesOff,
+                shelf_life_days:
+                  draft.goesOff && draft.shelfLifeDays.trim()
+                    ? Number(draft.shelfLifeDays)
+                    : undefined,
+                group: draft.group.trim() || undefined,
+              },
+            ],
+          },
+        },
+      );
+      return results[0];
+    },
+  });
+
+  // Restores a half-typed "add item" draft after a refresh or back/forward — cleared the instant
+  // an item actually saves (useInstantAdd's own setDraftState reset already handles that moment).
+  useEffect(() => {
+    if (!draftScope) return;
+    itemDraftStorage.load<StockItemDraft>(draftScope).then((saved) => {
+      if (saved) instant.setDraftState(saved);
+    });
+    // Only on mount for this business.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftScope]);
+
+  useEffect(() => {
+    if (!draftScope) return;
+    const isEmpty = JSON.stringify(instant.draft) === JSON.stringify(EMPTY_STOCK_ITEM_DRAFT);
+    if (isEmpty) {
+      itemDraftStorage.clear(draftScope);
+    } else {
+      itemDraftStorage.save(draftScope, instant.draft);
+    }
+  }, [draftScope, instant.draft]);
 
   if (status === 'bootstrapping') {
     return (
@@ -69,82 +157,65 @@ export default function SetupStepThree() {
   // A plain `const` so the functions below (called later, asynchronously) keep TypeScript's
   // non-null narrowing — the state variable above loses it once captured in a closure.
   const business = onboardingBusiness;
+  const allItems = items ?? [];
+  const existingGroups = [...new Set(allItems.map((item) => item.group).filter(Boolean))];
+  const addedGroups = groupItems(allItems);
 
-  function resetDraft() {
-    setDraft(EMPTY_DRAFT);
-    setDraftErrors({});
-    setEditingIndex(null);
-  }
-
-  function handleAddOrUpdateItem() {
-    const errors: { name?: string; unit?: string } = {};
-    if (!draft.name.trim()) errors.name = s3.errors.nameRequired;
-    if (!draft.unit) errors.unit = s3.errors.unitRequired;
-    setDraftErrors(errors);
+  async function handleAdd() {
+    setAddFormError(null);
+    const errors = validateStockItemDraft(instant.draft, allItems);
+    setAddFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
-
-    const item: OwnStockDraft = { ...draft, name: draft.name.trim() };
-    setOwnItems((current) => {
-      if (editingIndex !== null) {
-        const next = [...current];
-        next[editingIndex] = item;
-        return next;
-      }
-      return [...current, item];
-    });
-    resetDraft();
-  }
-
-  function handleEditItem(index: number) {
-    setDraft(ownItems[index]);
-    setEditingIndex(index);
-    setDraftErrors({});
-  }
-
-  function handleRemoveItem(index: number) {
-    setOwnItems((current) => current.filter((_, i) => i !== index));
-    setOwnItemErrors({});
-    if (editingIndex === index) resetDraft();
-  }
-
-  function buildPayload() {
-    const starterRows = (starterPack?.stock_items ?? [])
-      .filter((item) => tickedStarter[item.name])
-      .map((item) => ({ name: item.name, unit: item.unit }));
-    const ownRows = ownItems.map((item) => ({
-      name: item.name,
-      unit: item.unit,
-      usual_price: item.usualPrice.trim() || undefined,
-      supplier: item.supplier.trim() || undefined,
-      shared: item.shared,
-      goes_off: item.goesOff,
-      shelf_life_days:
-        item.goesOff && item.shelfLifeDays.trim() ? Number(item.shelfLifeDays) : undefined,
-    }));
-    return { starterRows, ownRows, items: [...starterRows, ...ownRows] };
-  }
-
-  function applyRowErrors(rowErrors: RowError[], starterCount: number) {
-    const nextStarterErrors: Record<string, string> = {};
-    const nextOwnErrors: Record<number, string> = {};
-    const tickedNames = (starterPack?.stock_items ?? [])
-      .filter((item) => tickedStarter[item.name])
-      .map((item) => item.name);
-    for (const err of rowErrors) {
-      const index = err.row - 1;
-      if (index < starterCount) {
-        nextStarterErrors[tickedNames[index]] = err.message;
+    try {
+      await instant.add();
+      setAddFieldErrors({});
+      setToast(s3.addedToast);
+      if (draftScope) await itemDraftStorage.clear(draftScope);
+    } catch (err) {
+      if (err instanceof ApiError && err.rowErrors && err.rowErrors[0]) {
+        setAddFormError(err.rowErrors[0].message);
+      } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
+        setAddFormError(s3.errors.network);
+      } else if (err instanceof ApiError) {
+        setAddFormError(err.message || s3.errors.generic);
       } else {
-        nextOwnErrors[index - starterCount] = err.message;
+        setAddFormError(s3.errors.generic);
       }
     }
-    setStarterErrors(nextStarterErrors);
-    setOwnItemErrors(nextOwnErrors);
   }
 
-  function mapSubmitError(err: unknown, starterCount: number) {
+  async function handleRemove(item: StockItem) {
+    setItems((current) => (current ?? []).filter((i) => i.id !== item.id));
+    try {
+      await authedFetch(`/businesses/${business.id}/stock-items/${item.id}/`, {
+        method: 'PATCH',
+        body: { active: false },
+      });
+    } catch {
+      setItems((current) => [...(current ?? []), item]);
+    }
+  }
+
+  function buildStarterPayload() {
+    const existingNames = new Set(allItems.map((item) => item.name.toLowerCase()));
+    return (starterPack?.stock_items ?? [])
+      .filter((item) => tickedStarter[item.name] && !existingNames.has(item.name.toLowerCase()))
+      .map((item) => ({ name: item.name, unit: item.unit }));
+  }
+
+  function applyRowErrors(rowErrors: { row: number; field: string; message: string }[]) {
+    const nextStarterErrors: Record<string, string> = {};
+    const tickedNames = buildStarterPayload().map((item) => item.name);
+    for (const err of rowErrors) {
+      const name = tickedNames[err.row - 1];
+      if (name) nextStarterErrors[name] = err.message;
+    }
+    setStarterErrors(nextStarterErrors);
+  }
+
+  function mapSubmitError(err: unknown) {
     if (err instanceof ApiError && err.rowErrors) {
-      applyRowErrors(err.rowErrors, starterCount);
+      applyRowErrors(err.rowErrors);
       setSubmitError(s3.errors.generic);
     } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
       setSubmitError(s3.errors.network);
@@ -158,19 +229,20 @@ export default function SetupStepThree() {
   async function save(): Promise<boolean> {
     setSubmitError(null);
     setStarterErrors({});
-    setOwnItemErrors({});
-    const { starterRows, items } = buildPayload();
-    if (items.length === 0) {
+    const starterRows = buildStarterPayload();
+    if (starterRows.length === 0 && allItems.length === 0) {
       setSubmitError(s3.errors.minimumOne);
       return false;
     }
 
     setSubmitting(true);
     try {
-      await authedFetch(`/businesses/${business.id}/stock-items/bulk/`, {
-        method: 'POST',
-        body: { items },
-      });
+      if (starterRows.length > 0) {
+        await authedFetch(`/businesses/${business.id}/stock-items/bulk/`, {
+          method: 'POST',
+          body: { items: starterRows },
+        });
+      }
       await authedFetch(`/businesses/${business.id}/onboarding/3/`, {
         method: 'PATCH',
         body: { status: 'done' },
@@ -182,7 +254,7 @@ export default function SetupStepThree() {
       await refreshMe();
       return true;
     } catch (err) {
-      mapSubmitError(err, starterRows.length);
+      mapSubmitError(err);
       return false;
     } finally {
       setSubmitting(false);
@@ -212,7 +284,7 @@ export default function SetupStepThree() {
       await refreshMe();
       router.push('/setup/4');
     } catch (err) {
-      mapSubmitError(err, 0);
+      mapSubmitError(err);
     } finally {
       setSkipping(false);
     }
@@ -240,6 +312,7 @@ export default function SetupStepThree() {
       />
 
       <Body style={styles.title}>{s3.title}</Body>
+      <Small style={styles.subtitle}>{s3.stepIntro}</Small>
 
       {submitError ? (
         <View style={styles.formError}>
@@ -251,88 +324,88 @@ export default function SetupStepThree() {
       {starterPack && starterPack.stock_items.length > 0 ? (
         <View style={styles.field}>
           <Body style={styles.sectionLabel}>{s3.pickCommon}</Body>
-          {starterPack.stock_items.map((item) => (
-            <View key={item.name} style={styles.field}>
-              <Checkbox
-                checked={Boolean(tickedStarter[item.name])}
-                onChange={(checked) =>
-                  setTickedStarter((current) => ({ ...current, [item.name]: checked }))
-                }
-                title={item.name}
-                helpText={item.unit}
-              />
-              {starterErrors[item.name] ? (
-                <View style={styles.formError}>
-                  <Icon name="error" size={type.sm} colour={colours.danger} />
-                  <Small style={styles.formErrorText}>{starterErrors[item.name]}</Small>
+          {starterPack.stock_items.map((item) => {
+            const alreadyAdded = allItems.some(
+              (i) => i.name.toLowerCase() === item.name.toLowerCase(),
+            );
+            return (
+              <View key={item.name} style={styles.field}>
+                <Checkbox
+                  checked={alreadyAdded || Boolean(tickedStarter[item.name])}
+                  onChange={
+                    alreadyAdded
+                      ? () => {}
+                      : (checked) =>
+                          setTickedStarter((current) => ({ ...current, [item.name]: checked }))
+                  }
+                  title={item.name}
+                  helpText={alreadyAdded ? `${item.unit} · already added` : item.unit}
+                />
+                {starterErrors[item.name] ? (
+                  <View style={styles.formError}>
+                    <Icon name="error" size={type.sm} colour={colours.danger} />
+                    <Small style={styles.formErrorText}>{starterErrors[item.name]}</Small>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {addedGroups.length > 0 ? (
+        <View style={styles.field}>
+          <Body style={styles.sectionLabel}>{s3.addedItems}</Body>
+          <GroupedList
+            groups={addedGroups}
+            getKey={(item) => item.id}
+            renderItem={(item) => (
+              <View style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}>
+                <View style={styles.itemRowCopy}>
+                  <Body style={styles.itemRowName}>{item.name}</Body>
+                  <Small style={styles.itemRowMeta}>
+                    {item.unit}
+                    {item.shared ? ' · shared' : ''}
+                    {item.goes_off ? ' · perishable' : ''}
+                  </Small>
                 </View>
-              ) : null}
-            </View>
-          ))}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s3.remove} ${item.name}`}
+                  onPress={() => handleRemove(item)}
+                  style={styles.itemAction}
+                >
+                  <Icon name="delete" size={18} colour={colours.danger} />
+                </Pressable>
+              </View>
+            )}
+          />
         </View>
       ) : null}
 
       <View style={styles.field}>
         <Body style={styles.sectionLabel}>{s3.addOwn}</Body>
 
+        {addFormError ? <Banner kind="error">{addFormError}</Banner> : null}
         <StockItemForm
-          value={draft}
-          onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
-          errors={draftErrors}
+          value={instant.draft}
+          onChange={instant.setDraft}
+          errors={addFieldErrors}
+          existingGroups={existingGroups}
+          nameFieldRef={instant.nameFieldRef}
         />
 
         <Pressable
           accessibilityRole="button"
-          onPress={handleAddOrUpdateItem}
-          style={styles.addButton}
+          onPress={handleAdd}
+          style={[styles.addButton, instant.saving ? styles.addButtonDisabled : null]}
+          disabled={instant.saving}
         >
-          <Body style={styles.addButtonText}>
-            {editingIndex !== null ? s3.updateItem : s3.addItem}
-          </Body>
+          <Body style={styles.addButtonText}>{s3.addItem}</Body>
         </Pressable>
       </View>
 
-      {ownItems.length > 0 ? (
-        <View style={styles.field}>
-          <Body style={styles.sectionLabel}>{s3.addedItems}</Body>
-          <View style={twoColumns ? styles.itemGrid : styles.field}>
-            {ownItems.map((item, index) => (
-              <View
-                key={`${item.name}-${index}`}
-                style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}
-              >
-                <View style={styles.itemRowCopy}>
-                  <Body style={styles.itemRowName}>{item.name}</Body>
-                  <Small style={styles.itemRowMeta}>
-                    {item.unit}
-                    {item.shared ? ' · shared' : ''}
-                    {item.goesOff ? ' · goes off' : ''}
-                  </Small>
-                  {ownItemErrors[index] ? (
-                    <Small style={styles.formErrorText}>{ownItemErrors[index]}</Small>
-                  ) : null}
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${s3.edit} ${item.name}`}
-                  onPress={() => handleEditItem(index)}
-                  style={styles.itemAction}
-                >
-                  <Icon name="edit" size={18} colour={colours.primary} />
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${s3.remove} ${item.name}`}
-                  onPress={() => handleRemoveItem(index)}
-                  style={styles.itemAction}
-                >
-                  <Icon name="delete" size={18} colour={colours.danger} />
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        </View>
-      ) : null}
+      <Toast message={toast} onHide={() => setToast(null)} />
     </Screen>
   );
 }
@@ -347,6 +420,9 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: fonts.headingBold,
     fontSize: type.xl,
+  },
+  subtitle: {
+    color: colours.muted,
   },
   sectionLabel: {
     fontFamily: fonts.bodyExtraBold,
@@ -366,21 +442,19 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodyExtraBold,
   },
   addButton: {
-    minHeight: 48,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: colours.primary,
     borderRadius: radii.pill,
   },
+  addButtonDisabled: {
+    opacity: 0.6,
+  },
   addButtonText: {
     color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
-  },
-  itemGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
   },
   itemRow: {
     flexDirection: 'row',
@@ -392,7 +466,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   // Two per row at 900px+ — a percentage width, not a fixed pixel one, so it still shrinks cleanly
-  // with the wrapping `itemGrid` gap rather than overflowing it.
+  // with the wrapping gap rather than overflowing it.
   itemRowHalf: {
     flexBasis: '48%',
     minWidth: 0,

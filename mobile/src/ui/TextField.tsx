@@ -38,23 +38,26 @@ export type TextFieldProps = {
  * error, success). `MobileField` and `PasswordField` are thin configurations of this, not separate
  * implementations, so the border/focus/error chrome exists in exactly one place.
  */
-export function TextField({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  hint,
-  error,
-  success,
-  secureTextEntry,
-  keyboardType,
-  autoComplete,
-  maxLength,
-  autoFocus,
-  editable = true,
-  left,
-  right,
-}: TextFieldProps) {
+export const TextField = React.forwardRef<TextInput, TextFieldProps>(function TextField(
+  {
+    label,
+    value,
+    onChangeText,
+    placeholder,
+    hint,
+    error,
+    success,
+    secureTextEntry,
+    keyboardType,
+    autoComplete,
+    maxLength,
+    autoFocus,
+    editable = true,
+    left,
+    right,
+  },
+  ref,
+) {
   const [focused, setFocused] = useState(false);
   const statusId = useId();
 
@@ -77,6 +80,7 @@ export function TextField({
       <View style={[styles.inputWrap, wrapStatusStyles[status]]}>
         {left}
         <TextInput
+          ref={ref}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -116,7 +120,7 @@ export function TextField({
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   field: {

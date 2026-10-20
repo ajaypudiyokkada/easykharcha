@@ -12,7 +12,7 @@ type Props = {
 };
 
 /**
- * Not in the Step 2 kit — added for "Used in many items" and "Goes off", which are genuinely
+ * Not in the Step 2 kit — added for "Used in many items" and "Perishable item", which are genuinely
  * on/off settings rather than a confirm-this-sentence checkbox. Uses React Native's own `Switch`
  * (a real native control on iOS/Android, a styled checkbox-like toggle on web) rather than
  * reinventing one, with the same two-line label pattern as `Checkbox`.

@@ -27,6 +27,10 @@ class StockItem(models.Model):
     shared = models.BooleanField(default=False)
     goes_off = models.BooleanField(default=False)
     shelf_life_days = models.PositiveIntegerField(null=True, blank=True)
+    # Step 19: free text, blank means "Ungrouped" — canonicalised case-insensitively against this
+    # business's other stock-item groups in the view (see stock/views.py's _canonical_group), the
+    # same split as name-uniqueness: format-only here, anything needing a query lives in the view.
+    group = models.CharField(max_length=40, blank=True, default="")
     active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="stock_items_created"
@@ -63,6 +67,8 @@ class SellItem(models.Model):
     # uses 0.3 kg of Rice) — lets a later step compare what was sold against what was used. Only
     # meaningful alongside main_stock_item; enforced in the serializer/view, not a DB constraint.
     uses_qty = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    # Step 19: same as StockItem.group — its own namespace, not shared with stock-item groups.
+    group = models.CharField(max_length=40, blank=True, default="")
     active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sell_items_created"

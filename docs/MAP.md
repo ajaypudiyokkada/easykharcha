@@ -10,7 +10,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
-- `stock/` — stock items, sell items; models.py (StockItem, SellItem), views.py, serializers.py, exceptions.py, urls.py
+- `stock/` — stock items, sell items; models.py (StockItem, SellItem — Step 19 added `group`, a free-text, blank-allowed, case-insensitively-canonicalised-per-business field), views.py (`_canonical_group`/`_group_resolver`), serializers.py, exceptions.py, urls.py
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
@@ -106,9 +106,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
   — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
-  edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — list +
-  add/edit sheet (StockItemForm/SellItemForm) screens; `settings/alerts.tsx` — the 6 alert settings
-  (Step 18 added expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
+  edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — Step 19:
+  an inline add form (instant-save, GroupedList) + a Sheet for editing an existing item only
+  (StockItemForm/SellItemForm); `settings/alerts.tsx` — the 6 alert settings (Step 18 added
+  expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing
 
@@ -126,6 +127,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `ConfirmDialog.tsx` — centered confirm/cancel dialog (destructive actions)
 - `constants.ts` — breakpoints (BREAKPOINT_TABLET=600, NAV_SIDE_BREAKPOINT=840), touch/control sizes
 - `EmptyState.tsx` — "nothing here yet" block with optional action
+- `GroupedList.tsx` — Step 19: collapsible group headings (Ungrouped last) over a flat item list —
+  Settings' stock/sell lists, the wizard's "added items" list, the sell-item form's "uses" picker
 - `Icon.tsx` — named lucide-react-native icon registry (IconName union)
 - `MobileField.tsx` — TextField with a fixed "+91" prefix
 - `NoAccess.tsx` — "you don't have access" block
@@ -158,6 +161,12 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   per backend resource
 - `business/routing.ts` — where to send a signed-in user (wizard step vs /home)
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
+- `forms/groupItems.ts`, `forms/validateStockItem.ts`, `forms/validateSellItem.ts`,
+  `forms/validateNumber.ts`, `forms/itemDraftStorage.ts` — Step 19: grouping, shared client-side
+  validation and duplicate-name checks, and half-typed-add-form persistence, one of each, reused by
+  every stock/sell-item add form instead of four separate copies
+- `hooks/useInstantAdd.ts` — Step 19: one Add tap saves immediately (optimistic, rolled back on
+  failure) and clears/refocuses the form — used by setup/3, setup/4 and both Settings item lists
 - `screens/ComingSoonScreen.tsx` — shared stub for Team/Settings
 - `screens/ProfileSheet.tsx` — name/role/business, Switch business (if >1), Account (coming soon),
   Log out — the only place Log out lives now, opened from AppShell's avatar/user block

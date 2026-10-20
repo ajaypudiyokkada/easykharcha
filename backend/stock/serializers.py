@@ -5,6 +5,14 @@ from rest_framework import serializers
 from .models import SellItem, StockItem, Unit
 
 ZERO = Decimal("0")
+# A sell item's uses_qty states "one unit sold uses this much of the main stock item" — 0 isn't a
+# meaningful answer to that (it just means no main item was chosen, already expressed by leaving
+# uses_qty unset entirely), so a provided value must be a real positive amount.
+MIN_POSITIVE_QTY = Decimal("0.001")
+
+
+def _clean_group(value: str) -> str:
+    return value.strip()
 
 
 class StockItemRowSerializer(serializers.Serializer):
@@ -19,7 +27,8 @@ class StockItemRowSerializer(serializers.Serializer):
     supplier = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
     shared = serializers.BooleanField(required=False, default=False)
     goes_off = serializers.BooleanField(required=False, default=False)
-    shelf_life_days = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    shelf_life_days = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    group = serializers.CharField(max_length=40, required=False, allow_blank=True, default="")
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -27,11 +36,18 @@ class StockItemRowSerializer(serializers.Serializer):
             raise serializers.ValidationError("Enter a name.")
         return value
 
+    def validate_group(self, value: str) -> str:
+        return _clean_group(value)
+
     def validate(self, attrs: dict) -> dict:
         # Only meaningful when goes_off is set — normalised here so a stray value from a toggle
         # the user flipped back off never lingers in the saved row.
         if not attrs.get("goes_off"):
             attrs["shelf_life_days"] = None
+        elif attrs.get("shelf_life_days") is None:
+            raise serializers.ValidationError(
+                {"shelf_life_days": 'Enter a shelf life in days, or turn off "Perishable item".'}
+            )
         return attrs
 
 
@@ -48,7 +64,8 @@ class StockItemUpdateSerializer(serializers.Serializer):
     supplier = serializers.CharField(max_length=120, required=False, allow_blank=True)
     shared = serializers.BooleanField(required=False)
     goes_off = serializers.BooleanField(required=False)
-    shelf_life_days = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    shelf_life_days = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    group = serializers.CharField(max_length=40, required=False, allow_blank=True)
     active = serializers.BooleanField(required=False)
 
     def validate_name(self, value: str) -> str:
@@ -57,11 +74,18 @@ class StockItemUpdateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Enter a name.")
         return value
 
+    def validate_group(self, value: str) -> str:
+        return _clean_group(value)
+
     def validate(self, attrs: dict) -> dict:
         # Only clears shelf_life_days when goes_off is explicitly turned off in this request — a
         # PATCH that doesn't mention goes_off at all (e.g. just renaming) must leave it alone.
         if "goes_off" in attrs and not attrs["goes_off"]:
             attrs["shelf_life_days"] = None
+        elif attrs.get("goes_off") and attrs.get("shelf_life_days") is None:
+            raise serializers.ValidationError(
+                {"shelf_life_days": 'Enter a shelf life in days, or turn off "Perishable item".'}
+            )
         return attrs
 
 
@@ -91,6 +115,7 @@ class StockItemSerializer(serializers.ModelSerializer):
             "shared",
             "goes_off",
             "shelf_life_days",
+            "group",
             "active",
             "created_at",
             "last_unit_price",
@@ -108,14 +133,18 @@ class SellItemRowSerializer(serializers.Serializer):
     # the view rejects it on its own, since that check needs to know whether a stock item ended up
     # linked at all, which only the view can resolve.
     uses_qty = serializers.DecimalField(
-        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=ZERO
+        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=MIN_POSITIVE_QTY
     )
+    group = serializers.CharField(max_length=40, required=False, allow_blank=True, default="")
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
         if not value:
             raise serializers.ValidationError("Enter a name.")
         return value
+
+    def validate_group(self, value: str) -> str:
+        return _clean_group(value)
 
 
 class SellItemUpdateSerializer(serializers.Serializer):
@@ -129,8 +158,9 @@ class SellItemUpdateSerializer(serializers.Serializer):
     )
     main_stock_item = serializers.IntegerField(required=False, allow_null=True)
     uses_qty = serializers.DecimalField(
-        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=ZERO
+        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=MIN_POSITIVE_QTY
     )
+    group = serializers.CharField(max_length=40, required=False, allow_blank=True)
     active = serializers.BooleanField(required=False)
 
     def validate_name(self, value: str) -> str:
@@ -138,6 +168,9 @@ class SellItemUpdateSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Enter a name.")
         return value
+
+    def validate_group(self, value: str) -> str:
+        return _clean_group(value)
 
 
 class SellItemSerializer(serializers.ModelSerializer):
@@ -151,6 +184,7 @@ class SellItemSerializer(serializers.ModelSerializer):
             "selling_price",
             "main_stock_item",
             "uses_qty",
+            "group",
             "active",
             "created_at",
         )

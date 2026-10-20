@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, type TextInput } from 'react-native';
 
 import type { StockItem } from '../api/stock';
 import { UNITS, type UnitValue } from '../constants/units';
@@ -19,6 +19,7 @@ export type StockItemDraft = {
   shared: boolean;
   goesOff: boolean;
   shelfLifeDays: string;
+  group: string;
   active: boolean;
 };
 
@@ -30,6 +31,7 @@ export const EMPTY_STOCK_ITEM_DRAFT: StockItemDraft = {
   shared: false,
   goesOff: false,
   shelfLifeDays: '',
+  group: '',
   active: true,
 };
 
@@ -42,6 +44,7 @@ export function stockItemToDraft(item: StockItem): StockItemDraft {
     shared: item.shared,
     goesOff: item.goes_off,
     shelfLifeDays: item.shelf_life_days != null ? String(item.shelf_life_days) : '',
+    group: item.group,
     active: item.active,
   };
 }
@@ -49,23 +52,41 @@ export function stockItemToDraft(item: StockItem): StockItemDraft {
 type Props = {
   value: StockItemDraft;
   onChange: (patch: Partial<StockItemDraft>) => void;
-  errors?: { name?: string; unit?: string };
-  /** Settings' edit sheet shows this; the wizard's "add your own" form never does (a new item is
-   * always active). */
+  errors?: { name?: string; unit?: string; usualPrice?: string; shelfLifeDays?: string };
+  /** Settings' edit sheet shows this; the wizard's "add your own" form never does. */
   showActive?: boolean;
+  /** This business's existing stock-item groups (from whatever list the caller already loaded),
+   * offered as quick-pick chips alongside the fixed starter set shown when there are none yet. */
+  existingGroups?: string[];
+  /** Attached to the name field so a caller (see hooks/useInstantAdd.ts) can refocus it after a
+   * successful add, ready for the next item with no extra tap. */
+  nameFieldRef?: React.Ref<TextInput>;
 };
 
-/** The stock-item fields shared by setup/3's "Add your own" and Settings' "What you buy" add/edit
- * sheet — name, unit, usual price, supplier, shared, goes off (+ shelf life), and optionally active.
- * No Save/Add button here — the caller owns that, since the two contexts save differently. */
-export function StockItemForm({ value, onChange, errors, showActive }: Props) {
+/** The stock-item fields shared by setup/3's "add your own" and Settings' "What you buy" add/edit
+ * sheet — name, unit, usual price, supplier, shared, perishable (+ shelf life), group, and
+ * optionally active. No Save/Add button here — the caller owns that, since the two contexts save
+ * differently. */
+export function StockItemForm({
+  value,
+  onChange,
+  errors,
+  showActive,
+  existingGroups,
+  nameFieldRef,
+}: Props) {
+  const groupSuggestions =
+    existingGroups && existingGroups.length > 0 ? existingGroups : s3.groupSuggestions;
+
   return (
     <View style={styles.field}>
       <TextField
+        ref={nameFieldRef}
         label={s3.nameLabel}
         value={value.name}
         onChangeText={(name) => onChange({ name })}
         placeholder={s3.namePlaceholder}
+        maxLength={120}
         error={errors?.name}
       />
 
@@ -98,6 +119,7 @@ export function StockItemForm({ value, onChange, errors, showActive }: Props) {
         onChangeText={(usualPrice) => onChange({ usualPrice })}
         placeholder={s3.pricePlaceholder}
         keyboardType="decimal-pad"
+        error={errors?.usualPrice}
       />
 
       <TextField
@@ -126,8 +148,33 @@ export function StockItemForm({ value, onChange, errors, showActive }: Props) {
           onChangeText={(shelfLifeDays) => onChange({ shelfLifeDays })}
           placeholder={s3.shelfLifePlaceholder}
           keyboardType="number-pad"
+          error={errors?.shelfLifeDays}
         />
       ) : null}
+
+      <View style={styles.field}>
+        <TextField
+          label={s3.groupLabel}
+          value={value.group}
+          onChangeText={(group) => onChange({ group })}
+          placeholder={s3.groupPlaceholder}
+          maxLength={40}
+        />
+        <View style={styles.unitRow}>
+          {groupSuggestions
+            .filter((group) => group.toLowerCase() !== value.group.trim().toLowerCase())
+            .map((group) => (
+              <Pressable
+                key={group}
+                accessibilityRole="button"
+                onPress={() => onChange({ group })}
+                style={styles.groupChip}
+              >
+                <Small style={styles.groupChipText}>{group}</Small>
+              </Pressable>
+            ))}
+        </View>
+      </View>
 
       {showActive ? (
         <Toggle
@@ -171,6 +218,18 @@ const styles = StyleSheet.create({
   unitChipTextSelected: {
     color: colours.text,
     fontFamily: fonts.bodyExtraBold,
+  },
+  groupChip: {
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colours.mint,
+    borderRadius: radii.pill,
+    backgroundColor: colours.card,
+  },
+  groupChipText: {
+    color: colours.muted,
   },
   errorText: {
     color: colours.danger,

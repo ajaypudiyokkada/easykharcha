@@ -125,6 +125,15 @@ not built yet.
   purchase batch is still on hand, flagged danger/warning against the new per-business
   `expiry_warn_days` setting (default 2). Settings hub's "Expiry alerts" row and the landing page's
   matching "coming soon" label are both real now — no other "coming soon" label touched.
+- **Step 19 — Item setup: clearer, instant, groupable, robust.** New `StockItem.group`/
+  `SellItem.group` (free text, case-insensitively canonicalised per business). The sell-item form's
+  "uses" picker explains itself, is searchable/grouped, and can add a brand-new stock item inline
+  without leaving the form. Adding a stock/sell item (wizard or Settings) now saves instantly
+  (optimistic, rolled back on failure) instead of batching to one submit; Settings' old add-sheet is
+  edit-only now, matching the wizard's always-inline add form. Client+server validation tightened
+  (shelf life required once "goes off" is on, `uses_qty` must be a real positive number, comma-
+  decimals and whitespace-only names rejected) — see `forms/validate*.ts` and `stock/serializers.py`.
+  The "goes off" toggle itself was later renamed "Perishable item" in the UI (same field/behaviour).
 
 ## Permission table
 
