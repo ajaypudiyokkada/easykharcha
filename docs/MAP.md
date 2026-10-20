@@ -13,7 +13,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `stock/` — stock items, sell items; models.py (StockItem, SellItem), views.py, serializers.py, exceptions.py, urls.py
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
-- `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
+- `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
@@ -107,7 +107,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
   edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — list +
-  add/edit sheet (StockItemForm/SellItemForm) screens; `settings/alerts.tsx` — the 5 alert settings
+  add/edit sheet (StockItemForm/SellItemForm) screens; `settings/alerts.tsx` — the 6 alert settings
+  (Step 18 added expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing
 
@@ -206,3 +207,4 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 | wastage_alert_pct | 5 | 0–100 |
 | rate_creep_pct | 10 | 0–100 |
 | gap_alert_pct (stock-gap flag threshold) | 10 | 0–100 |
+| expiry_warn_days (expiry_soon alert lead time) | 2 | 1–30 |

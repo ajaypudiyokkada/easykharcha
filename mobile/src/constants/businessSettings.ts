@@ -8,4 +8,5 @@ export const DEFAULT_BUSINESS_SETTINGS = {
   wastage_alert_pct: 5,
   rate_creep_pct: 10,
   gap_alert_pct: 10,
+  expiry_warn_days: 2,
 } as const;

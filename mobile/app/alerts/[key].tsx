@@ -59,6 +59,13 @@ function numberRows(alert: Alert): { label: string; value: string }[] {
       }
       return rows;
     }
+    case 'expiry_soon':
+      return [
+        { label: labels.at_risk_qty, value: `${n.at_risk_qty} ${n.unit}` },
+        { label: labels.expiry_date, value: String(n.expiry_date) },
+        { label: labels.days_left, value: String(n.days_left) },
+        { label: labels.value_at_risk, value: formatRupees(String(n.value_at_risk)) },
+      ];
     default:
       return [];
   }

@@ -120,6 +120,11 @@ not built yet.
   stub; Home's Money section gained a "Reports" link onto the 7-day period. A 12px axis-tick text
   exemption added to `scripts/responsive_check.mjs`, matching the landing-mockup one. `signup_per_ip`
   raised 20 -> 30 for the larger smoke suite.
+- **Step 18 — Expiry alerts.** New `expiry_soon` alert type: for an active, `goes_off` stock item
+  with `shelf_life_days` set, a newest-first FIFO walk against the latest count estimates which
+  purchase batch is still on hand, flagged danger/warning against the new per-business
+  `expiry_warn_days` setting (default 2). Settings hub's "Expiry alerts" row and the landing page's
+  matching "coming soon" label are both real now — no other "coming soon" label touched.
 
 ## Permission table
 

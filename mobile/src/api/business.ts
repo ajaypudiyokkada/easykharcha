@@ -37,4 +37,5 @@ export type BusinessSettings = {
   wastage_alert_pct: string;
   rate_creep_pct: string;
   gap_alert_pct: string;
+  expiry_warn_days: number;
 };

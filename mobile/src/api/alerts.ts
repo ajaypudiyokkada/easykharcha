@@ -1,4 +1,5 @@
-export type AlertType = 'count_late' | 'price_rise' | 'wastage_high' | 'gap_flagged';
+export type AlertType =
+  'count_late' | 'price_rise' | 'wastage_high' | 'gap_flagged' | 'expiry_soon';
 export type AlertSeverity = 'warning' | 'danger';
 
 export type AlertNextAction = {

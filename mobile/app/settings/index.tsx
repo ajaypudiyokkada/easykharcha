@@ -38,7 +38,7 @@ const STOCK_ROWS: Row[] = [
   { key: 'stock', label: s.whatYouBuy, icon: 'stock', href: '/settings/stock' },
   { key: 'sell', label: s.whatYouSell, icon: 'sales', href: '/settings/sell' },
   { key: 'alerts', label: s.alertRules, icon: 'alert', href: '/settings/alerts' },
-  { key: 'expiry', label: s.expiryAlerts, icon: 'clock', comingSoon: true },
+  { key: 'expiry', label: s.expiryAlerts, icon: 'clock', href: '/settings/alerts' },
 ];
 
 export default function SettingsHub() {

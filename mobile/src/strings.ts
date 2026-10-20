@@ -432,6 +432,7 @@ export const strings = {
       price_rise: 'Prices',
       wastage_high: 'Wastage',
       gap_flagged: 'Gaps',
+      expiry_soon: 'Expiry',
     } as Record<string, string | ((n: number) => string)>,
     empty: {
       message: 'Nothing needs attention',
@@ -464,6 +465,10 @@ export const strings = {
       gap_qty: 'Gap',
       gap_value: 'Gap value',
       expected_used: 'Expected used',
+      at_risk_qty: 'At risk',
+      expiry_date: 'Estimated expiry',
+      days_left: 'Days left',
+      value_at_risk: 'Value at risk',
     } as Record<string, string>,
     errors: {
       network: "Can't reach EasyKharcha. Check your internet and try again.",
@@ -783,6 +788,8 @@ export const strings = {
       gapAlertLabel: 'Stock gap alert %',
       gapAlertExample:
         "e.g. 10 means you'll be alerted if a stock gap goes above 10% of expected use.",
+      expiryWarnDaysLabel: 'Expiry warning (days ahead)',
+      expiryWarnDaysExample: "e.g. 2 means you'll be warned 2 days before something may go off.",
       openingCountMechanism: (hour: string) =>
         `Opening count late: when it's not submitted by ${hour}:00.`,
       closingCountMechanism: (hour: string) =>
@@ -793,6 +800,8 @@ export const strings = {
         `Wastage alert: when wastage is more than ${pct}% of what you bought in the last 7 days.`,
       gapAlertMechanism: (pct: string) =>
         `Stock gap alert: when a stock gap is more than ${pct}% of expected use.`,
+      expiryWarnDaysMechanism: (days: string) =>
+        `Expiry alert: starting ${days} day${days === '1' ? '' : 's'} before something you've marked "goes off" is due to expire.`,
       save: 'Save rules',
       savedToast: 'Alert rules saved',
       errors: {

@@ -16,18 +16,22 @@ from django.utils import timezone
 
 from businesses.models import AccessRole, Business
 from counts.gap import lines_with_gap, unit_cost_for
-from counts.models import CountType, StockCount
+from counts.models import CountLine, CountLineState, CountType, StockCount
 from purchases.models import PurchaseLine
 from wastage.models import WastageEntry
 
 from .models import AlertCheck
 
 ZERO = Decimal("0")
+MONEY_PLACES = Decimal("0.01")
 WASTAGE_WINDOW_DAYS = 7
 PRICE_RISE_WINDOW_DAYS = 30
 MIN_PRIOR_PURCHASES = 2
+# Step 18: a count more than this many days old is still used for an expiry estimate (the
+# alternative — no estimate at all — is worse), just flagged as needing a recount to confirm.
+EXPIRY_STALE_COUNT_DAYS = 3
 
-ALERT_TYPES = ("count_late", "price_rise", "wastage_high", "gap_flagged")
+ALERT_TYPES = ("count_late", "price_rise", "wastage_high", "gap_flagged", "expiry_soon")
 
 # Danger alerts (price_rise, gap_flagged) sort ahead of warnings (count_late, wastage_high); within
 # a tier, the alert with the bigger rupee value behind it sorts first.
@@ -280,6 +284,116 @@ def _gap_flagged_alerts(business: Business) -> list[dict]:
     return alerts
 
 
+def _at_risk_batch(stock_item, counted_qty: Decimal, as_of) -> tuple[PurchaseLine, Decimal] | None:
+    """Which purchase this item's current count is most likely still holding, under a FIFO-usage
+    assumption: if older stock always gets used before newer stock, whatever's left on hand must be
+    made up of the most recent purchases — so walking purchase lines newest-first and accumulating
+    quantity until it covers the count reconstructs the batches still around. The oldest one needed
+    to cover the count (it may be only partly needed) has been sitting the longest, so it's the one
+    closest to its shelf life. None if this item has no purchase history at all to anchor a guess to."""
+    lines = list(
+        PurchaseLine.objects.filter(
+            stock_item=stock_item,
+            purchase__is_deleted=False,
+            purchase__purchase_date_time__lte=as_of,
+        )
+        .select_related("purchase")
+        .order_by("-purchase__purchase_date_time", "-id")
+    )
+    if not lines:
+        return None
+
+    running_total = ZERO
+    for line in lines:
+        portion = min(line.quantity, counted_qty - running_total)
+        running_total += portion
+        if running_total >= counted_qty:
+            return line, portion
+
+    # Every known purchase together still doesn't add up to what's on hand (older stock than this
+    # app has purchase history for) — the oldest one known is the best available anchor.
+    oldest = lines[-1]
+    return oldest, oldest.quantity
+
+
+def _expiry_soon_alerts(business: Business) -> list[dict]:
+    warn_days = business.settings.expiry_warn_days
+    today = _business_today(business)
+    tz = ZoneInfo(business.timezone)
+
+    items = business.stock_items.filter(active=True, goes_off=True, shelf_life_days__isnull=False)
+
+    alerts = []
+    for item in items:
+        latest_line = (
+            CountLine.objects.filter(
+                stock_item=item, count__business=business, state=CountLineState.COUNTED
+            )
+            .select_related("count")
+            .order_by("-count__submitted_at")
+            .first()
+        )
+        if latest_line is None or not latest_line.counted_qty:
+            continue
+
+        count = latest_line.count
+        batch = _at_risk_batch(item, latest_line.counted_qty, count.submitted_at)
+        if batch is None:
+            continue
+        at_risk_line, at_risk_qty = batch
+
+        purchase_date = timezone.localtime(at_risk_line.purchase.purchase_date_time, tz).date()
+        expiry_date = purchase_date + timedelta(days=item.shelf_life_days)
+        days_left = (expiry_date - today).days
+        if days_left > warn_days:
+            continue
+
+        severity = "danger" if days_left <= 0 else "warning"
+        expiry_label = f"{expiry_date.day} {expiry_date.strftime('%b')}"
+        purchase_label = f"{purchase_date.day} {purchase_date.strftime('%b')}"
+        day_word = "day" if abs(days_left) == 1 else "days"
+
+        if severity == "danger":
+            title = f"{item.name} may already be past its shelf life"
+            shelf_phrase = (
+                f"about {abs(days_left)} {day_word} past its {item.shelf_life_days}-day shelf life"
+            )
+        else:
+            title = f"{item.name} may go off by {expiry_label}"
+            shelf_phrase = (
+                f"{days_left} {day_word} left of its {item.shelf_life_days}-day shelf life"
+            )
+        detail = f"{at_risk_qty} {item.unit} from the {purchase_label} purchase — {shelf_phrase}."
+
+        is_stale = (timezone.now() - count.submitted_at) > timedelta(days=EXPIRY_STALE_COUNT_DAYS)
+        if is_stale:
+            count_date = count.business_date.isoformat()
+            detail += f" Based on a count from {count_date}; recount to confirm."
+
+        value = (at_risk_qty * at_risk_line.unit_price).quantize(MONEY_PLACES)
+        alerts.append(
+            {
+                "key": f"expiry_soon:{item.id}:{at_risk_line.purchase_id}",
+                "type": "expiry_soon",
+                "title": title,
+                "detail": detail,
+                "severity": severity,
+                "numbers": {
+                    "item_name": item.name,
+                    "at_risk_qty": str(at_risk_qty),
+                    "unit": item.unit,
+                    "expiry_date": expiry_date.isoformat(),
+                    "days_left": days_left,
+                    "value_at_risk": str(value),
+                    "count_is_stale": is_stale,
+                },
+                "next_action": {"label": "Use these first", "route": f"/stock/{item.id}"},
+                "value": value,
+            }
+        )
+    return alerts
+
+
 def compute_alerts(business: Business, role: str | None = None) -> list[dict]:
     """Every currently-true alert for `business`, sorted by severity then rupee value — regardless
     of whether it's already been checked (see `open_alerts` for that)."""
@@ -288,6 +402,7 @@ def compute_alerts(business: Business, role: str | None = None) -> list[dict]:
         *_price_rise_alerts(business),
         *_wastage_high_alerts(business),
         *_gap_flagged_alerts(business),
+        *_expiry_soon_alerts(business),
     ]
     alerts.sort(key=lambda alert: (SEVERITY_RANK.get(alert["severity"], 1), -alert["value"]))
     for alert in alerts:

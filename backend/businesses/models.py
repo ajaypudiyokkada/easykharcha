@@ -127,6 +127,9 @@ class BusinessSettings(models.Model):
     # Step 14: how far used_since_last_count may diverge from sales-expected usage (as a % of
     # expected_used) before a stock gap line is flagged in count review.
     gap_alert_pct = models.DecimalField(max_digits=5, decimal_places=2)
+    # Step 18: how many days ahead of an estimated expiry date alerts/service.py's expiry_soon alert
+    # starts warning (0 days or past = danger instead).
+    expiry_warn_days = models.PositiveSmallIntegerField()
 
     def __str__(self) -> str:
         return f"Settings for {self.business_id}"

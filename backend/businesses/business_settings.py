@@ -19,6 +19,7 @@ FIELDS = (
     "wastage_alert_pct",
     "rate_creep_pct",
     "gap_alert_pct",
+    "expiry_warn_days",
 )
 
 
@@ -64,6 +65,9 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
         decimal_places=2,
         min_value=Decimal(_range("gap_alert_pct")[0]),
         max_value=Decimal(_range("gap_alert_pct")[1]),
+    )
+    expiry_warn_days = serializers.IntegerField(
+        min_value=_range("expiry_warn_days")[0], max_value=_range("expiry_warn_days")[1]
     )
 
     class Meta:
