@@ -1,4 +1,5 @@
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
+from django.contrib.auth.models import PermissionsMixin
 from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
@@ -12,6 +13,8 @@ class UserManager(BaseUserManager):
     ) -> "User":
         if not mobile:
             raise ValueError("A mobile number is required")
+        extra.setdefault("is_staff", False)
+        extra.setdefault("is_superuser", False)
         user = self.model(mobile=mobile, name=name, **extra)
         if password:
             user.set_password(password)
@@ -20,14 +23,29 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
+    def create_superuser(
+        self, mobile: str, name: str = "", password: str | None = None, **extra
+    ) -> "User":
+        """Only path to a platform-staff account — business roles (Owner/Manager/Head chef/Helper)
+        are unrelated and keep working exactly as before; see businesses/permissions.py."""
+        extra["is_staff"] = True
+        extra["is_superuser"] = True
+        if not password:
+            raise ValueError("A password is required for a superuser")
+        return self.create_user(mobile, name=name, password=password, **extra)
 
-class User(AbstractBaseUser):
-    """A business owner's identity."""
+
+class User(AbstractBaseUser, PermissionsMixin):
+    """A business owner's identity. PermissionsMixin (is_superuser, groups, user_permissions) plus
+    is_staff below exist only for the Django admin (platform-staff support tool) — business-level
+    authorization never looks at these, see businesses/permissions.py."""
 
     mobile = models.CharField(max_length=10, unique=True, validators=[mobile_validator])
     name = models.CharField(max_length=120, blank=True)
     email = models.EmailField(blank=True)
     is_active = models.BooleanField(default=True)
+    # Platform staff (Django admin access) only — see the class docstring above.
+    is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Consent (signup requires consent=true; the version comes from settings.CONSENT_VERSION so a

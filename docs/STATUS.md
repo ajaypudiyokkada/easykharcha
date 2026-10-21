@@ -142,6 +142,13 @@ not built yet.
   Nothing saves until Continue/Next — one bulk request, with a new `skip_existing` flag on
   `stock-items/bulk/` that quietly drops already-there rows instead of erroring the batch, so
   repeating the same picker selection is a no-op. Steps 4–6 of the wizard are unchanged.
+- **Step 21a — Django admin for support.** Platform-staff only, unrelated to business roles: `User`
+  gained `is_staff`/`is_superuser` (`PermissionsMixin`, default `False`); `businesses/permissions.py`
+  never looks at them. Admin lives at env `ADMIN_URL_PATH` (default `manage-ek/`, not `/admin/`),
+  behind its own login rate limit (`config/admin_security.py`). Registered: users, businesses,
+  access (memberships/roles), stock/sell items, alert checks — editable, no secrets shown, user/
+  business delete disabled; counts, purchases, sales, wastage and the audit log are read-only
+  (create-only/append-only by design). See `deploy/README.md` for creating/resetting the first admin.
 
 ## Permission table
 

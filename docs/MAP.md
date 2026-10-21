@@ -15,6 +15,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
+- Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
+  `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
+  sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
+  admin_mixins.py` (the read-only mixins)
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
 
