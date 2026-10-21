@@ -6,7 +6,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 - `accounts/` — signup, login, refresh, logout, /me; models.py (User), serializers.py, otp.py (OTP, unused by UI yet), ratelimit.py (IP/mobile rate limits), validators.py (PIN/password rules), views.py, urls.py
 - `audit/` — one audit-log row per write; models.py (AuditLog), log.py (log_action helper), no endpoints
-- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business, Access, AccessRole), views.py, team.py, business_settings.py, permissions.py (the role→permission table), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py, urls.py
+- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Access, AccessRole), views.py, team.py, business_settings.py, permissions.py (the role→permission table), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update), urls.py
+- `geo/` — Step 21b: India pincode lookup; models.py (Pincode — pincode/area/district/state/office_type, indexed on pincode), states.py (`INDIA_STATES`), management/commands/load_pincodes.py (idempotent CSV load, `--if-empty` for entrypoint.sh), views.py, exceptions.py (PincodeNotFound), urls.py
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
@@ -80,6 +81,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `GET businesses/<id>/reports/summary/?period=today|7d|30d|90d&item=` — ReportsSummaryView — one call,
   six blocks: money_went, used_vs_expected, wastage_trend, price_trend (`?item=` picks the stock item,
   default the one with the largest rise), sales_vs_cost, biggest_gaps
+- `GET geo/pincode/<code>/` — PincodeDetailView — Step 21b: `{pincode, state, districts, areas}`, 400
+  for a badly-shaped code, 404 for one not in the table
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
@@ -167,8 +170,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `auth/permissions.ts` — `can(permissions, 'x.y')`, `isLimitedRole(permissions)`
 - `auth/storage.ts` — access/refresh token persistence (SecureStore on native, localStorage on web)
 - `api/client.ts` — fetch wrapper: base URL, timeout, typed ApiError
-- `api/{auth,business,stock,purchases,counts,wastage,team,sales,alerts,reports}.ts` — one typed client
-  per backend resource
+- `api/{auth,business,stock,purchases,counts,wastage,team,sales,alerts,reports,geo}.ts` — one typed
+  client per backend resource (`geo.ts` is Step 21b's `PincodeLookup` type only, no fetch helper — the
+  fetch itself is in `PincodeLocationField.tsx`, like every other screen-level `authedFetch` call)
 - `business/routing.ts` — where to send a signed-in user (wizard step vs /home)
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload
 - `forms/groupItems.ts`, `forms/validateStockItem.ts`, `forms/validateSellItem.ts`,
@@ -192,6 +196,12 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   the Settings entry point
 - `forms/StockItemForm.tsx`, `SellItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared
   form component each, used by both the setup wizard and Settings
+- `forms/PincodeLocationField.tsx` — Step 21b: Country (fixed) + Pincode lookup -> State (read-only) +
+  City (the pincode's district(s), first preselected) + optional searchable Area; "Enter city
+  yourself" falls back to free-text City + a State picker (sets `manual_location`) when a pincode
+  isn't found. Used inside `BusinessForm.tsx` in place of the old free-text City; an existing business
+  with a city but no pincode shows a plain "Add pincode" prompt instead of forcing one.
+  `constants/indiaStates.ts` has the State picker's options (kept in sync with `geo/states.py`).
 - `strings.ts` — all user-facing copy, one object per screen
 - `labels.ts` — copy that varies by business type
 - `format.ts` — ₹ and date/time formatting in the business's own timezone

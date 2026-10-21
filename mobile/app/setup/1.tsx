@@ -6,7 +6,11 @@ import type { Business } from '../../src/api/business';
 import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
-import { BusinessForm, type BusinessDraft } from '../../src/forms/BusinessForm';
+import {
+  BusinessForm,
+  EMPTY_BUSINESS_DRAFT,
+  type BusinessDraft,
+} from '../../src/forms/BusinessForm';
 import { strings } from '../../src/strings';
 import { BottomActionBar, Body, Icon, Screen, StepHeader } from '../../src/ui';
 import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
@@ -27,9 +31,12 @@ export default function SetupStepOne() {
   const existing = getOnboardingBusiness(businesses);
 
   const [draft, setDraft] = useState<BusinessDraft>({
+    ...EMPTY_BUSINESS_DRAFT,
     name: existing?.name ?? '',
     businessType: (existing?.business_type as BusinessDraft['businessType']) ?? '',
     city: existing?.city ?? '',
+    pincode: existing?.pincode ?? '',
+    state: existing?.state ?? '',
     tagline: existing?.tagline ?? '',
   });
 
@@ -80,6 +87,9 @@ export default function SetupStepOne() {
         name: draft.name.trim(),
         business_type: draft.businessType,
         city: draft.city.trim(),
+        pincode: draft.pincode,
+        state: draft.state,
+        manual_location: draft.manualLocation,
         tagline: draft.tagline.trim(),
       };
       let business: Business;
@@ -147,6 +157,7 @@ export default function SetupStepOne() {
       <BusinessForm
         value={draft}
         onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+        authedFetch={authedFetch}
         errors={fieldErrors}
       />
     </Screen>

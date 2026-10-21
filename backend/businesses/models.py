@@ -23,6 +23,9 @@ class Business(models.Model):
     name = models.CharField(max_length=120)
     business_type = models.CharField(max_length=32, choices=BusinessType.choices)
     city = models.CharField(max_length=120)
+    pincode = models.CharField(max_length=6, blank=True)
+    state = models.CharField(max_length=64, blank=True)
+    country = models.CharField(max_length=2, default="IN")
     tagline = models.CharField(max_length=160, blank=True)
     primary_colour = models.CharField(
         max_length=7, default="#1F6F63", validators=[hex_colour_validator]

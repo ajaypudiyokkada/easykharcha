@@ -1,7 +1,9 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import type { RequestOptions } from '../api/client';
 import { BUSINESS_TYPES, type BusinessTypeValue } from '../constants/businessTypes';
+import { EMPTY_LOCATION_DRAFT, PincodeLocationField } from './PincodeLocationField';
 import { strings } from '../strings';
 import { Body, Icon, TextField } from '../ui';
 import { colours, fonts, radii, spacing, type } from '../theme/tokens';
@@ -12,18 +14,29 @@ export type BusinessDraft = {
   name: string;
   businessType: BusinessTypeValue | '';
   city: string;
+  pincode: string;
+  state: string;
+  manualLocation: boolean;
   tagline: string;
+};
+
+export const EMPTY_BUSINESS_DRAFT: BusinessDraft = {
+  name: '',
+  businessType: '',
+  tagline: '',
+  ...EMPTY_LOCATION_DRAFT,
 };
 
 type Props = {
   value: BusinessDraft;
   onChange: (patch: Partial<BusinessDraft>) => void;
+  authedFetch: <T>(path: string, options?: RequestOptions) => Promise<T>;
   errors?: { name?: string; businessType?: string; city?: string };
 };
 
 /** The business fields shared by setup/1 and Settings' "Business details" screen — name, type,
  * city, tagline. No Save/Next button here — the caller owns that. */
-export function BusinessForm({ value, onChange, errors }: Props) {
+export function BusinessForm({ value, onChange, authedFetch, errors }: Props) {
   return (
     <View style={styles.field}>
       <TextField
@@ -64,11 +77,10 @@ export function BusinessForm({ value, onChange, errors }: Props) {
         ) : null}
       </View>
 
-      <TextField
-        label={s1.cityLabel}
-        value={value.city}
-        onChangeText={(city) => onChange({ city })}
-        placeholder={s1.cityPlaceholder}
+      <PincodeLocationField
+        value={value}
+        onChange={onChange}
+        authedFetch={authedFetch}
         error={errors?.city}
       />
 

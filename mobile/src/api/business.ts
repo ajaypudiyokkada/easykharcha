@@ -10,6 +10,9 @@ export type Business = {
   name: string;
   business_type: string;
   city: string;
+  pincode: string;
+  state: string;
+  country: string;
   tagline: string;
   primary_colour: string;
   logo: string | null;

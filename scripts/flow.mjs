@@ -18,6 +18,10 @@
  *     on one resumes that exact step.
  *  4. Logs in as the Helper created in scenario 1, using their PIN, and confirms /home has no
  *     checklist card and no setup links at all.
+ *  5. Step 21b: a pincode (560034) fills in State and preselects City on /setup/1, an area is picked
+ *     from its (small) areas list, the business saves, and reopening Settings -> Business profile
+ *     shows the same pincode/state/city. A second, unknown pincode (999999) on that same screen shows
+ *     "not found" and the "Enter city yourself" manual fallback.
  *
  * Run with:  npm run flow
  *
@@ -49,6 +53,7 @@ const STEP15_SCREEN_DIR = 'docs/screens/step15';
 const STEP16_SCREEN_DIR = 'docs/screens/step16';
 const STEP19_SCREEN_DIR = 'docs/screens/step19';
 const STEP20_SCREEN_DIR = 'docs/screens/step20';
+const STEP21B_SCREEN_DIR = 'docs/screens/step21b';
 
 function findChrome() {
   const candidates = [
@@ -188,9 +193,17 @@ async function login(page, mobile, secret) {
   await clickButton(page, 'Log in');
 }
 
-async function fillStepOne(page, businessName, city, typeLabel) {
+// Types a pincode into the PincodeLocationField and waits for its lookup to resolve (the "State"
+// chip only renders once it has) before moving on — without this, a click racing ahead of the
+// debounce + request could land before the City chips/State chip even exist yet.
+async function fillPincodeLocation(page, pincode) {
+  await typeInto(page, 'Pincode', pincode);
+  await waitForText(page, 'State');
+}
+
+async function fillStepOne(page, businessName, pincode, typeLabel) {
   await typeInto(page, 'Business name', businessName);
-  await typeInto(page, 'City', city);
+  await fillPincodeLocation(page, pincode);
   await clickAndSettle(await findVisibleByText(page, 'radio', typeLabel));
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/2');
@@ -578,7 +591,7 @@ async function captureStep10Screens(page) {
     await signup(page, name, mobile, password);
     await login(page, mobile, password);
     await waitForPath(page, '/setup/1');
-    await fillStepOne(page, "Shots Ten's Kitchen", 'Pune', 'Cloud kitchen');
+    await fillStepOne(page, "Shots Ten's Kitchen", '411001', 'Cloud kitchen');
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/2');
     await clickButton(page, 'Next');
@@ -1053,7 +1066,7 @@ async function checkReportsEmptyStateFlow(page) {
   await signup(page, name, mobile, password);
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
-  await fillStepOne(page, 'Empty Reports Biz', 'Pune', 'Cloud kitchen');
+  await fillStepOne(page, 'Empty Reports Biz', '411001', 'Cloud kitchen');
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/3');
 
@@ -1074,6 +1087,65 @@ async function checkReportsEmptyStateFlow(page) {
 
   await mkdir(STEP16_SCREEN_DIR, { recursive: true });
   await page.screenshot({ path: `${STEP16_SCREEN_DIR}/reports-empty-390.png` });
+
+  await logoutFromAnywhere(page);
+}
+
+// Step 21b: pincode -> State/City autofill, picking from a (small, <=8, no search needed) areas
+// list, saving, and reopening Settings -> Business profile to see the same values — plus the three
+// 390px states Light checks asks for: empty, found, and not-found/manual.
+async function checkPincodeLocationFlow(page) {
+  await mkdir(STEP21B_SCREEN_DIR, { recursive: true });
+  const name = 'Pincode Flow Owner';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password);
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+
+  await page.setViewport({ width: 390, height: 3000 });
+  await page.screenshot({ path: `${STEP21B_SCREEN_DIR}/pincode-empty-390.png` });
+
+  await typeInto(page, 'Business name', 'Koramangala Kitchen');
+  await fillPincodeLocation(page, '560034');
+  await waitForText(page, 'Karnataka');
+  await page.screenshot({ path: `${STEP21B_SCREEN_DIR}/pincode-found-390.png` });
+  console.log('OK — a valid pincode fills in State and preselects City.');
+
+  await clickAndSettle(await findVisible(page, '[aria-label="Area (optional)"]'));
+  await waitForText(page, "St. John's Medical College");
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Koramangala'));
+  console.log("OK — the Area picker lists this pincode's areas, and a choice can be made.");
+
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Cloud kitchen'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/2');
+  console.log('OK — the business saves with the picked pincode/city/state.');
+
+  // Finish the wizard (nothing else here is under test) so Settings' Business profile is reachable.
+  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+  await skipStep(page, 3, '/setup/4');
+  await skipStep(page, 4, '/setup/5');
+  await skipStep(page, 5, '/setup/6');
+  await skipStep(page, 6, '/setup/done');
+  await clickButton(page, 'Go to Home');
+  await waitForPath(page, '/home');
+
+  await page.goto(`${APP_URL}/settings/business`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Business details');
+  await waitForText(page, 'Karnataka');
+  console.log('OK — reopening Business profile shows the saved pincode/state/city.');
+
+  // "Not found" falls back to manual entry, typed into that same now-saved pincode field.
+  await typeInto(page, 'Pincode', '999999');
+  await waitForText(page, "We couldn't find that pincode.");
+  await clickButton(page, 'Enter city yourself');
+  await waitForText(page, 'Choose a state');
+  await page.screenshot({ path: `${STEP21B_SCREEN_DIR}/pincode-not-found-manual-390.png` });
+  console.log('OK — an unknown pincode shows "not found" and offers manual entry.');
 
   await logoutFromAnywhere(page);
 }
@@ -1118,7 +1190,7 @@ async function main() {
     await waitForPath(page, '/setup/1');
     console.log('OK — logged in with no business yet, landed on /setup/1.');
 
-    await fillStepOne(page, "Anita's Kitchen", 'Pune', 'Cloud kitchen');
+    await fillStepOne(page, "Anita's Kitchen", '411001', 'Cloud kitchen');
     console.log('OK — step 1 saved, moved to /setup/2.');
 
     await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
@@ -1303,7 +1375,7 @@ async function main() {
     await signup(page, name2, mobile2, password2);
     await login(page, mobile2, password2);
     await waitForPath(page, '/setup/1');
-    await fillStepOne(page, "Resume Test's Bakery", 'Mumbai', 'Bakery or sweets');
+    await fillStepOne(page, "Resume Test's Bakery", '400001', 'Bakery or sweets');
 
     // /setup/2 itself has no logout button (only the wizard controls) — go to /home, which does,
     // to log out. Resuming depends only on the business's saved onboarding_step, not on which
@@ -1323,7 +1395,7 @@ async function main() {
     await signup(page, name3, mobile3, password3);
     await login(page, mobile3, password3);
     await waitForPath(page, '/setup/1');
-    await fillStepOne(page, "Skip Test's Shop", 'Chennai', 'Other');
+    await fillStepOne(page, "Skip Test's Shop", '600001', 'Other');
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/3');
 
@@ -1391,6 +1463,7 @@ async function main() {
     await captureStep16Screens(page);
     await logoutFromAnywhere(page);
     await checkReportsEmptyStateFlow(page);
+    await checkPincodeLocationFlow(page);
 
     await captureStep10Screens(page);
     await captureStep12Screens(page, mobile, password);

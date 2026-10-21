@@ -158,6 +158,13 @@ not built yet.
   link (reimplementing `django.contrib.auth.admin.UserAdmin`'s own mechanism, since that class is
   tied to `auth.User`'s fields) so a superuser can reset a locked-out/forgotten-password user's
   password from the admin — no hash shown, change logged in the admin log like any other edit.
+- **Step 21d — Pincode-based city selection.** New `geo` app: India's ~19K pincodes / ~155K
+  pincode-area rows (`load_pincodes`, idempotent, `--if-empty` on every container start),
+  `GET geo/pincode/<code>/`. `Business` gained `pincode`/`state`/`country` (kept `city`); create/
+  update now cross-checks pincode against city/state unless `manual_location` is set. New
+  `PincodeLocationField` (Country fixed, Pincode -> State/City/Area, "Enter city yourself" fallback)
+  replaces free-text City in setup step 1 and Settings' Business profile; an existing city-only
+  business shows an "Add pincode" prompt instead of a forced change.
 
 ## Permission table
 

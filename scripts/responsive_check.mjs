@@ -456,7 +456,9 @@ async function buildOwnerSession(page) {
   await waitForPath(page, '/setup/1');
 
   await typeInto(page, 'Business name', "Lincy's Kitchen");
-  await typeInto(page, 'City', 'Bangalore');
+  // 560034 (Bengaluru/Koramangala) — the pincode lookup fills in State and City.
+  await typeInto(page, 'Pincode', '560034');
+  await waitForText(page, 'Karnataka');
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Cloud kitchen'));
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/2');
