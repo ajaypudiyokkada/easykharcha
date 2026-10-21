@@ -448,6 +448,11 @@ async function checkOwnerOpeningCount(page) {
   // Step 23b: Today card screenshot once opening is done — closing is unlocked (due), not locked.
   await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/today-closing-due-390.png` });
   console.log('OK — Home\'s stock count card shows both the opening and closing count states.');
+
+  // Restores the 390x3000 viewport the rest of the flow already runs at (set by
+  // captureStep9Screens just before this function runs) — this function's own 390x844 is only for
+  // its own screenshots above.
+  await page.setViewport({ width: 390, height: 3000 });
 }
 
 const FORBIDDEN_WORDS = ['₹', 'expected', 'gap', 'price'];
@@ -514,6 +519,9 @@ async function checkHelperTodayFlow(page, helperMobile, helperPin) {
   // Step 23b: both counts are done — the Today card's terminal state.
   await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/today-both-done-390.png` });
   console.log(`OK — saved Step 23b Today card/Count screen screenshots to ${STEP23B_SCREEN_DIR}/.`);
+  // Restores the 390x3000 viewport the rest of the flow runs at — the 390x844 above is only for
+  // this function's own screenshots.
+  await page.setViewport({ width: 390, height: 3000 });
 
   await (await findVisible(page, '[aria-label="Record wastage"]')).click();
   await waitForText(page, 'What was lost?');
