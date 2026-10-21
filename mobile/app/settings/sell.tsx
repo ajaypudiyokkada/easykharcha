@@ -197,6 +197,7 @@ export default function SellItemsSettings() {
             value={instant.draft}
             onChange={instant.setDraft}
             errors={addFieldErrors}
+            businessType={business?.business_type ?? ''}
             stockItems={stockItems}
             onAddStockItem={handleAddStockItem}
             existingGroups={existingGroups}

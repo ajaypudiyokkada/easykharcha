@@ -5,6 +5,7 @@ import type { CountFormItem } from '../api/counts';
 import { ApiError } from '../api/client';
 import type { WastageEntry, WastageReason } from '../api/wastage';
 import { useAuth } from '../auth/AuthContext';
+import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 import { Banner, Sheet } from '../ui';
@@ -29,6 +30,7 @@ type Props = {
 export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItemId }: Props) {
   const { authedFetch, businesses } = useAuth();
   const business = businesses[0];
+  const cfg = sectorCopyFor(business?.business_type ?? '');
 
   const [items, setItems] = useState<CountFormItem[]>([]);
   const [stockItemId, setStockItemId] = useState<number | null>(null);
@@ -135,6 +137,7 @@ export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItem
 
       <View style={styles.field}>
         <Small style={styles.label}>{s.reasonLabel}</Small>
+        <Small style={styles.helpText}>{cfg.wastageHelp}</Small>
         <View style={styles.chips}>
           {REASONS.map((value) => {
             const selected = reason === value;
@@ -173,6 +176,9 @@ const styles = StyleSheet.create({
   },
   label: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  helpText: {
+    color: colours.muted,
   },
   chips: {
     flexDirection: 'row',

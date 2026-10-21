@@ -428,6 +428,7 @@ export default function SetupStepFour() {
           value={instant.draft}
           onChange={instant.setDraft}
           errors={addFieldErrors}
+          businessType={business.business_type}
           stockItems={stockItems === null ? null : linkableStockItems}
           onAddStockItem={handleAddStockItem}
           existingGroups={existingGroups}

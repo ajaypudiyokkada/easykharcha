@@ -165,6 +165,17 @@ not built yet.
   `PincodeLocationField` (Country fixed, Pincode -> State/City/Area, "Enter city yourself" fallback)
   replaces free-text City in setup step 1 and Settings' Business profile; an existing city-only
   business shows an "Add pincode" prompt instead of a forced change.
+- **Step 22 — Sector-aware wording and units.** New `mobile/src/sectorCopy.(json|ts)`: one config
+  keyed by all 9 business types for every sector-varying string (stock/sell nouns, placeholders,
+  group suggestions, the "uses" picker label/help, shared/goes-off toggle wording, count/wastage
+  help) and unit list (`allowedUnits`/`defaultUnit`); `labels.ts` now wraps it, and Head-chef is
+  "Head cook" for food types, "Production lead" for small_manufacturing, "Supervisor" otherwise.
+  `StockItemForm`/`SellItemForm`/`StarterStockPicker` take a `businessType` prop; unit chips show
+  the type's own list first behind a "More units" disclosure, and the goes-off toggle hides under
+  "More options" for types that don't default to perishable. `stock.Unit` gained 10 pure-label
+  choices (no conversion exists between any unit, so gap maths is unaffected). New
+  `scripts/check_sector_copy.py` (in `npm run check`) fails on food wording outside food types or a
+  starter-catalogue unit missing from its type's `allowedUnits`.
 
 ## Permission table
 

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, View, type TextInput } from 'react-native';
 
 import type { StockItem } from '../api/stock';
 import { UNITS, type UnitValue } from '../constants/units';
+import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
 import { Small, TextField, Toggle } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
@@ -49,14 +50,23 @@ export function stockItemToDraft(item: StockItem): StockItemDraft {
   };
 }
 
+/** A fresh draft pre-filled with this business type's default unit — used everywhere a brand-new
+ * stock item is started (not editing an existing one, which keeps its own unit). */
+export function emptyStockItemDraft(businessType: string): StockItemDraft {
+  return { ...EMPTY_STOCK_ITEM_DRAFT, unit: sectorCopyFor(businessType).defaultUnit };
+}
+
 type Props = {
   value: StockItemDraft;
   onChange: (patch: Partial<StockItemDraft>) => void;
   errors?: { name?: string; unit?: string; usualPrice?: string; shelfLifeDays?: string };
+  /** Drives every sector-varying placeholder, unit list and toggle wording — see sectorCopy.ts. */
+  businessType: string;
   /** Settings' edit sheet shows this; the wizard's "add your own" form never does. */
   showActive?: boolean;
   /** This business's existing stock-item groups (from whatever list the caller already loaded),
-   * offered as quick-pick chips alongside the fixed starter set shown when there are none yet. */
+   * offered as quick-pick chips alongside the business type's own starter set shown when there are
+   * none yet. */
   existingGroups?: string[];
   /** Attached to the name field so a caller (see hooks/useInstantAdd.ts) can refocus it after a
    * successful add, ready for the next item with no extra tap. */
@@ -75,13 +85,39 @@ export function StockItemForm({
   value,
   onChange,
   errors,
+  businessType,
   showActive,
   existingGroups,
   nameFieldRef,
   minimal,
 }: Props) {
+  const cfg = sectorCopyFor(businessType);
+  const [showMoreUnits, setShowMoreUnits] = useState(
+    () => !!value.unit && !cfg.allowedUnits.includes(value.unit),
+  );
+  const [showMoreOptions, setShowMoreOptions] = useState(() => cfg.goesOffDefault || value.goesOff);
+
   const groupSuggestions =
-    existingGroups && existingGroups.length > 0 ? existingGroups : s3.groupSuggestions;
+    existingGroups && existingGroups.length > 0 ? existingGroups : cfg.stockGroupSuggestions;
+  const primaryUnits = UNITS.filter((unit) => cfg.allowedUnits.includes(unit.value));
+  const moreUnits = UNITS.filter((unit) => !cfg.allowedUnits.includes(unit.value));
+
+  function unitChip(unit: (typeof UNITS)[number]) {
+    const selected = value.unit === unit.value;
+    return (
+      <Pressable
+        key={unit.value}
+        accessibilityRole="radio"
+        accessibilityState={{ checked: selected }}
+        onPress={() => onChange({ unit: unit.value })}
+        style={[styles.unitChip, selected ? styles.unitChipSelected : null]}
+      >
+        <Small style={selected ? styles.unitChipTextSelected : styles.unitChipText}>
+          {unit.label}
+        </Small>
+      </Pressable>
+    );
+  }
 
   return (
     <View style={styles.field}>
@@ -90,31 +126,24 @@ export function StockItemForm({
         label={s3.nameLabel}
         value={value.name}
         onChangeText={(name) => onChange({ name })}
-        placeholder={s3.namePlaceholder}
+        placeholder={cfg.stockNamePlaceholder}
         maxLength={120}
         error={errors?.name}
       />
 
       <View style={styles.field}>
         <Small style={styles.unitLabel}>{s3.unitLabel}</Small>
-        <View style={styles.unitRow}>
-          {UNITS.map((unit) => {
-            const selected = value.unit === unit.value;
-            return (
-              <Pressable
-                key={unit.value}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selected }}
-                onPress={() => onChange({ unit: unit.value })}
-                style={[styles.unitChip, selected ? styles.unitChipSelected : null]}
-              >
-                <Small style={selected ? styles.unitChipTextSelected : styles.unitChipText}>
-                  {unit.label}
-                </Small>
-              </Pressable>
-            );
-          })}
-        </View>
+        <View style={styles.unitRow}>{primaryUnits.map(unitChip)}</View>
+        {moreUnits.length > 0 ? (
+          <>
+            {showMoreUnits ? <View style={styles.unitRow}>{moreUnits.map(unitChip)}</View> : null}
+            <Pressable accessibilityRole="button" onPress={() => setShowMoreUnits((s) => !s)}>
+              <Small style={styles.disclosureText}>
+                {showMoreUnits ? s3.fewerUnits : s3.moreUnits}
+              </Small>
+            </Pressable>
+          </>
+        ) : null}
         {errors?.unit ? <Small style={styles.errorText}>{errors.unit}</Small> : null}
       </View>
 
@@ -138,26 +167,57 @@ export function StockItemForm({
 
           <Toggle
             title={s3.sharedToggle}
+            helpText={cfg.sharedToggleHelp}
             value={value.shared}
             onChange={(shared) => onChange({ shared })}
           />
 
-          <Toggle
-            title={s3.goesOffToggle}
-            value={value.goesOff}
-            onChange={(goesOff) => onChange({ goesOff })}
-          />
-
-          {value.goesOff ? (
-            <TextField
-              label={s3.shelfLifeLabel}
-              value={value.shelfLifeDays}
-              onChangeText={(shelfLifeDays) => onChange({ shelfLifeDays })}
-              placeholder={s3.shelfLifePlaceholder}
-              keyboardType="number-pad"
-              error={errors?.shelfLifeDays}
-            />
-          ) : null}
+          {cfg.goesOffDefault ? (
+            <>
+              <Toggle
+                title={cfg.goesOffQuestion}
+                value={value.goesOff}
+                onChange={(goesOff) => onChange({ goesOff })}
+              />
+              {value.goesOff ? (
+                <TextField
+                  label={s3.shelfLifeLabel}
+                  value={value.shelfLifeDays}
+                  onChangeText={(shelfLifeDays) => onChange({ shelfLifeDays })}
+                  placeholder={s3.shelfLifePlaceholder}
+                  keyboardType="number-pad"
+                  error={errors?.shelfLifeDays}
+                />
+              ) : null}
+            </>
+          ) : (
+            <View style={styles.field}>
+              <Pressable accessibilityRole="button" onPress={() => setShowMoreOptions((s) => !s)}>
+                <Small style={styles.disclosureText}>
+                  {showMoreOptions ? s3.fewerOptions : s3.moreOptions}
+                </Small>
+              </Pressable>
+              {showMoreOptions ? (
+                <>
+                  <Toggle
+                    title={cfg.goesOffQuestion}
+                    value={value.goesOff}
+                    onChange={(goesOff) => onChange({ goesOff })}
+                  />
+                  {value.goesOff ? (
+                    <TextField
+                      label={s3.shelfLifeLabel}
+                      value={value.shelfLifeDays}
+                      onChangeText={(shelfLifeDays) => onChange({ shelfLifeDays })}
+                      placeholder={s3.shelfLifePlaceholder}
+                      keyboardType="number-pad"
+                      error={errors?.shelfLifeDays}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </View>
+          )}
         </>
       ) : null}
 
@@ -166,7 +226,7 @@ export function StockItemForm({
           label={s3.groupLabel}
           value={value.group}
           onChangeText={(group) => onChange({ group })}
-          placeholder={s3.groupPlaceholder}
+          placeholder={cfg.stockGroupPlaceholder}
           maxLength={40}
         />
         <View style={styles.unitRow}>
@@ -202,6 +262,12 @@ const styles = StyleSheet.create({
   },
   unitLabel: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  disclosureText: {
+    color: colours.primary,
+    fontFamily: fonts.bodyExtraBold,
+    minHeight: MIN_TOUCH_TARGET,
+    textAlignVertical: 'center',
   },
   unitRow: {
     flexDirection: 'row',

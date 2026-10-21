@@ -7,6 +7,7 @@ import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { DEFAULT_BUSINESS_SETTINGS } from '../../src/constants/businessSettings';
+import { targetCostHint } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 import {
@@ -194,7 +195,7 @@ export default function AlertRulesSettings() {
               value={targetCostPct}
               onChangeText={setTargetCostPct}
               keyboardType="decimal-pad"
-              hint={s6.targetCostExample}
+              hint={targetCostHint(business?.business_type ?? '')}
             />
             <TextField
               label={s6.wastageAlertLabel}

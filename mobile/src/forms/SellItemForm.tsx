@@ -2,12 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View, type TextInput } from 'react-native';
 
 import type { SellItem, StockItem } from '../api/stock';
+import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
 import { Banner, Body, Button, Icon, Small, TextField, Toggle } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 import { groupItems } from './groupItems';
-import { EMPTY_STOCK_ITEM_DRAFT, StockItemForm, type StockItemDraft } from './StockItemForm';
+import { emptyStockItemDraft, StockItemForm, type StockItemDraft } from './StockItemForm';
 
 const s3 = strings.setup.step3;
 const s4 = strings.setup.step4;
@@ -46,6 +47,8 @@ type Props = {
   value: SellItemDraft;
   onChange: (patch: Partial<SellItemDraft>) => void;
   errors?: { name?: string; price?: string; usesQty?: string };
+  /** Drives every sector-varying placeholder and wording — see sectorCopy.ts. */
+  businessType: string;
   /** Linkable (non-shared) stock items — null while still loading. */
   stockItems: StockItem[] | null;
   /** Saves one new stock item (the picker's "+ Add a new item") and returns it — the caller owns
@@ -70,6 +73,7 @@ export function SellItemForm({
   value,
   onChange,
   errors,
+  businessType,
   stockItems,
   onAddStockItem,
   showUsesQty,
@@ -77,9 +81,12 @@ export function SellItemForm({
   existingGroups,
   nameFieldRef,
 }: Props) {
+  const cfg = sectorCopyFor(businessType);
   const [search, setSearch] = useState('');
   const [addingStockItem, setAddingStockItem] = useState(false);
-  const [newItemDraft, setNewItemDraft] = useState<StockItemDraft>(EMPTY_STOCK_ITEM_DRAFT);
+  const [newItemDraft, setNewItemDraft] = useState<StockItemDraft>(() =>
+    emptyStockItemDraft(businessType),
+  );
   const [newItemFieldErrors, setNewItemFieldErrors] = useState<{ name?: string; unit?: string }>(
     {},
   );
@@ -108,7 +115,7 @@ export function SellItemForm({
       const created = await onAddStockItem(newItemDraft);
       onChange({ mainStockItemId: created.id });
       setAddingStockItem(false);
-      setNewItemDraft(EMPTY_STOCK_ITEM_DRAFT);
+      setNewItemDraft(emptyStockItemDraft(businessType));
       setNewItemFieldErrors({});
     } catch {
       setNewItemError(s4.errors.generic);
@@ -124,7 +131,7 @@ export function SellItemForm({
         label={s4.nameLabel}
         value={value.name}
         onChangeText={(name) => onChange({ name })}
-        placeholder={s4.namePlaceholder}
+        placeholder={cfg.sellNamePlaceholder}
         maxLength={120}
         error={errors?.name}
       />
@@ -139,8 +146,8 @@ export function SellItemForm({
       />
 
       <View style={styles.field}>
-        <Small style={styles.unitLabel}>{s4.mainStockItemLabel}</Small>
-        <Small style={styles.introText}>{s4.usesPickerIntro}</Small>
+        <Small style={styles.unitLabel}>{cfg.usesLabel}</Small>
+        <Small style={styles.introText}>{cfg.usesHelp}</Small>
 
         {stockItems === null ? (
           <ActivityIndicator color={colours.primary} />
@@ -222,6 +229,7 @@ export function SellItemForm({
                   value={newItemDraft}
                   onChange={(patch) => setNewItemDraft((current) => ({ ...current, ...patch }))}
                   errors={newItemFieldErrors}
+                  businessType={businessType}
                 />
                 <Button
                   label={s3.addItem}
@@ -252,7 +260,7 @@ export function SellItemForm({
           label={s4.groupLabel}
           value={value.group}
           onChangeText={(group) => onChange({ group })}
-          placeholder={s4.groupPlaceholder}
+          placeholder={cfg.sellGroupPlaceholder}
           maxLength={40}
         />
         {existingGroups && existingGroups.length > 0 ? (

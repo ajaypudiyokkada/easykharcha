@@ -11,7 +11,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
-- `stock/` — stock items, sell items; models.py (StockItem, SellItem — Step 19 added `group`, a free-text, blank-allowed, case-insensitively-canonicalised-per-business field), views.py (`_canonical_group`/`_group_resolver`), serializers.py, exceptions.py, urls.py
+- `stock/` — stock items, sell items; models.py (StockItem, SellItem — Step 19 added `group`, a free-text, blank-allowed, case-insensitively-canonicalised-per-business field; Step 22's `Unit` has 16 pure-label choices, no conversion between any of them), views.py (`_canonical_group`/`_group_resolver`), serializers.py, exceptions.py, urls.py
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
@@ -203,7 +203,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   with a city but no pincode shows a plain "Add pincode" prompt instead of forcing one.
   `constants/indiaStates.ts` has the State picker's options (kept in sync with `geo/states.py`).
 - `strings.ts` — all user-facing copy, one object per screen
-- `labels.ts` — copy that varies by business type
+- `sectorCopy.ts`/`sectorCopy.json` — Step 22: the one config, keyed by all 9 `BusinessType`s, for
+  every sector-varying string and unit list (stock/sell nouns, placeholders, group suggestions, the
+  "uses" picker label/help, shared/goes-off toggle wording, count/wastage help, `allowedUnits`/
+  `defaultUnit`, the Head-chef role label); `labels.ts` is now a thin wrapper over it
+- `labels.ts` — copy that varies by business type (delegates to sectorCopy.ts)
 - `format.ts` — ₹ and date/time formatting in the business's own timezone
 - `theme/tokens.ts` — colours, spacing, radii, type sizes (closed set)
 - `theme/brand.ts` — per-business brand colour + WCAG contrast
@@ -219,6 +223,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `npm run responsive:selftest` — proves the clipping check can actually fail
 - `npm run icons` → `scripts/generate_icons.mjs` — favicon/PWA icon set from `docs/images/ek_logo_icon.png`
 - `npm run pwa-check` → `scripts/pwa_check.mjs` — manifest/service-worker sanity check
+- `npm run check:sector-copy` → `scripts/check_sector_copy.py` — Step 22: fails if food wording
+  (dish, chef, kitchen, ingredient, ...) appears in a non-food business type's sectorCopy.json or
+  starter_packs.json, or a catalogue item's unit isn't in its type's `allowedUnits`
 - `npm run build:web` / `serve:web` → `scripts/patch_web_shell.mjs` / `serve_web.mjs` — static web export
 - `scripts/lib/landing_server.mjs` — throwaway static server for landing/index.html, used by flow/responsive
 

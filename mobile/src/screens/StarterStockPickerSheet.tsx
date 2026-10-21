@@ -98,6 +98,7 @@ export function StarterStockPickerSheet({
           existingItems={existingItems}
           value={value}
           onChange={setValue}
+          businessType={businessType}
         />
       </View>
       <Button

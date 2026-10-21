@@ -7,7 +7,7 @@ import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { groupItems } from '../../src/forms/groupItems';
-import { EMPTY_STOCK_ITEM_DRAFT, StockItemForm } from '../../src/forms/StockItemForm';
+import { emptyStockItemDraft, StockItemForm } from '../../src/forms/StockItemForm';
 import { validateStockItemDraft } from '../../src/forms/validateStockItem';
 import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { StarterStockPickerSheet } from '../../src/screens/StarterStockPickerSheet';
@@ -65,10 +65,10 @@ export default function StockItemsSettings() {
     load();
   }, [load]);
 
-  const instant = useInstantAdd<StockItem, typeof EMPTY_STOCK_ITEM_DRAFT>({
+  const instant = useInstantAdd<StockItem, ReturnType<typeof emptyStockItemDraft>>({
     items: items ?? [],
     setItems: (updater) => setItems((current) => updater(current ?? [])),
-    emptyDraft: EMPTY_STOCK_ITEM_DRAFT,
+    emptyDraft: emptyStockItemDraft(business?.business_type ?? ''),
     toOptimistic: (draft) => ({
       id: 0,
       name: draft.name.trim(),
@@ -177,6 +177,7 @@ export default function StockItemsSettings() {
             value={instant.draft}
             onChange={instant.setDraft}
             errors={addFieldErrors}
+            businessType={business?.business_type ?? ''}
             existingGroups={existingGroups}
             nameFieldRef={instant.nameFieldRef}
           />

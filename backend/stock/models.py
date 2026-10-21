@@ -6,12 +6,27 @@ from businesses.models import Business
 
 
 class Unit(models.TextChoices):
+    """No conversion between these exists anywhere (not even g<->kg) — a StockItem is locked to one
+    unit for its whole life (see StockItemDetailView's unit-change refusal once purchased/counted),
+    so every quantity ever recorded against it (purchases, counts, wastage, uses_qty) is already in
+    that same unit. Adding a label here is purely cosmetic and needs no gap-maths change."""
+
     KG = "kg", "kg"
     G = "g", "g"
     L = "L", "L"
     ML = "ml", "ml"
     PIECE = "piece", "piece"
     PACK = "pack", "pack"
+    DOZEN = "dozen", "dozen"
+    TONNE = "tonne", "tonne"
+    M = "m", "m"
+    SHEET = "sheet", "sheet"
+    ROLL = "roll", "roll"
+    SET = "set", "set"
+    BOX = "box", "box"
+    BAG = "bag", "bag"
+    TRAY = "tray", "tray"
+    BOTTLE = "bottle", "bottle"
 
 
 class StockItem(models.Model):

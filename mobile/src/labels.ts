@@ -1,31 +1,16 @@
 /**
  * Wording that changes by business type — kept separate from strings.ts because it's a function of
- * the business, not fixed copy. Used from step 4 onward; kept ready here for later screens too.
+ * the business, not fixed copy. Thin wrappers over sectorCopy.ts, kept so existing call sites
+ * (roleLabel, roleDescription) don't need to change.
  */
+import { sectorCopyFor } from './sectorCopy';
+
 export function sellItemLabel(businessType: string): string {
-  switch (businessType) {
-    case 'restaurant_cafe':
-      return 'dish';
-    case 'bakery_sweets':
-      return 'product';
-    case 'homestay':
-      return 'service';
-    default:
-      return 'item you sell';
-  }
+  return sectorCopyFor(businessType).sellNoun;
 }
 
-// Business types where "runs the kitchen" is a literal, meaningful job — everywhere else, the same
-// role is called "Team lead" instead.
-const KITCHEN_BUSINESS_TYPES = new Set([
-  'restaurant_cafe',
-  'cloud_kitchen',
-  'bakery_sweets',
-  'tiffin_catering',
-]);
-
 export function headChefLabel(businessType: string): string {
-  return KITCHEN_BUSINESS_TYPES.has(businessType) ? 'Head chef' : 'Team lead';
+  return sectorCopyFor(businessType).roleLabels.headChef;
 }
 
 export type TeamRole = 'owner' | 'manager' | 'head_chef' | 'helper';

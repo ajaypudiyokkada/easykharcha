@@ -3,9 +3,10 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "check": "npm run check:backend && npm run check:mobile",
+    "check": "npm run check:backend && npm run check:mobile && npm run check:sector-copy",
     "check:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_backend.ps1",
     "check:mobile": "npm --prefix mobile run check",
+    "check:sector-copy": "python scripts/check_sector_copy.py",
     "smoke": "python scripts/smoke.py",
     "flow": "node scripts/flow.mjs",
     "responsive": "node scripts/responsive_check.mjs",

@@ -224,6 +224,7 @@ export default function SetupStepThree() {
           existingItems={allItems}
           value={pickerValue}
           onChange={setPickerValue}
+          businessType={business.business_type}
         />
       </View>
 

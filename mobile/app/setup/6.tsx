@@ -7,6 +7,7 @@ import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { DEFAULT_BUSINESS_SETTINGS } from '../../src/constants/businessSettings';
+import { targetCostHint } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import { BottomActionBar, Body, Button, Icon, Screen, StepHeader, TextField } from '../../src/ui';
 import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
@@ -204,7 +205,7 @@ export default function SetupStepSix() {
         value={targetCostPct}
         onChangeText={setTargetCostPct}
         keyboardType="decimal-pad"
-        hint={s6.targetCostExample}
+        hint={targetCostHint(business.business_type)}
       />
       <TextField
         label={s6.wastageAlertLabel}
