@@ -9,7 +9,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Access, AccessRole), views.py (`BusinessUpdateView` — Step 23: a `business_type` change with existing items and no `items_action` raises `ItemsDecisionNeeded`), sector_change.py (Step 23's `remove_items_for_sector_change`, keeping items with history or still used by a sell item), team.py, business_settings.py, permissions.py (the role→permission table — Step 23a: `ALL_PERMISSIONS` registry, Owner computed as all of it), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update; `BusinessUpdateSerializer`'s `items_action`), urls.py
 - `geo/` — Step 21b: India pincode lookup; models.py (Pincode — pincode/area/district/state/office_type, indexed on pincode), states.py (`INDIA_STATES`), management/commands/load_pincodes.py (idempotent CSV load, `--if-empty` for entrypoint.sh), views.py, exceptions.py (PincodeNotFound), urls.py
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
-- `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
+- `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount —
+  Step 23b's `missing_opening`, CountLine), views.py (`CountsTodayStatusView`'s `counts/today/`;
+  `CountListCreateView.post` raises `OpeningRequired` for a closing with no opening unless the
+  opening was missed), business_day.py (`business_date_for` — Step 23b's `day_starts_hour` shift,
+  counts/alerts' `opening_late`/`closing_late` only, not sales/wastage/reports/purchases), today_status.py
+  (`status_for`'s locked/due/late/done + `next_action`, shared with `today/`), serializers.py,
+  gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants,
+  `CLOSING_GRACE_HOURS`), exceptions.py (`OpeningRequired`), urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
 - `stock/` — stock items, dishes (SellItem); models.py (StockItem, SellItem — Step 19 added `group`;
   Step 22's `Unit` has 16 pure-label choices, no backend conversion between any of them; Step 22a
@@ -24,7 +31,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props — none built yet.
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
-- `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
+- `alerts/` — Step 15: alerts computed on read (opening_late/closing_late — Step 23b's split of the
+  old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
+  models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
@@ -72,6 +81,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `GET/POST businesses/<id>/purchases/` — PurchaseListCreateView — list + today/7-day summary, record
 - `GET/PATCH/DELETE businesses/<id>/purchases/<pid>/` — PurchaseDetailView — soft-delete on DELETE
 - `GET businesses/<id>/counts/form/?type=` — CountFormView — blind form: id/name/unit only
+- `GET businesses/<id>/counts/today/` — CountsTodayStatusView — Step 23b: opening/closing
+  locked/due/late/done + `next_action`, `counts.create` or `counts.review`, no stock quantities
 - `GET/POST businesses/<id>/counts/` — CountListCreateView — review list (Owner/Manager get a
   `flagged_gaps` count per row), submit a count
 - `GET businesses/<id>/counts/<count_id>/` — CountDetailView — gap-flagged items first, then
@@ -79,7 +90,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   `gap_qty`, `gap_value`, `gap_status`, `gap_reason` (Step 14) — never sent to Head chef/Helper,
   who can't reach this endpoint at all (no `counts.review`)
 - `POST businesses/<id>/counts/remind/` — CountRemindView — Owner-only, returns a wa.me link
-- `GET businesses/<id>/today/` — TodayView — opening/closing state, deadlines, wastage count, `alerts_count` (Owner/Manager only)
+- `GET businesses/<id>/today/` — TodayView — same opening/closing status as `counts/today/` (shared
+  `today_status.status_for`), plus wastage count, `alerts_count` (Owner/Manager only)
 - `GET/POST businesses/<id>/wastage/` — WastageListCreateView — role-scoped values
 - `DELETE businesses/<id>/wastage/<entry_id>/` — WastageDetailView — Owner-only
 - `GET/POST businesses/<id>/sales/` — SaleListCreateView — list (newest first, paginated, date-range
@@ -259,6 +271,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 | Business setting | Default | Range |
 |---|---|---|
+| day_starts_hour (Step 23b: business date = date of count time minus this) | 5 | 0–12 |
 | count_deadline_hour (opening due) | 11 | 0–23 |
 | closing_count_hour | 20 | 0–23 |
 | target_cost_pct | 30 | 1–100 |

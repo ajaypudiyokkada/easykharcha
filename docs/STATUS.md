@@ -208,6 +208,15 @@ not built yet.
   Head-chef-only, now also shows for the Owner. Manager/Head chef/Helper unchanged.
   `scripts/smoke.py`'s new `check_permission_table` fails if the Owner ever drifts from
   `ALL_PERMISSIONS`, and prints the role table.
+- **Step 23b — Daily workflow: opening count, then closing count.** New `day_starts_hour` setting
+  (default 5): a count's business date is now the local date of (count time minus this), computed
+  once in `counts/business_day.py`, used only by counts and the `opening_late`/`closing_late`
+  alerts (Step 23b's split of `count_late`) — sales/wastage/reports/purchases keep the plain
+  calendar date. A closing needs an opening first unless it was missed (deadline passed, or the
+  closing window already started), else 409 `opening_required`; a missed-opening closing saves with
+  `missing_opening: true`. New `GET counts/today/` (`today_status.status_for`, shared with `today/`)
+  exposes locked/due/late/done + `next_action`, driving a real two-row Today card on Home and
+  routing `/count` straight to whichever count is next.
 
 ## Permission table
 
