@@ -55,6 +55,7 @@ const STEP19_SCREEN_DIR = 'docs/screens/step19';
 const STEP20_SCREEN_DIR = 'docs/screens/step20';
 const STEP21B_SCREEN_DIR = 'docs/screens/step21b';
 const STEP21D_SCREEN_DIR = 'docs/screens/step21d';
+const STEP22A_SCREEN_DIR = 'docs/screens/step22a';
 
 function findChrome() {
   const candidates = [
@@ -414,9 +415,6 @@ async function checkOwnerOpeningCount(page) {
   await typeInto(page, 'Rice quantity', '5');
   await typeInto(page, 'Cooking oil quantity', '5');
   await typeInto(page, 'Fresh Paneer quantity', '5');
-  // Step 19: Greek Yoghurt was added via the sell-item form's "+ Add a new item" picker earlier —
-  // it's a real active stock item now too, so it needs counting like any other.
-  await typeInto(page, 'Greek Yoghurt quantity', '5');
   await clickButton(page, 'Save count');
   await waitForText(page, 'Count saved. Thank you.');
   console.log('OK — the Owner submits the opening stock count.');
@@ -481,7 +479,6 @@ async function checkHelperTodayFlow(page, helperMobile, helperPin) {
   await typeInto(page, 'Rice quantity', '50');
   await typeInto(page, 'Cooking oil quantity', '5');
   await typeInto(page, 'Fresh Paneer quantity', '5');
-  await typeInto(page, 'Greek Yoghurt quantity', '5');
   await clickButton(page, 'Save count');
   await waitForText(page, 'That looks very different from usual.');
   await waitForText(page, 'Is 50 kg right?');
@@ -679,10 +676,11 @@ async function captureStep10Screens(page) {
   console.log(`OK — saved Step 10 screenshots at 390px and 1280px to ${STEP10_SCREEN_DIR}/.`);
 }
 
-// Step 12: Owner edits a sell item's "How much does one use?", then sees the plain-language
-// message when trying to deactivate the stock item that sell item still depends on. Reuses "Fresh
-// Paneer" (stock) and "Paneer Tikka" (sell item linked to it) from User 1's wizard data above —
-// the page is already signed in as that Owner when this runs.
+// Step 12 settings + Step 22a dish recipes: Owner creates "Paneer Tikka" via "Add a dish" (portion,
+// 3 ingredients incl. two added inline), edits it, then sees the plain-language message when trying
+// to deactivate "Fresh Paneer" (stock) while that dish still uses it. Reuses "Mango Lassi" (a
+// no-ingredients dish from the wizard, Step 4) to prove the dish list's "Needs ingredients" badge.
+// The page is already signed in as the Owner from User 1's wizard data when this runs.
 async function checkSettingsFlow(page) {
   await page.goto(`${APP_URL}/settings`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Settings');
@@ -690,16 +688,79 @@ async function checkSettingsFlow(page) {
 
   await clickButton(page, 'What you sell');
   await waitForPath(page, '/settings/sell');
-  await waitForText(page, 'Paneer Tikka');
-
-  await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
-  await waitForText(page, 'Edit item sold');
-  await typeInto(page, 'How much does one use? (kg)', '0.3');
-  await clickButton(page, 'Save item');
-  await waitForText(page, 'Item saved');
+  await waitForText(page, 'Mango Lassi');
+  await waitForText(page, 'Needs ingredients');
   console.log(
-    'OK — Settings -> What you sell -> edited an item, set "How much does one use?", saved.',
+    'OK — Settings -> What you sell lists the wizard-created dishes, badged "Needs ingredients".',
   );
+
+  await mkdir(STEP22A_SCREEN_DIR, { recursive: true });
+  await page.screenshot({ path: `${STEP22A_SCREEN_DIR}/dish-list-badges-390.png` });
+
+  // === Step 22a: add a dish with a portion and 3 ingredients — one picked from the grouped list,
+  // two added inline from inside the picker itself — then edit it ===
+  // This business is "Cloud kitchen" — sectorCopy.json's sellNoun calls it "menu item", so that's
+  // what the "Add {label}" button reads (the sheet's own title is the fixed "Add a dish" either way).
+  await clickButton(page, 'Add menu item');
+  await waitForText(page, 'Add a dish');
+  await waitForText(page, '+ Add ingredient');
+  // The sheet animates in — a short settle avoids catching it mid-fade, same as other sheet shots.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP22A_SCREEN_DIR}/dish-form-empty-ingredients-390.png` });
+  await page.setViewport({ width: 1280, height: 1000 });
+  await page.screenshot({ path: `${STEP22A_SCREEN_DIR}/dish-form-empty-ingredients-1280.png` });
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log('OK — "Add a dish" opens the dish form with its empty-ingredients state.');
+
+  await typeInto(page, 'Name', 'Paneer Tikka', { last: true });
+  await typeInto(page, 'Selling price', '180', { last: true });
+  await typeInto(page, 'Portion (optional)', '1 plate', { last: true });
+
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, 'Fresh Paneer');
+  await typeInto(page, 'Amount', '0.300');
+  console.log('OK — picked Fresh Paneer from the grouped ingredient list.');
+
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, '+ Add a new item');
+  await waitForText(page, 'Add a stock item');
+  await typeInto(page, 'Name', 'Greek Yoghurt', { last: true });
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'kg', { last: true }));
+  await clickButton(page, 'Add item');
+  await waitForText(page, 'Greek Yoghurt');
+  await typeInto(page, 'Amount', '0.100', { last: true, minCount: 2 });
+  console.log('OK — added a second ingredient inline, from inside the picker itself.');
+
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, '+ Add a new item');
+  await waitForText(page, 'Add a stock item');
+  await typeInto(page, 'Name', 'Mint Chutney', { last: true });
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'kg', { last: true }));
+  await clickButton(page, 'Add item');
+  await waitForText(page, 'Mint Chutney');
+  await typeInto(page, 'Amount', '0.050', { last: true, minCount: 3 });
+  console.log('OK — added a third ingredient inline too, proving the escape hatch isn\'t one-shot.');
+
+  await page.screenshot({ path: `${STEP22A_SCREEN_DIR}/dish-form-390.png` });
+  await page.setViewport({ width: 1280, height: 1600 });
+  await page.screenshot({ path: `${STEP22A_SCREEN_DIR}/dish-form-1280.png` });
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — saved Step 22a screenshots to ${STEP22A_SCREEN_DIR}/.`);
+
+  await clickButton(page, 'Save dish');
+  await waitForText(page, 'Dish added');
+  console.log('OK — saved the new dish with a portion and 3 ingredients; it appears at once.');
+
+  // Edit it: drop one ingredient, keep the recipe confirmed with the remaining two.
+  await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
+  await waitForText(page, 'Edit dish');
+  await (await findVisible(page, '[aria-label="Remove Mint Chutney"]')).click();
+  await clickButton(page, 'Save dish');
+  await waitForText(page, 'Dish saved');
+  console.log('OK — edited the dish, removing one ingredient; it saves with the remaining two.');
 
   await page.goto(`${APP_URL}/settings/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'What you buy');
@@ -709,7 +770,7 @@ async function checkSettingsFlow(page) {
   await clickButton(page, 'Save item');
   await waitForText(page, "Can't deactivate");
   console.log(
-    'OK — What you buy -> trying to deactivate a stock item a sell item still uses shows the plain-language message.',
+    'OK — What you buy -> trying to deactivate a stock item a dish still uses shows the plain-language message.',
   );
 }
 
@@ -830,11 +891,11 @@ async function captureStep12Screens(page, ownerMobile, ownerPassword) {
   console.log(`OK — saved Step 12 screenshots at 390px to ${STEP12_SCREEN_DIR}/.`);
 }
 
-// Step 14: Owner records sales for two already-linked items (Paneer Tikka, which Step 12's
-// checkSettingsFlow gave a uses_qty of 0.3 on Fresh Paneer; Veg biryani, which uses nothing) ->
-// the list and summary update -> the closing count's gap for Fresh Paneer is flagged (nothing sold
-// explains all of it) while Rice's is not_comparable (nothing sells it at all) -> required
-// screenshots -> deletes one sale via the confirmation dialog.
+// Step 14: Owner records sales for two dishes (Paneer Tikka, whose confirmed recipe checkSettingsFlow
+// gave 0.300 kg of Fresh Paneer; Veg biryani, a no-ingredients dish) -> the list and summary update ->
+// the closing count's gap for Fresh Paneer is flagged (nothing sold explains all of it) while Rice's
+// is not_comparable (nothing sells it at all) -> required screenshots -> deletes one sale via the
+// confirmation dialog.
 async function checkSalesFlow(page) {
   await page.goto(`${APP_URL}/sales`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Sales');
@@ -1208,8 +1269,16 @@ async function checkSectorChangeFlow(page) {
   await waitForText(page, 'Raw material');
   console.log('OK — "Remove and start fresh" lands straight on the manufacturing starter list.');
 
+  // Filtered to elements with actual layout, same reasoning as findVisible() above — expo-router
+  // keeps the previous /setup/3 screen's DOM mounted (hidden, zero-size) rather than unmounting it,
+  // so an unfiltered textContent search would catch that stale copy of "Chicken" even once the
+  // current screen has correctly dropped it.
   const stillHasChicken = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('*')).some((el) => el.textContent?.trim() === 'Chicken'),
+    Array.from(document.querySelectorAll('*')).some((el) => {
+      if (el.textContent?.trim() !== 'Chicken') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }),
   );
   if (stillHasChicken) {
     fail('sector change flow: Chicken (the removed restaurant item) is still showing on /setup/3');
@@ -1317,11 +1386,13 @@ async function main() {
     await page.goto(`${APP_URL}/setup/4`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await waitForPath(page, '/setup/4');
 
+    // Step 22a: the wizard's quick "add your own" dish form is name/price/portion/group only, no
+    // ingredient picker any more — attaching ingredients is the manual dish form's job instead, see
+    // checkSettingsFlow below (Paneer Tikka is created there, with its full recipe).
     await mkdir(STEP19_SCREEN_DIR, { recursive: true });
     await waitForText(page, 'Add your own');
-    await waitForText(page, "Pick from the items you've added. Missing one? Add it here.");
-    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/sell-item-picker-390.png` });
-    console.log('OK — Step 19: the "uses" picker explains itself and lists what was already added.');
+    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/add-your-own-dish-390.png` });
+    console.log('OK — Step 22a: the wizard\'s quick dish form has no ingredient picker.');
 
     await clickAndSettle(await findVisible(page, '[aria-label="Veg biryani"]'));
     // minCount: 2 — the starter item's inline price box only mounts once the tick above is
@@ -1330,29 +1401,12 @@ async function main() {
     await typeInto(page, 'Selling price', '120', { minCount: 2 });
     console.log('OK — ticked one starter sell item and set a price.');
 
-    await typeInto(page, 'Name', 'Paneer Tikka', { last: true });
-    await typeInto(page, 'Selling price', '180', { last: true });
-
-    // Step 19: instead of picking an existing stock item, add a brand new one from inside the
-    // picker itself — no leaving the sell-item form, no lost typing.
-    await clickButton(page, '+ Add a new item');
-    await waitForText(page, 'Add a stock item');
-    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/add-from-picker-390.png` });
-    await typeInto(page, 'Name', 'Greek Yoghurt', { last: true });
-    await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
-    // The inline panel's own "Add item" button is the first one in the DOM — the outer sell-item
-    // form's "Add item" (its own Save/submit) comes after it, lower on the page.
+    await typeInto(page, 'Name', 'Mango Lassi', { last: true });
+    await typeInto(page, 'Selling price', '30', { last: true });
+    await typeInto(page, 'Portion (optional)', '1 glass', { last: true });
     await clickButton(page, 'Add item');
-    await waitForText(page, 'Greek Yoghurt');
-    console.log('OK — Step 19: "+ Add a new item" opens an inline stock-item form and selects the result.');
-
-    // Re-pick Fresh Paneer as this sell item's actual main stock item — Greek Yoghurt above was
-    // only to prove the inline add-and-select works, not the link this item is meant to carry (a
-    // later scenario deactivates Fresh Paneer and expects it to still be in use).
-    await clickAndSettle(await findVisibleByText(page, 'radio', 'Fresh Paneer'));
-    await clickButton(page, 'Add item');
-    await waitForText(page, 'Paneer Tikka');
-    console.log('OK — added one own sell item linked to a stock item added from the picker itself.');
+    await waitForText(page, 'Mango Lassi');
+    console.log('OK — added a plain dish (name, price, portion) with no ingredients from the wizard.');
 
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/5');
@@ -1373,7 +1427,9 @@ async function main() {
     const headChefPin = '8417';
     await typeInto(page, 'Name', 'Chef Rahul', { last: true });
     await typeInto(page, 'Mobile number', headChefMobile, { last: true });
-    await clickAndSettle(await findVisibleByText(page, 'radio', 'Head chef'));
+    // This business is "Cloud kitchen" — sectorCopy.json's roleLabels shows the Head chef role as
+    // "Head cook" there, not the literal role name (see mobile/src/labels.ts's roleLabel()).
+    await clickAndSettle(await findVisibleByText(page, 'radio', 'Head cook'));
     await typeInto(page, 'PIN', headChefPin, { last: true });
     await clickButton(page, 'Add person');
     await waitForText(page, 'Chef Rahul');
@@ -1469,15 +1525,6 @@ async function main() {
     await waitForPath(page, '/setup/3');
 
     await skipStep(page, 3, '/setup/4');
-
-    // Step 19: no stock items exist at all (step 3 was skipped) — the "uses" picker shows its
-    // empty state (the same "+ Add a new item" affordance) instead of an empty list.
-    await page.setViewport({ width: 390, height: 1400 });
-    await waitForText(page, 'Add stock items first to link one. You can do this later.');
-    await waitForText(page, '+ Add a new item');
-    await page.screenshot({ path: `${STEP19_SCREEN_DIR}/sell-item-picker-empty-390.png` });
-    console.log('OK — Step 19: with no stock items yet, the picker shows its empty state.');
-
     await skipStep(page, 4, '/setup/5');
     await skipStep(page, 5, '/setup/6');
     await skipStep(page, 6, '/setup/done');

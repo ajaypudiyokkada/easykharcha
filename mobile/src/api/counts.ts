@@ -31,14 +31,16 @@ export type CountListEntry = StockCount & {
 
 export type GapStatus = 'ok' | 'not_comparable';
 
-export type GapReasonCode = 'no_previous_count' | 'not_sold' | 'uses_not_set' | 'sales_missing';
+export type GapReasonCode =
+  'no_previous_count' | 'not_sold' | 'recipe_not_confirmed' | 'sales_missing';
 
-/** Why a line's gap can't be computed — `count` for uses_not_set (how many sell items on this item
- * still need "how much does one use?" set), `dates` for sales_missing (the exact business dates in
- * the window with no sale recorded at all). */
+/** Why a line's gap can't be computed — `count`/`sell_items` for recipe_not_confirmed (how many,
+ * and which, dishes on this item still need their recipe confirmed), `dates` for sales_missing (the
+ * exact business dates in the window with no sale recorded at all). */
 export type GapReason = {
   code: GapReasonCode;
   count?: number;
+  sell_items?: { id: number; name: string }[];
   dates?: string[];
 };
 

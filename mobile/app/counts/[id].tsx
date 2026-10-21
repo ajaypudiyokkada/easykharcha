@@ -35,6 +35,9 @@ function gapReasonText(line: CountDetailLine, timezone: string): string {
     const dates = (reason.dates ?? []).map((d) => formatDate(d, timezone));
     return s.gapReason.sales_missing(dates);
   }
+  if (reason.code === 'recipe_not_confirmed') {
+    return s.gapReason.recipe_not_confirmed(reason.sell_items ?? []);
+  }
   return s.gapReason[reason.code] as string;
 }
 
@@ -184,17 +187,27 @@ function LineCard({
           </View>
         </>
       ) : line.gap_status === 'not_comparable' && line.gap_reason ? (
-        line.gap_reason.code === 'uses_not_set' || line.gap_reason.code === 'sales_missing' ? (
+        line.gap_reason.code === 'recipe_not_confirmed' ||
+        line.gap_reason.code === 'sales_missing' ? (
           <Pressable
             accessibilityRole="button"
             style={styles.gapReasonRow}
-            onPress={() =>
-              router.push(line.gap_reason?.code === 'uses_not_set' ? '/settings/sell' : '/sales')
-            }
+            onPress={() => {
+              if (line.gap_reason?.code === 'recipe_not_confirmed') {
+                const sellItems = line.gap_reason.sell_items ?? [];
+                router.push(
+                  sellItems.length === 1
+                    ? `/settings/sell?edit=${sellItems[0].id}`
+                    : '/settings/sell',
+                );
+              } else {
+                router.push('/sales');
+              }
+            }}
           >
             <Small style={styles.gapReasonText}>{gapReasonText(line, timezone)}</Small>
             <Small style={styles.gapReasonLink}>
-              {line.gap_reason.code === 'uses_not_set'
+              {line.gap_reason.code === 'recipe_not_confirmed'
                 ? s.gapReasonLinkSell
                 : s.gapReasonLinkSales(
                     line.gap_reason.dates?.[0]

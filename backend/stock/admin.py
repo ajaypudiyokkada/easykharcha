@@ -12,6 +12,6 @@ class StockItemAdmin(admin.ModelAdmin):
 
 @admin.register(SellItem)
 class SellItemAdmin(admin.ModelAdmin):
-    list_display = ("name", "business", "selling_price", "main_stock_item", "active")
-    list_filter = ("active",)
+    list_display = ("name", "business", "selling_price", "portion_label", "recipe_status", "active")
+    list_filter = ("active", "recipe_status")
     search_fields = ("name", "business__name")

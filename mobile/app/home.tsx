@@ -238,7 +238,7 @@ function OwnerHome() {
     null,
   );
   const [salesSummary, setSalesSummary] = useState<SaleListResponse['summary'] | null>(null);
-  const [needsUsesQtySetup, setNeedsUsesQtySetup] = useState(false);
+  const [needsIngredientsCount, setNeedsIngredientsCount] = useState(0);
   const [today, setToday] = useState<TodayStatus | null>(null);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [purchaseSheetVisible, setPurchaseSheetVisible] = useState(false);
@@ -274,8 +274,8 @@ function OwnerHome() {
     if (isOwner) {
       authedFetch<SellItem[]>(`/businesses/${business.id}/sell-items/`)
         .then((items) =>
-          setNeedsUsesQtySetup(
-            items.some((item) => item.main_stock_item !== null && item.uses_qty === null),
+          setNeedsIngredientsCount(
+            items.filter((item) => item.recipe_status !== 'confirmed').length,
           ),
         )
         .catch(() => {});
@@ -431,18 +431,20 @@ function OwnerHome() {
           </View>
         ) : null}
 
-        {isOwner && needsUsesQtySetup ? (
+        {isOwner && needsIngredientsCount > 0 ? (
           <Pressable
             accessibilityRole="button"
             style={styles.setupCard}
-            onPress={() => router.push('/settings/sell')}
+            onPress={() => router.push('/settings/sell?filter=needs_ingredients')}
           >
             <View style={styles.setupIcon}>
               <Icon name="info" size={20} colour={colours.card} />
             </View>
             <View style={styles.entryMain}>
-              <Body style={styles.attentionTitle}>{s.setUsesQtyTitle}</Body>
-              <Small style={styles.entryMeta}>{s.setUsesQtyBody}</Small>
+              <Body style={styles.attentionTitle}>
+                {s.needsIngredientsTitle(needsIngredientsCount)}
+              </Body>
+              <Small style={styles.entryMeta}>{s.needsIngredientsBody}</Small>
             </View>
             <Icon name="chevronRight" size={20} colour={colours.muted} />
           </Pressable>

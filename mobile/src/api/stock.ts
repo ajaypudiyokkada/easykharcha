@@ -26,14 +26,29 @@ export type PricePoint = {
   unit_price: string;
 };
 
+export type RecipeStatus = 'none' | 'unconfirmed' | 'confirmed';
+
+export type SellItemIngredient = {
+  id: number;
+  stock_item: number;
+  stock_item_name: string;
+  /** The stock item's own unit — the quantity below is always already in it. */
+  unit: string;
+  /** Per ONE portion. */
+  quantity: string;
+};
+
 export type SellItem = {
   id: number;
   name: string;
   selling_price: string;
-  main_stock_item: number | null;
-  /** How much of main_stock_item one unit sold uses, in that item's own unit — null unless set, and
-   * only meaningful alongside main_stock_item. */
-  uses_qty: string | null;
+  /** Short free text, e.g. "1 plate" or "6 pieces" — purely descriptive. */
+  portion_label: string;
+  /** `none` (no ingredients yet), `unconfirmed` (a future AI/scan estimate awaiting review — nothing
+   * creates this yet) or `confirmed` (the manual dish form saved it with >=1 ingredient). Gap maths,
+   * Count review, Alerts and Reports only trust `confirmed` dishes. */
+  recipe_status: RecipeStatus;
+  ingredients: SellItemIngredient[];
   /** Its own namespace, not shared with stock-item groups. */
   group: string;
   active: boolean;

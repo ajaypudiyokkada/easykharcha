@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -8,7 +8,6 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { groupItems } from '../../src/forms/groupItems';
 import { EMPTY_SELL_ITEM_DRAFT, SellItemForm } from '../../src/forms/SellItemForm';
-import type { StockItemDraft } from '../../src/forms/StockItemForm';
 import { validateSellItemDraft } from '../../src/forms/validateSellItem';
 import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { sellItemLabel } from '../../src/labels';
@@ -35,23 +34,30 @@ import {
 import { HOME_CONTENT_WIDTH } from '../../src/ui/constants';
 
 const ss = strings.settings.sell;
+const sd = strings.dishForm;
 
 export default function SellItemsSettings() {
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
+  const params = useLocalSearchParams<{ filter?: string; edit?: string }>();
 
   const [items, setItems] = useState<SellItem[] | null>(null);
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [search, setSearch] = useState('');
+  const [needsIngredientsOnly, setNeedsIngredientsOnly] = useState(
+    params.filter === 'needs_ingredients',
+  );
   const [addFieldErrors, setAddFieldErrors] = useState<ReturnType<typeof validateSellItemDraft>>(
     {},
   );
   const [addFormError, setAddFormError] = useState<string | null>(null);
+  const [sheetVisible, setSheetVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<SellItem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [openedEditFromParam, setOpenedEditFromParam] = useState(false);
 
   const load = useCallback(() => {
     if (!business) return;
@@ -70,6 +76,18 @@ export default function SellItemsSettings() {
     load();
   }, [load]);
 
+  // A count-review gap reason or the Home "needs ingredients" nudge can deep-link straight to one
+  // dish's edit sheet, or pre-filter the list — only once items have actually loaded.
+  useEffect(() => {
+    if (openedEditFromParam || !params.edit || !items) return;
+    const target = items.find((item) => item.id === Number(params.edit));
+    if (target) {
+      setEditingItem(target);
+      setSheetVisible(true);
+    }
+    setOpenedEditFromParam(true);
+  }, [params.edit, items, openedEditFromParam]);
+
   const instant = useInstantAdd<SellItem, typeof EMPTY_SELL_ITEM_DRAFT>({
     items: items ?? [],
     setItems: (updater) => setItems((current) => updater(current ?? [])),
@@ -78,8 +96,9 @@ export default function SellItemsSettings() {
       id: 0,
       name: draft.name.trim(),
       selling_price: draft.sellingPrice.trim(),
-      main_stock_item: draft.mainStockItemId,
-      uses_qty: draft.usesQty.trim() || null,
+      portion_label: draft.portionLabel.trim(),
+      recipe_status: 'none',
+      ingredients: [],
       group: draft.group.trim(),
       active: true,
       created_at: new Date().toISOString(),
@@ -94,7 +113,7 @@ export default function SellItemsSettings() {
               {
                 name: draft.name.trim(),
                 selling_price: draft.sellingPrice.trim(),
-                main_stock_item: draft.mainStockItemId ?? undefined,
+                portion_label: draft.portionLabel.trim() || undefined,
                 group: draft.group.trim() || undefined,
               },
             ],
@@ -129,35 +148,6 @@ export default function SellItemsSettings() {
   const all = items ?? [];
   const existingGroups = [...new Set(all.map((item) => item.group).filter(Boolean))];
 
-  async function handleAddStockItem(stockDraft: StockItemDraft): Promise<StockItem> {
-    const results = await authedFetch<StockItem[]>(
-      `/businesses/${business!.id}/stock-items/bulk/`,
-      {
-        method: 'POST',
-        body: {
-          items: [
-            {
-              name: stockDraft.name.trim(),
-              unit: stockDraft.unit,
-              usual_price: stockDraft.usualPrice.trim() || undefined,
-              supplier: stockDraft.supplier.trim() || undefined,
-              shared: stockDraft.shared,
-              goes_off: stockDraft.goesOff,
-              shelf_life_days:
-                stockDraft.goesOff && stockDraft.shelfLifeDays.trim()
-                  ? Number(stockDraft.shelfLifeDays)
-                  : undefined,
-              group: stockDraft.group.trim() || undefined,
-            },
-          ],
-        },
-      },
-    );
-    const created = results[0];
-    setStockItems((current) => [created, ...(current ?? [])]);
-    return created;
-  }
-
   async function handleAdd() {
     setAddFormError(null);
     const errors = validateSellItemDraft(instant.draft, all);
@@ -180,9 +170,12 @@ export default function SellItemsSettings() {
     }
   }
 
-  const filtered = all.filter((item) =>
+  const matchingSearch = all.filter((item) =>
     item.name.toLowerCase().includes(search.trim().toLowerCase()),
   );
+  const filtered = needsIngredientsOnly
+    ? matchingSearch.filter((item) => item.recipe_status !== 'confirmed')
+    : matchingSearch;
   const activeItems = groupItems(filtered.filter((item) => item.active));
   const inactiveItems = filtered.filter((item) => !item.active);
 
@@ -191,6 +184,15 @@ export default function SellItemsSettings() {
       <Screen maxWidth={HOME_CONTENT_WIDTH}>
         <Heading level={1}>{ss.title}</Heading>
 
+        <Button
+          label={sd.addDish(label)}
+          variant="primary"
+          onPress={() => {
+            setEditingItem(null);
+            setSheetVisible(true);
+          }}
+        />
+
         <View style={styles.addSection}>
           {addFormError ? <Banner kind="error">{addFormError}</Banner> : null}
           <SellItemForm
@@ -198,8 +200,6 @@ export default function SellItemsSettings() {
             onChange={instant.setDraft}
             errors={addFieldErrors}
             businessType={business?.business_type ?? ''}
-            stockItems={stockItems}
-            onAddStockItem={handleAddStockItem}
             existingGroups={existingGroups}
             nameFieldRef={instant.nameFieldRef}
           />
@@ -217,6 +217,17 @@ export default function SellItemsSettings() {
           onChangeText={setSearch}
           placeholder={ss.searchPlaceholder}
         />
+
+        {needsIngredientsOnly ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setNeedsIngredientsOnly(false)}
+            style={styles.filterChip}
+          >
+            <Small style={styles.filterChipText}>{ss.needsIngredientsFilter}</Small>
+            <Small style={styles.filterChipClear}>{ss.clearFilter}</Small>
+          </Pressable>
+        ) : null}
 
         {failed ? (
           <ReadError onRetry={load} loading={loading} />
@@ -239,8 +250,10 @@ export default function SellItemsSettings() {
                   renderItem={(item) => (
                     <SellRow
                       item={item}
-                      stockItems={stockItems}
-                      onPress={() => setEditingItem(item)}
+                      onPress={() => {
+                        setEditingItem(item);
+                        setSheetVisible(true);
+                      }}
                     />
                   )}
                 />
@@ -255,8 +268,10 @@ export default function SellItemsSettings() {
                     <SellRow
                       key={item.id}
                       item={item}
-                      stockItems={stockItems}
-                      onPress={() => setEditingItem(item)}
+                      onPress={() => {
+                        setEditingItem(item);
+                        setSheetVisible(true);
+                      }}
                     />
                   ))}
                 </View>
@@ -266,36 +281,25 @@ export default function SellItemsSettings() {
         )}
       </Screen>
 
-      {editingItem ? (
-        <SellItemSheet
-          visible={Boolean(editingItem)}
-          editingItem={editingItem}
-          existingItems={all}
-          stockItems={stockItems}
-          onStockItemAdded={(item) => setStockItems((current) => [item, ...(current ?? [])])}
-          onClose={() => setEditingItem(null)}
-          onSaved={(message) => {
-            setEditingItem(null);
-            setToast(message);
-            load();
-          }}
-        />
-      ) : null}
+      <SellItemSheet
+        visible={sheetVisible}
+        editingItem={editingItem}
+        existingItems={all}
+        stockItems={stockItems}
+        onStockItemAdded={(item) => setStockItems((current) => [item, ...(current ?? [])])}
+        onClose={() => setSheetVisible(false)}
+        onSaved={(message) => {
+          setSheetVisible(false);
+          setToast(message);
+          load();
+        }}
+      />
       <Toast message={toast} onHide={() => setToast(null)} />
     </AppShell>
   );
 }
 
-function SellRow({
-  item,
-  stockItems,
-  onPress,
-}: {
-  item: SellItem;
-  stockItems: StockItem[] | null;
-  onPress: () => void;
-}) {
-  const linked = stockItems?.find((stock) => stock.id === item.main_stock_item);
+function SellRow({ item, onPress }: { item: SellItem; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"
@@ -304,13 +308,30 @@ function SellRow({
       style={[styles.row, !item.active ? styles.rowInactive : null]}
     >
       <View style={styles.rowMain}>
-        <Body style={styles.rowName}>{item.name}</Body>
+        <View style={styles.rowTitleLine}>
+          <Body style={styles.rowName}>{item.name}</Body>
+          {item.recipe_status === 'none' ? <Badge label={ss.needsIngredientsBadge} /> : null}
+          {item.recipe_status === 'unconfirmed' ? (
+            <Badge label={ss.estimateConfirmBadge} warning />
+          ) : null}
+        </View>
         <Small style={styles.rowMeta}>
           {formatRupees(item.selling_price)}
-          {linked ? ` · ${linked.name}` : ''}
+          {item.portion_label ? ` · ${item.portion_label}` : ''}
         </Small>
       </View>
     </Pressable>
+  );
+}
+
+/** A plain pill badge — "Needs ingredients" (muted, routine) vs "Estimate - confirm" (warning,
+ * needs review) — same small local pattern as counts/[id].tsx's own Badge, not promoted to a shared
+ * component for just two call sites. */
+function Badge({ label, warning }: { label: string; warning?: boolean }) {
+  return (
+    <View style={[styles.badge, warning ? styles.badgeWarning : null]}>
+      <Small style={styles.badgeText}>{label}</Small>
+    </View>
   );
 }
 
@@ -338,6 +359,23 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.sm,
   },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 2,
+    borderColor: colours.primary,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  filterChipText: {
+    fontFamily: fonts.bodyExtraBold,
+  },
+  filterChipClear: {
+    color: colours.primary,
+    fontFamily: fonts.bodyExtraBold,
+  },
   row: {
     minHeight: 60,
     justifyContent: 'center',
@@ -353,10 +391,29 @@ const styles = StyleSheet.create({
   rowMain: {
     gap: 2,
   },
+  rowTitleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   rowName: {
     fontFamily: fonts.bodyExtraBold,
   },
   rowMeta: {
     color: colours.muted,
+  },
+  badge: {
+    minHeight: 24,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+    backgroundColor: colours.muted,
+  },
+  badgeWarning: {
+    backgroundColor: colours.warning,
+  },
+  badgeText: {
+    color: colours.card,
+    fontFamily: fonts.bodyExtraBold,
   },
 });

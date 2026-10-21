@@ -24,6 +24,11 @@ export type SectorCopy = {
   stockGroupSuggestions: string[];
   sellNamePlaceholder: string;
   sellGroupPlaceholder: string;
+  /** Shown as quick-pick chips only until this business has its own sell-item groups to offer
+   * instead — its own namespace from stockGroupSuggestions, e.g. "Starters"/"Main course". */
+  sellGroupSuggestions: string[];
+  /** Placeholder for the dish form's portion-label field, e.g. "1 plate" or "6 pieces". */
+  sellPortionPlaceholder: string;
   /** Example items under the "Used in many items" toggle. */
   sharedToggleHelp: string;
   /** Ordered; shown as the first unit chips offered. The full unit list is always reachable via

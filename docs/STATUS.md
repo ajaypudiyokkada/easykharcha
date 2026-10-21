@@ -182,10 +182,25 @@ not built yet.
   `ItemsDecisionNeeded`, item names + counts) instead of silently saving, same shape as counts'
   `NeedsConfirmation`. `items_action: "keep"` just changes the type; `"remove"`
   (`businesses/sector_change.py`) deletes items with no history (purchases/counts/wastage/sales)
-  and not still used as a sell item's main stock item, keeping and reporting the rest; one
-  transaction, two audit-log actions (`business.update`, `business.sector_change`). New
-  `ChangeBusinessTypeSheet` (setup/1 and Settings' Business profile) shows the sheet every time;
-  "Remove" jumps straight to the new type's starter list.
+  and not still a dish's ingredient, keeping and reporting the rest; one transaction, two
+  audit-log actions (`business.update`, `business.sector_change`). New `ChangeBusinessTypeSheet`
+  (setup/1 and Settings' Business profile) shows the sheet every time; "Remove" jumps straight to
+  the new type's starter list.
+- **Step 22a — Dishes carry a portion and multi-ingredient recipe.** Replaced `SellItem`'s single
+  `main_stock_item`/`uses_qty` with `SellItemIngredient` (one row per ingredient, qty always in the
+  stock item's own unit) plus `portion_label` and `recipe_status` (none/unconfirmed/confirmed);
+  existing linked sell items migrated straight to `confirmed`, everything else to `none`. New
+  `POST sell-items/` (single dish create with ingredients, always confirmed — a dish needs >=1);
+  `sell-items/bulk/` stays ingredients-free (recipe_status=none) and gained `skip_existing`.
+  `counts/gap.py`'s `uses_not_set` reason became `recipe_not_confirmed` (names the dish(es)); gap
+  maths, Reports' `sales_vs_cost` and sector-change's "still in use" check all now go through
+  ingredients and only trust `confirmed` recipes. New `DishRecipeForm` (name/portion/group/
+  multi-ingredient picker with a grouped+searchable list, inline "add a new item", and a g<->kg/
+  ml<->L client-side unit-conversion hint — `mobile/src/forms/unitConversion.ts`, the app's only
+  unit conversion, purely at entry time) drives Settings' "Add {label}"/edit sheet; the wizard's
+  own quick-add (`SellItemForm`) stays ingredients-free. Settings' dish list shows "Needs
+  ingredients"/"Estimate - confirm" badges; Home gained an owner-only "Add ingredients to N dishes"
+  nudge (`?filter=needs_ingredients` on Settings' dish list), replacing the old uses_qty nudge.
 
 ## Permission table
 
@@ -285,3 +300,7 @@ both say so in the UI.
   there's no dedicated multi-business management screen.
 - **Sales file upload (Petpooja)** — Step 14 deliberately built manual sales entry only, no upload
   button or upload screen; a later step may add bulk/file-based sales import.
+- **AI/scan recipe estimation** — Step 22a deliberately built the manual dish-recipe path only, no
+  "scan your menu" card or choice screen before "Add what you sell"; `RecipeStatus.UNCONFIRMED` and
+  `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props exist as extension points but nothing
+  creates or drives them yet — see `docs/MAP.md`'s `stock/` entry.
