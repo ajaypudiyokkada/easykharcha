@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -38,6 +38,9 @@ export default function StockItemsSettings() {
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
+  // Set by Settings' "Business profile" after "Remove them and start fresh" — jumps straight into
+  // the new type's starter list instead of landing on an empty "What you buy" screen.
+  const params = useLocalSearchParams<{ openStarter?: string }>();
 
   const [items, setItems] = useState<StockItem[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +51,7 @@ export default function StockItemsSettings() {
   );
   const [addFormError, setAddFormError] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
-  const [starterListOpen, setStarterListOpen] = useState(false);
+  const [starterListOpen, setStarterListOpen] = useState(params.openStarter === '1');
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {

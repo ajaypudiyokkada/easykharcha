@@ -1,16 +1,21 @@
 import { Redirect, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import type { Business } from '../../src/api/business';
-import { ApiError } from '../../src/api/client';
+import { ApiError, type ItemsSummary } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
+import { BUSINESS_TYPES } from '../../src/constants/businessTypes';
 import {
   BusinessForm,
   EMPTY_BUSINESS_DRAFT,
   type BusinessDraft,
 } from '../../src/forms/BusinessForm';
+import {
+  ChangeBusinessTypeSheet,
+  type ItemsAction,
+} from '../../src/screens/ChangeBusinessTypeSheet';
 import { strings } from '../../src/strings';
 import { BottomActionBar, Body, Icon, Screen, StepHeader } from '../../src/ui';
 import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
@@ -43,6 +48,11 @@ export default function SetupStepOne() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [itemsSummary, setItemsSummary] = useState<ItemsSummary | null>(null);
+  const [itemsSheetSaving, setItemsSheetSaving] = useState(false);
+  // Which button started the save that's now waiting on the items-decision sheet, so the sheet's
+  // own Continue can send the user on to the same place "Next" or "Save for later" would have.
+  const pendingAfterRef = useRef<'next' | 'later'>('next');
 
   if (status === 'bootstrapping') {
     return (
@@ -75,7 +85,7 @@ export default function SetupStepOne() {
     }
   }
 
-  async function save(): Promise<Business | null> {
+  async function save(itemsAction?: ItemsAction): Promise<Business | null> {
     const errors = validate();
     setFieldErrors(errors);
     setFormError(null);
@@ -96,7 +106,11 @@ export default function SetupStepOne() {
       if (existing) {
         business = await authedFetch<Business>(`/businesses/${existing.id}/`, {
           method: 'PATCH',
-          body: { ...payload, onboarding_step: 2 },
+          body: {
+            ...payload,
+            onboarding_step: 2,
+            ...(itemsAction ? { items_action: itemsAction } : null),
+          },
         });
       } else {
         const created = await authedFetch<Business>('/businesses/', {
@@ -113,9 +127,14 @@ export default function SetupStepOne() {
         body: { status: 'done' },
       });
       await refreshMe();
+      setItemsSummary(null);
       return business;
     } catch (err) {
-      mapError(err);
+      if (err instanceof ApiError && err.code === 'items_decision_needed' && err.itemsSummary) {
+        setItemsSummary(err.itemsSummary);
+      } else {
+        mapError(err);
+      }
       return null;
     } finally {
       setSubmitting(false);
@@ -123,13 +142,41 @@ export default function SetupStepOne() {
   }
 
   async function handleNext() {
+    pendingAfterRef.current = 'next';
     const business = await save();
     if (business) router.push('/setup/2');
   }
 
   async function handleSaveForLater() {
+    pendingAfterRef.current = 'later';
     const business = await save();
     if (business) router.replace('/home');
+  }
+
+  function handleCancelItemsDecision() {
+    setItemsSummary(null);
+    // The sector change itself never saved — put the picker back where the business actually is.
+    setDraft((current) => ({
+      ...current,
+      businessType: (existing?.business_type as BusinessDraft['businessType']) ?? '',
+    }));
+  }
+
+  async function handleItemsDecision(action: ItemsAction) {
+    setItemsSheetSaving(true);
+    try {
+      const business = await save(action);
+      if (!business) return;
+      if (action === 'remove') {
+        router.push('/setup/3');
+      } else if (pendingAfterRef.current === 'later') {
+        router.replace('/home');
+      } else {
+        router.push('/setup/2');
+      }
+    } finally {
+      setItemsSheetSaving(false);
+    }
   }
 
   return (
@@ -160,6 +207,19 @@ export default function SetupStepOne() {
         authedFetch={authedFetch}
         errors={fieldErrors}
       />
+
+      {itemsSummary ? (
+        <ChangeBusinessTypeSheet
+          visible
+          itemsSummary={itemsSummary}
+          newTypeLabel={
+            BUSINESS_TYPES.find((t) => t.value === draft.businessType)?.label ?? draft.businessType
+          }
+          onCancel={handleCancelItemsDecision}
+          onContinue={handleItemsDecision}
+          continueLoading={itemsSheetSaving}
+        />
+      ) : null}
     </Screen>
   );
 }

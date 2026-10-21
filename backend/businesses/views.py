@@ -5,6 +5,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -18,7 +19,7 @@ from audit.log import jsonable, log_action
 
 from .access import owner_access_or_403
 from .business_settings import defaults_for_new_business
-from .exceptions import BusinessLimitReached, InvalidLogoFile
+from .exceptions import BusinessLimitReached, InvalidLogoFile, ItemsDecisionNeeded
 from .models import (
     ONBOARDING_STEPS,
     SKIPPABLE_ONBOARDING_STEPS,
@@ -30,6 +31,7 @@ from .models import (
     OnboardingStepStatus,
 )
 from .permissions import require_permission
+from .sector_change import remove_items_for_sector_change
 from .serializers import (
     BusinessCreateSerializer,
     BusinessSerializer,
@@ -78,12 +80,30 @@ class BusinessUpdateView(APIView):
 
         serializer = BusinessUpdateSerializer(business, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        # Only real model fields — "dismiss_checklist" is a write-only virtual field with no
-        # matching attribute on Business, so it's naturally excluded from both snapshots.
-        changed = [f for f in serializer.validated_data if hasattr(business, f)]
+        data = serializer.validated_data
+        items_action = data.get("items_action")
+
+        # Changing the sector while stock/sell items already exist needs an explicit keep-or-remove
+        # choice first (see docs/STATUS.md Step 21d) — same 409-then-resubmit-with-a-flag shape as
+        # counts' NeedsConfirmation. No items, or the type isn't actually changing: nothing to ask.
+        type_changing = "business_type" in data and data["business_type"] != business.business_type
+        if type_changing and items_action not in ("keep", "remove"):
+            stock_names = list(business.stock_items.order_by("name").values_list("name", flat=True))
+            sell_names = list(business.sell_items.order_by("name").values_list("name", flat=True))
+            if stock_names or sell_names:
+                raise ItemsDecisionNeeded(stock_names, sell_names)
+
+        # Only real model fields — "dismiss_checklist" and "items_action" are write-only virtual
+        # fields with no matching attribute on Business, so they're naturally excluded here.
+        changed = [f for f in data if hasattr(business, f)]
         before = {f: jsonable(getattr(business, f)) for f in changed}
-        serializer.save()
+        items_summary = None
+        with transaction.atomic():
+            serializer.save()
+            if type_changing and items_action == "remove":
+                items_summary = remove_items_for_sector_change(business)
         after = {f: jsonable(getattr(business, f)) for f in changed}
+
         log_action(
             user=request.user,
             action="business.update",
@@ -91,7 +111,21 @@ class BusinessUpdateView(APIView):
             before=before,
             after=after,
         )
-        return Response(BusinessSerializer(business, context={"request": request}).data)
+        if type_changing:
+            log_action(
+                user=request.user,
+                action="business.sector_change",
+                business=business,
+                from_type=before.get("business_type"),
+                to_type=after.get("business_type"),
+                items_action=items_action or "keep",
+                items_summary=items_summary,
+            )
+
+        response_data = BusinessSerializer(business, context={"request": request}).data
+        if items_summary is not None:
+            response_data["items_summary"] = items_summary
+        return Response(response_data)
 
 
 class BusinessLogoView(APIView):

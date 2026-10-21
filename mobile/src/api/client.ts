@@ -22,6 +22,14 @@ export type ApiErrorKind = 'network' | 'timeout' | 'server' | 'offline';
 
 export type RowError = { row: number; field: string; message: string };
 
+/** Present only on businesses/'s items_decision_needed (409) — see
+ * businesses/exceptions.py's ItemsDecisionNeeded. */
+export type ItemsSummary = {
+  stock_items: string[];
+  sell_items: string[];
+  total_count: number;
+};
+
 export class ApiError extends Error {
   kind: ApiErrorKind;
   status?: number;
@@ -32,6 +40,7 @@ export class ApiError extends Error {
   /** Present only for counts/'s needs_confirmation (409) — the stock item ids whose typed value
    * looks unusual. Never a number, by design — see counts/exceptions.py's NeedsConfirmation. */
   itemIds?: number[];
+  itemsSummary?: ItemsSummary;
 
   constructor(
     kind: ApiErrorKind,
@@ -40,6 +49,7 @@ export class ApiError extends Error {
     code?: string,
     rowErrors?: RowError[],
     itemIds?: number[],
+    itemsSummary?: ItemsSummary,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -48,6 +58,7 @@ export class ApiError extends Error {
     this.code = code;
     this.rowErrors = rowErrors;
     this.itemIds = itemIds;
+    this.itemsSummary = itemsSummary;
   }
 }
 
@@ -126,6 +137,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
       error?: { code?: string; message?: string };
       row_errors?: RowError[];
       item_ids?: number[];
+      items_summary?: ItemsSummary;
     } | null;
     const message = shaped?.error?.message ?? `The server returned an error (${response.status}).`;
     throw new ApiError(
@@ -135,6 +147,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
       shaped?.error?.code,
       shaped?.row_errors,
       shaped?.item_ids,
+      shaped?.items_summary,
     );
   }
 
