@@ -19,6 +19,7 @@ export type StockCount = {
   deadline_at: string;
   is_late: boolean;
   minutes_late: number;
+  missing_opening: boolean;
 };
 
 export type CountListEntry = StockCount & {
@@ -76,11 +77,32 @@ export type CountLineDraft = {
   countedQty: string;
 };
 
-export type TodayCountState = 'not_started' | 'done' | 'late';
+export type OpeningCountState = 'due' | 'late' | 'done';
+export type ClosingCountState = 'locked' | 'due' | 'late' | 'done';
+export type NextCountAction = 'opening' | 'closing' | 'none';
 
+/** Step 23b: one opening count, then one closing count, per business date, clearly guided. Shared
+ * shape returned by both `counts/today/` (the Count screen's own, focused call) and `today/`
+ * (Home's richer call, which adds wastage/team/alerts fields around the same opening/closing). */
 export type TodayStatus = {
-  opening: { state: TodayCountState; deadline_at: string };
-  closing: { state: TodayCountState; deadline_at: string };
+  business_date: string;
+  opening: {
+    state: OpeningCountState;
+    due_by: string;
+    done_at: string | null;
+    by: string | null;
+  };
+  closing: {
+    state: ClosingCountState;
+    due_from: string;
+    done_at: string | null;
+    by: string | null;
+    /** True once a closing done now would be recorded without an opening for the day (the
+     * opening was missed, not just skipped early) — lets the Count screen show the note before
+     * saving, not just after. */
+    missing_opening: boolean;
+  };
+  next_action: NextCountAction;
   wastage_entries_today: number;
   /** Only present for a role with counts.status (Head chef) — how many of the business's active
    * items have been counted by anyone today, out of how many there are. */
@@ -88,3 +110,10 @@ export type TodayStatus = {
   /** Step 15, Owner/Manager only — the same count GET alerts/ would show. */
   alerts_count?: number;
 };
+
+/** `counts/today/`'s own response — same opening/closing/next_action, none of Home's extra
+ * fields. */
+export type CountsTodayStatus = Pick<
+  TodayStatus,
+  'business_date' | 'opening' | 'closing' | 'next_action'
+>;

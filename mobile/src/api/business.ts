@@ -34,6 +34,7 @@ export type Business = {
 };
 
 export type BusinessSettings = {
+  day_starts_hour: number;
   count_deadline_hour: number;
   closing_count_hour: number;
   target_cost_pct: string;

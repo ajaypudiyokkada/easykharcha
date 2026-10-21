@@ -25,6 +25,10 @@ class StockCount(models.Model):
     deadline_at = models.DateTimeField()
     is_late = models.BooleanField(default=False)
     minutes_late = models.PositiveIntegerField(default=0)
+    # Step 23b: true only for a closing count recorded when its business date had no opening count
+    # and the opening was already missed (deadline passed, or already past closing_count_hour) —
+    # never set for an opening count.
+    missing_opening = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("-business_date", "-submitted_at")

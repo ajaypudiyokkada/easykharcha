@@ -120,6 +120,10 @@ class BusinessSettings(models.Model):
     report and the validation share one source of truth."""
 
     business = models.OneToOneField(Business, on_delete=models.CASCADE, related_name="settings")
+    # Step 23b: the hour (0-12) the business day starts at — the business date of a count is the
+    # local date of (count time minus this many hours), so a closing count just after midnight
+    # still belongs to the previous business date for a business that runs past midnight.
+    day_starts_hour = models.PositiveSmallIntegerField()
     # How late in the day (hour, 0-23) the opening stock count can still be logged.
     count_deadline_hour = models.PositiveSmallIntegerField()
     # Same, for the closing stock count (default 20, meaning 8 PM).

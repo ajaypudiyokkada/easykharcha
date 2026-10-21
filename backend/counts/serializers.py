@@ -50,4 +50,5 @@ class StockCountSerializer(serializers.ModelSerializer):
             "deadline_at",
             "is_late",
             "minutes_late",
+            "missing_opening",
         )

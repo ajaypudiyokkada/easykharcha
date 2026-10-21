@@ -13,6 +13,7 @@ from .models import Business, BusinessSettings
 from .permissions import require_permission
 
 FIELDS = (
+    "day_starts_hour",
     "count_deadline_hour",
     "closing_count_hour",
     "target_cost_pct",
@@ -36,6 +37,9 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
     # Declared explicitly (not left to ModelSerializer's auto-generated fields) so the valid range
     # for each one comes from settings.BUSINESS_SETTINGS_RANGES, the same source of truth the report
     # and defaults_for_new_business() use, rather than being hardcoded a second time here.
+    day_starts_hour = serializers.IntegerField(
+        min_value=_range("day_starts_hour")[0], max_value=_range("day_starts_hour")[1]
+    )
     count_deadline_hour = serializers.IntegerField(
         min_value=_range("count_deadline_hour")[0], max_value=_range("count_deadline_hour")[1]
     )

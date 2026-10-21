@@ -18,6 +18,7 @@ import { bestTextOn, ensureContrast } from '../src/theme/brand';
 import { strings } from '../src/strings';
 import {
   Body,
+  Button,
   Card,
   Heading,
   Icon,
@@ -37,7 +38,8 @@ const t = strings.today;
 
 function alertIconFor(type: Alert['type']): IconName {
   switch (type) {
-    case 'count_late':
+    case 'opening_late':
+    case 'closing_late':
       return 'clock';
     case 'price_rise':
       return 'reports';
@@ -47,6 +49,53 @@ function alertIconFor(type: Alert['type']): IconName {
     default:
       return 'alert';
   }
+}
+
+/** One Today-card row (opening or closing): icon/colour/label for its current state, plus a
+ * "done <time> by <name>" detail line once it's done. Shared by TodayHome and OwnerHome so both
+ * read Step 23b's status the same way. */
+function countRowInfo(
+  kind: 'opening' | 'closing',
+  info: TodayStatus['opening'] | TodayStatus['closing'] | undefined,
+  timezone: string,
+): { icon: IconName; colour: string; label: string; detail: string } {
+  if (!info) return { icon: 'clock', colour: colours.muted, label: '', detail: '' };
+  if (info.state === 'done') {
+    return {
+      icon: 'success',
+      colour: colours.success,
+      label: kind === 'opening' ? t.openingDone : t.closingDone,
+      detail:
+        info.done_at && info.by ? t.doneBy(formatDateTime(info.done_at, timezone), info.by) : '',
+    };
+  }
+  if (info.state === 'locked') {
+    return { icon: 'clock', colour: colours.muted, label: t.closingLocked, detail: '' };
+  }
+  if (info.state === 'late') {
+    return {
+      icon: 'warning',
+      colour: colours.warning,
+      label: kind === 'opening' ? t.openingLate : t.closingLate,
+      detail: '',
+    };
+  }
+  const due = 'due_by' in info ? info.due_by : info.due_from;
+  return {
+    icon: 'clock',
+    colour: colours.muted,
+    label:
+      kind === 'opening'
+        ? t.openingDue(formatDateTime(due, timezone))
+        : t.closingDue(formatDateTime(due, timezone)),
+    detail: '',
+  };
+}
+
+function nextActionLabel(nextAction: TodayStatus['next_action'] | undefined): string | null {
+  if (nextAction === 'opening') return t.startOpening;
+  if (nextAction === 'closing') return t.startClosing;
+  return null;
 }
 
 export default function Home() {
@@ -116,17 +165,8 @@ function TodayHome() {
     );
   }
 
-  const nextCount =
-    today?.opening.state !== 'done'
-      ? { type: 'opening' as const, info: today?.opening }
-      : { type: 'closing' as const, info: today?.closing };
-  const deadlineLabel = nextCount.info
-    ? nextCount.type === 'opening'
-      ? t.openingDue(formatDateTime(nextCount.info.deadline_at, timezone))
-      : t.closingDue(formatDateTime(nextCount.info.deadline_at, timezone))
-    : null;
-
   const isHeadChef = can(permissions, 'counts.status');
+  const startLabel = nextActionLabel(today?.next_action);
 
   return (
     <AppShell active="home">
@@ -138,20 +178,33 @@ function TodayHome() {
           <Body style={styles.todayHeroSubtitle}>{t.subtitle}</Body>
         </View>
 
-        <View style={styles.bigActionsGrid}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t.countStock}
-            style={styles.bigAction}
-            onPress={() => router.push('/count')}
-          >
-            <View style={styles.bigActionIcon}>
-              <Icon name="stock" size={22} colour={colours.primary} />
-            </View>
-            <Heading level={3}>{t.countStock}</Heading>
-            <Small style={styles.bigActionHint}>{t.countStockHint}</Small>
-          </Pressable>
-          {canRecordWastage ? (
+        <Card style={styles.todayCountCard}>
+          {(['opening', 'closing'] as const).map((kind) => {
+            const row = countRowInfo(kind, today?.[kind], timezone);
+            return (
+              <View key={kind} style={styles.countStateRow}>
+                <Icon name={row.icon} size={18} colour={row.colour} />
+                <View style={styles.countStateTextWrap}>
+                  <Body style={[styles.deadlineTitle, { color: row.colour }]}>{row.label}</Body>
+                  {row.detail ? <Small style={styles.deadlineSub}>{row.detail}</Small> : null}
+                </View>
+              </View>
+            );
+          })}
+          {isHeadChef && today?.team_progress ? (
+            <Small style={styles.deadlineSub}>
+              {t.teamProgress(today.team_progress.counted, today.team_progress.total)}
+            </Small>
+          ) : null}
+          {startLabel ? (
+            <Button label={startLabel} variant="primary" onPress={() => router.push('/count')} />
+          ) : (
+            <Small style={styles.deadlineSub}>{t.bothDoneTitle}</Small>
+          )}
+        </Card>
+
+        {canRecordWastage ? (
+          <View style={styles.bigActionsGrid}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t.recordWastage}
@@ -164,20 +217,6 @@ function TodayHome() {
               <Heading level={3}>{t.recordWastage}</Heading>
               <Small style={styles.bigActionHint}>{t.recordWastageHint}</Small>
             </Pressable>
-          ) : null}
-        </View>
-
-        {deadlineLabel ? (
-          <View style={styles.deadlineCard}>
-            <Icon name="clock" size={22} colour={colours.text} />
-            <View style={styles.deadlineTextWrap}>
-              <Body style={styles.deadlineTitle}>{deadlineLabel}</Body>
-              {isHeadChef && today?.team_progress ? (
-                <Small style={styles.deadlineSub}>
-                  {t.teamProgress(today.team_progress.counted, today.team_progress.total)}
-                </Small>
-              ) : null}
-            </View>
           </View>
         ) : null}
 
@@ -317,32 +356,7 @@ function OwnerHome() {
     }
   }
 
-  function countStateLine(
-    type: 'opening' | 'closing',
-    info: TodayStatus['opening'] | undefined,
-  ): { icon: IconName; colour: string; label: string } {
-    if (!info) return { icon: 'clock', colour: colours.muted, label: '' };
-    if (info.state === 'done') {
-      return {
-        icon: 'success',
-        colour: colours.success,
-        label: type === 'opening' ? t.openingDone : t.closingDone,
-      };
-    }
-    if (info.state === 'late') {
-      return {
-        icon: 'warning',
-        colour: colours.warning,
-        label: type === 'opening' ? t.openingLate : t.closingLate,
-      };
-    }
-    const deadline = formatDateTime(info.deadline_at, timezone);
-    return {
-      icon: 'clock',
-      colour: colours.muted,
-      label: type === 'opening' ? t.openingDue(deadline) : t.closingDue(deadline),
-    };
-  }
+  const startLabel = nextActionLabel(today?.next_action);
 
   return (
     <AppShell active="home">
@@ -489,19 +503,29 @@ function OwnerHome() {
 
         {today ? (
           <View style={styles.statRow}>
-            <Card style={styles.statCard}>
+            <Card style={styles.ownerTodayCountCard}>
               <Small style={styles.statLabel}>{s.stockCountToday}</Small>
-              {(['opening', 'closing'] as const).map((type) => {
-                const line = countStateLine(type, today[type]);
+              {(['opening', 'closing'] as const).map((kind) => {
+                const row = countRowInfo(kind, today[kind], timezone);
                 return (
-                  <View key={type} style={styles.countStateRow}>
-                    <Icon name={line.icon} size={16} colour={line.colour} />
-                    <Small style={[styles.countStateLabel, { color: line.colour }]}>
-                      {line.label}
-                    </Small>
+                  <View key={kind} style={styles.countStateRow}>
+                    <Icon name={row.icon} size={16} colour={row.colour} />
+                    <View style={styles.countStateTextWrap}>
+                      <Small style={[styles.countStateLabel, { color: row.colour }]}>
+                        {row.label}
+                      </Small>
+                      {row.detail ? <Small style={styles.deadlineSub}>{row.detail}</Small> : null}
+                    </View>
                   </View>
                 );
               })}
+              {canStartCount && startLabel ? (
+                <Button
+                  label={startLabel}
+                  variant="primary"
+                  onPress={() => router.push('/count')}
+                />
+              ) : null}
             </Card>
             <Card style={styles.statCard}>
               <Small style={styles.statLabel}>{s.wastageToday}</Small>
@@ -686,6 +710,18 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  todayCountCard: {
+    gap: spacing.sm,
+  },
+  ownerTodayCountCard: {
+    flex: 1,
+    gap: spacing.sm,
+  },
+  countStateTextWrap: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
   sectionLabel: {
     color: colours.muted,
     marginBottom: spacing.xs,
@@ -799,17 +835,6 @@ const styles = StyleSheet.create({
   },
   bigActionHint: {
     color: colours.muted,
-  },
-  deadlineCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colours.highlight,
-    borderRadius: radii.lg,
-    padding: spacing.md,
-  },
-  deadlineTextWrap: {
-    flex: 1,
   },
   deadlineTitle: {
     fontFamily: fonts.bodyExtraBold,

@@ -8,7 +8,7 @@ from django.db.models import Sum
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,30 +21,17 @@ from businesses.permissions import access_or_403, permissions_for, require_permi
 from purchases.models import PurchaseLine
 from wastage.models import WastageEntry
 
+from .business_day import business_date_for
 from .config import (
     UNUSUAL_VALUE_LOOKBACK_COUNTS,
     UNUSUAL_VALUE_LOOKBACK_DAYS,
     UNUSUAL_VALUE_MULTIPLIER,
 )
-from .exceptions import CountValidationError, DuplicateCount, NeedsConfirmation
+from .exceptions import CountValidationError, DuplicateCount, NeedsConfirmation, OpeningRequired
 from .gap import ZERO, lines_with_gap
 from .models import CountLine, CountLineState, CountType, StockCount
 from .serializers import CountCreateSerializer, CountLineRowSerializer, StockCountSerializer
-
-
-def _business_today(business: Business):
-    tz = ZoneInfo(business.timezone)
-    return timezone.localtime(timezone.now(), tz).date()
-
-
-def _deadline_at(business: Business, business_date, count_type: str):
-    tz = ZoneInfo(business.timezone)
-    hour = (
-        business.settings.count_deadline_hour
-        if count_type == CountType.OPENING
-        else business.settings.closing_count_hour
-    )
-    return datetime.combine(business_date, time(hour=hour), tzinfo=tz)
+from .today_status import deadline_at_for, opening_missed, status_for
 
 
 def _row_errors_from(row_number: int, errors: dict) -> list[dict]:
@@ -116,7 +103,7 @@ class CountListCreateView(APIView):
         business = get_object_or_404(Business, id=business_id)
         require_permission(business, request.user, "counts.review")
 
-        business_date = request.query_params.get("date") or _business_today(business).isoformat()
+        business_date = request.query_params.get("date") or business_date_for(business).isoformat()
         counts = (
             StockCount.objects.filter(business=business, business_date=business_date)
             .select_related("counted_by")
@@ -154,11 +141,22 @@ class CountListCreateView(APIView):
         count_type = header.validated_data["type"]
         confirm_ids = set(header.validated_data["confirm_ids"])
 
-        business_date = _business_today(business)
+        now = timezone.now()
+        business_date = business_date_for(business, now)
         if StockCount.objects.filter(
             business=business, count_type=count_type, business_date=business_date
         ).exists():
             raise DuplicateCount()
+
+        missing_opening = False
+        if count_type == CountType.CLOSING:
+            opening_done = StockCount.objects.filter(
+                business=business, count_type=CountType.OPENING, business_date=business_date
+            ).exists()
+            if not opening_done:
+                if not opening_missed(business, business_date, now):
+                    raise OpeningRequired()
+                missing_opening = True
 
         raw_lines = request.data.get("lines")
         if not isinstance(raw_lines, list) or not raw_lines:
@@ -210,7 +208,6 @@ class CountListCreateView(APIView):
         if row_errors:
             raise CountValidationError(row_errors)
 
-        now = timezone.now()
         needs_confirmation_ids = [
             data["stock_item"].id
             for data in cleaned
@@ -220,7 +217,7 @@ class CountListCreateView(APIView):
         if needs_confirmation_ids:
             raise NeedsConfirmation(needs_confirmation_ids)
 
-        deadline_at = _deadline_at(business, business_date, count_type)
+        deadline_at = deadline_at_for(business, business_date, count_type)
         is_late = now > deadline_at
         minutes_late = int((now - deadline_at).total_seconds() // 60) if is_late else 0
 
@@ -233,6 +230,7 @@ class CountListCreateView(APIView):
                 deadline_at=deadline_at,
                 is_late=is_late,
                 minutes_late=minutes_late,
+                missing_opening=missing_opening,
             )
             CountLine.objects.bulk_create(
                 [
@@ -256,6 +254,7 @@ class CountListCreateView(APIView):
             business_date=str(business_date),
             is_late=is_late,
             minutes_late=minutes_late,
+            missing_opening=missing_opening,
             items_counted=sum(1 for d in cleaned if d["state"] == CountLineState.COUNTED),
             items_skipped=sum(1 for d in cleaned if d["state"] == CountLineState.SKIPPED),
             items_not_sure=sum(1 for d in cleaned if d["state"] == CountLineState.NOT_SURE),
@@ -325,8 +324,9 @@ class CountRemindView(APIView):
 
 
 class TodayView(APIView):
-    """One role-shaped snapshot of "today" — opening/closing count state, the deadline times, and
-    how many wastage entries exist. No money anywhere in this response, for any role."""
+    """One role-shaped snapshot of "today" — opening/closing count status (Step 23b's
+    today_status.status_for), and how many wastage entries exist. No money anywhere in this
+    response, for any role."""
 
     permission_classes = [IsAuthenticated]
 
@@ -335,22 +335,9 @@ class TodayView(APIView):
         access = access_or_403(business, request.user)
         permissions = permissions_for(access.role)
 
-        business_date = _business_today(business)
-        counts_today = {
-            c.count_type: c
-            for c in StockCount.objects.filter(business=business, business_date=business_date)
-        }
-
-        def state_for(count_type: str) -> str:
-            # "done" once submitted, regardless of whether that submission itself landed after the
-            # deadline (StockCount.is_late/minutes_late still records that fact for count review).
-            # Before submission, "late" means the deadline has already passed with nothing
-            # submitted yet — the real "needs attention" case Home's alert is for; "not_started"
-            # alone would never fire an alert before anyone had a chance to act.
-            if count_type in counts_today:
-                return "done"
-            deadline = _deadline_at(business, business_date, count_type)
-            return "late" if timezone.now() > deadline else "not_started"
+        now = timezone.now()
+        today_status = status_for(business, now)
+        business_date = today_status["business_date"]
 
         def day_bounds():
             tz = ZoneInfo(business.timezone)
@@ -365,14 +352,9 @@ class TodayView(APIView):
             wastage_qs = wastage_qs.filter(recorded_by=request.user)
 
         data = {
-            "opening": {
-                "state": state_for(CountType.OPENING),
-                "deadline_at": _deadline_at(business, business_date, CountType.OPENING),
-            },
-            "closing": {
-                "state": state_for(CountType.CLOSING),
-                "deadline_at": _deadline_at(business, business_date, CountType.CLOSING),
-            },
+            "opening": today_status["opening"],
+            "closing": today_status["closing"],
+            "next_action": today_status["next_action"],
             "wastage_entries_today": wastage_qs.count(),
         }
 
@@ -396,3 +378,20 @@ class TodayView(APIView):
             data["alerts_count"] = len(open_alerts(business, access.role))
 
         return Response(data)
+
+
+class CountsTodayStatusView(APIView):
+    """Step 23b: the focused opening/closing status the Count screen drives itself from — no
+    wastage/alerts/team numbers, no stock quantities, just locked/due/late/done and next_action.
+    Open to counts.create or counts.review, the two permissions that between them cover every role
+    that can ever see a count."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = get_object_or_404(Business, id=business_id)
+        access = access_or_403(business, request.user)
+        if not permissions_for(access.role) & {"counts.create", "counts.review"}:
+            raise PermissionDenied()
+
+        return Response(status_for(business))

@@ -13,3 +13,8 @@ UNUSUAL_VALUE_LOOKBACK_COUNTS = 5
 
 # How many days of purchases to look back across for the same comparison.
 UNUSUAL_VALUE_LOOKBACK_DAYS = 7
+
+# Step 23b: how many hours past closing_count_hour the Today status still calls the closing count
+# merely "due" rather than "late" — opening has no such grace, it's late immediately past its own
+# deadline (count_deadline_hour).
+CLOSING_GRACE_HOURS = 2

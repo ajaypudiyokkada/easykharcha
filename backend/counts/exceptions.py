@@ -20,6 +20,16 @@ class NeedsConfirmation(APIException):
         self.item_ids = item_ids
 
 
+class OpeningRequired(APIException):
+    """A closing count was attempted for a business date with no opening count yet, and the
+    opening isn't missed (its deadline hasn't passed, and the closing window hasn't begun) — so
+    there's still time for the opening to happen first."""
+
+    status_code = 409
+    default_detail = "Do the opening count first."
+    default_code = "opening_required"
+
+
 class CountValidationError(APIException):
     """Carries per-row errors in `.row_errors` — config/exceptions.py adds them to the response
     alongside the normal {"error": {...}} shape. Same shape as purchases' and stock's bulk errors."""
