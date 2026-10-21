@@ -433,7 +433,10 @@ async function login(page, mobile, secret) {
  * uses in reverse, further down) so the opening count buildOwnerSession is about to submit stays
  * "not_started" (not already "late") regardless of what time of day this script happens to run —
  * otherwise /count would silently render the *closing* form instead once the default 11 AM
- * deadline has passed, and the count-review click below would never find its row. */
+ * deadline has passed, and the count-review click below would never find its row. day_starts_hour:
+ * 0 keeps the business date the plain calendar date too, so overnight (between midnight and the
+ * real default day_starts_hour of 5) "today" isn't already yesterday's business date with its
+ * 23:00 deadline already passed (which would unlock/route to closing instead of opening). */
 async function keepOpeningCountNotLate(page) {
   const access = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
   const me = await apiRequest('/me/', { token: access });
@@ -441,7 +444,7 @@ async function keepOpeningCountNotLate(page) {
   await apiRequest(`/businesses/${businessId}/settings/`, {
     method: 'PATCH',
     token: access,
-    body: { count_deadline_hour: 23 },
+    body: { day_starts_hour: 0, count_deadline_hour: 23 },
   });
 }
 
