@@ -41,3 +41,22 @@ class CannotChangeOwnerRole(APIException):
     status_code = 422
     default_detail = "Owner role can't be changed here."
     default_code = "CANNOT_CHANGE_OWNER_ROLE"
+
+
+class ItemsDecisionNeeded(APIException):
+    """Changing business_type while stock/sell items exist needs an explicit keep-or-remove choice
+    from the owner first — same 409-then-resubmit-with-a-flag pattern as counts'
+    NeedsConfirmation. Carries just enough for the client's confirmation sheet (names, for the "up
+    to 5 + N more" preview, and counts), never decides anything itself."""
+
+    status_code = 409
+    default_detail = "Choose what should happen to the existing items first."
+    default_code = "items_decision_needed"
+
+    def __init__(self, stock_item_names: list[str], sell_item_names: list[str]):
+        super().__init__()
+        self.items_summary = {
+            "stock_items": stock_item_names,
+            "sell_items": sell_item_names,
+            "total_count": len(stock_item_names) + len(sell_item_names),
+        }

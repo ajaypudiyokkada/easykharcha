@@ -324,6 +324,201 @@ def check_business_flow() -> None:
     print("OK — a second user can neither see nor edit the business.")
 
 
+def check_sector_change_flow() -> None:
+    """Step 21d: changing business_type once stock/sell items exist needs an explicit keep-or-remove
+    choice (409 items_decision_needed, then resubmit with items_action) — same shape as counts'
+    needs_confirmation. "Remove" must never delete an item with history, or a stock item a surviving
+    sell item still uses."""
+    _, owner_access, _ = signup_and_login("Sector Change Owner")
+
+    # No items yet -> the type changes straight away, no 409 at all.
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Empty Sector Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector change flow: business create expected 201, got {status} ({body})")
+    empty_business_id = body["id"]
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{empty_business_id}/",
+        {"business_type": "homestay"},
+        token=owner_access,
+    )
+    if status != 200 or body.get("business_type") != "homestay":
+        fail(f"sector change flow: type change with no items expected 200, got {status} ({body})")
+    print("OK — a business with no items changes type with no sheet.")
+
+    # A business with items: Milk (gets a purchase -> history), Flour (no history of its own, but
+    # Cake's main stock item), Sugar (no history, not used by anything surviving). Cake gets a sale
+    # (history); Smoothie doesn't.
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Sector Change Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector change flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Milk", "unit": "L"},
+                {"name": "Flour", "unit": "kg"},
+                {"name": "Sugar", "unit": "kg"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector change flow: stock bulk create expected 201, got {status} ({body})")
+    milk_id = next(i["id"] for i in body if i["name"] == "Milk")
+    flour_id = next(i["id"] for i in body if i["name"] == "Flour")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {"name": "Cake", "selling_price": "150.00", "main_stock_item": flour_id},
+                {"name": "Smoothie", "selling_price": "60.00"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector change flow: sell bulk create expected 201, got {status} ({body})")
+    cake_id = next(i["id"] for i in body if i["name"] == "Cake")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [{"stock_item": milk_id, "quantity": "10", "unit_price": "60", "line_total": "600"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector change flow: purchase expected 201, got {status} ({body})")
+
+    business_date = _now_iso()[:10]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": cake_id, "quantity": "5"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector change flow: sale expected 201, got {status} ({body})")
+    print("OK — Milk has a purchase, Flour backs Cake, Cake has a sale; Sugar and Smoothie have nothing.")
+
+    # Changing the type without items_action -> 409 with every item's name and the total count.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"business_type": "small_manufacturing"},
+        token=owner_access,
+    )
+    summary = body.get("items_summary", {})
+    if (
+        status != 409
+        or body.get("error", {}).get("code") != "items_decision_needed"
+        or sorted(summary.get("stock_items", [])) != ["Flour", "Milk", "Sugar"]
+        or sorted(summary.get("sell_items", [])) != ["Cake", "Smoothie"]
+        or summary.get("total_count") != 5
+    ):
+        fail(f"sector change flow: expected 409 items_decision_needed with 5 items, got {status} ({body})")
+    print("OK — changing the type with items and no decision returns 409 with names and counts.")
+
+    before_sector_logs = count_audit_rows("business.sector_change", business_id)
+
+    # "Keep my items" — the type changes, nothing is touched.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"business_type": "small_manufacturing", "items_action": "keep"},
+        token=owner_access,
+    )
+    if status != 200 or body.get("business_type") != "small_manufacturing":
+        fail(f"sector change flow: keep expected 200 with the new type, got {status} ({body})")
+    status, stock_body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/?include_inactive=1", token=owner_access
+    )
+    status2, sell_body, _ = request(
+        "GET", f"/businesses/{business_id}/sell-items/?include_inactive=1", token=owner_access
+    )
+    if status != 200 or status2 != 200 or len(stock_body) != 3 or len(sell_body) != 2:
+        fail(f"sector change flow: keep expected all 5 items intact, got {stock_body} / {sell_body}")
+    if count_audit_rows("business.sector_change", business_id) != before_sector_logs + 1:
+        fail("sector change flow: expected one new business.sector_change audit row after keep")
+    print("OK — 'Keep my items': type changed, all 5 items intact, audit row logged.")
+
+    # A failing request (an invalid colour alongside the type change) must change nothing at all.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {
+            "business_type": "home_business",
+            "items_action": "remove",
+            "primary_colour": "#F5F0E8",
+        },
+        token=owner_access,
+    )
+    status_after, after_body, _ = request("GET", "/me/", token=owner_access)
+    after_business = next(b for b in after_body["businesses"] if b["id"] == business_id)
+    if status not in (400, 422) or after_business.get("business_type") != "small_manufacturing":
+        fail(f"sector change flow: a failing request should change nothing, got {status} ({body})")
+    print("OK — a request that fails validation rolls back the whole thing, including the type.")
+
+    # "Remove them and start fresh" — Sugar and Smoothie (no history, nothing surviving uses them)
+    # are gone; Milk (purchase history), Flour (Cake still uses it) and Cake (sale history) remain.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"business_type": "home_business", "items_action": "remove"},
+        token=owner_access,
+    )
+    summary = body.get("items_summary", {})
+    if (
+        status != 200
+        or body.get("business_type") != "home_business"
+        or summary.get("stock_items_removed") != 1
+        or summary.get("sell_items_removed") != 1
+        or len(summary.get("stock_items_kept", [])) != 2
+        or len(summary.get("sell_items_kept", [])) != 1
+    ):
+        fail(f"sector change flow: remove expected 1+1 removed, 2+1 kept, got {status} ({body})")
+    kept_stock_names = {row["name"] for row in summary["stock_items_kept"]}
+    if kept_stock_names != {"Milk", "Flour"}:
+        fail(f"sector change flow: expected Milk and Flour kept, got {kept_stock_names}")
+    print("OK — 'Remove and start fresh': Sugar and Smoothie gone; Milk, Flour and Cake kept and reported.")
+
+    status, stock_body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/?include_inactive=1", token=owner_access
+    )
+    status2, sell_body, _ = request(
+        "GET", f"/businesses/{business_id}/sell-items/?include_inactive=1", token=owner_access
+    )
+    stock_names = {item["name"] for item in stock_body}
+    sell_names = {item["name"] for item in sell_body}
+    if status != 200 or status2 != 200 or stock_names != {"Milk", "Flour"} or sell_names != {"Cake"}:
+        fail(
+            "sector change flow: expected only Milk/Flour and Cake left, got "
+            f"{stock_names} / {sell_names}"
+        )
+    if count_audit_rows("business.sector_change", business_id) != before_sector_logs + 2:
+        fail("sector change flow: expected 2 new business.sector_change audit rows (409 doesn't log)")
+    print("OK — the surviving items match on a fresh read, and every sector change is audit-logged.")
+
+
 def check_stock_flow() -> None:
     owner_mobile, owner_access, _ = signup_and_login("Stock Owner")
     status, body, _ = request(
@@ -3178,6 +3373,7 @@ def main() -> None:
     check_health()
     check_auth_flow()
     check_business_flow()
+    check_sector_change_flow()
     check_stock_flow()
     check_item_setup_flow()
     check_starter_pack_flow()

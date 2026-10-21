@@ -176,6 +176,16 @@ not built yet.
   choices (no conversion exists between any unit, so gap maths is unaffected). New
   `scripts/check_sector_copy.py` (in `npm run check`) fails on food wording outside food types or a
   starter-catalogue unit missing from its type's `allowedUnits`.
+- **Step 23 — Business-type change asks what to do with existing items.** `BusinessUpdateView`
+  PATCH: a `business_type` change with stock/sell items already on the business and no
+  `items_action` returns 409 `items_decision_needed` (`businesses/exceptions.py`'s
+  `ItemsDecisionNeeded`, item names + counts) instead of silently saving, same shape as counts'
+  `NeedsConfirmation`. `items_action: "keep"` just changes the type; `"remove"`
+  (`businesses/sector_change.py`) deletes items with no history (purchases/counts/wastage/sales)
+  and not still used as a sell item's main stock item, keeping and reporting the rest; one
+  transaction, two audit-log actions (`business.update`, `business.sector_change`). New
+  `ChangeBusinessTypeSheet` (setup/1 and Settings' Business profile) shows the sheet every time;
+  "Remove" jumps straight to the new type's starter list.
 
 ## Permission table
 

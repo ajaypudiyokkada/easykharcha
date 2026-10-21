@@ -6,7 +6,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 - `accounts/` — signup, login, refresh, logout, /me; models.py (User), serializers.py, otp.py (OTP, unused by UI yet), ratelimit.py (IP/mobile rate limits), validators.py (PIN/password rules), views.py, urls.py
 - `audit/` — one audit-log row per write; models.py (AuditLog), log.py (log_action helper), no endpoints
-- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Access, AccessRole), views.py, team.py, business_settings.py, permissions.py (the role→permission table), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update), urls.py
+- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Access, AccessRole), views.py (`BusinessUpdateView` — Step 23: a `business_type` change with existing items and no `items_action` raises `ItemsDecisionNeeded`), sector_change.py (Step 23's `remove_items_for_sector_change`, keeping items with history or still used by a sell item), team.py, business_settings.py, permissions.py (the role→permission table), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update; `BusinessUpdateSerializer`'s `items_action`), urls.py
 - `geo/` — Step 21b: India pincode lookup; models.py (Pincode — pincode/area/district/state/office_type, indexed on pincode), states.py (`INDIA_STATES`), management/commands/load_pincodes.py (idempotent CSV load, `--if-empty` for entrypoint.sh), views.py, exceptions.py (PincodeNotFound), urls.py
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
@@ -186,6 +186,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   Log out — the only place Log out lives now, opened from AppShell's avatar/user block
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx`, `RecordSalesSheet.tsx` — the shared
   record sheets
+- `screens/ChangeBusinessTypeSheet.tsx` — Step 23: the keep-or-remove-items sheet shown on a
+  `business_type` change, from setup/1 (going back) and Settings' Business profile
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
   a member, change role (asks for a new secret only when crossing the Manager boundary), reset a
   PIN/password

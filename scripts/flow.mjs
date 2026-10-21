@@ -54,6 +54,7 @@ const STEP16_SCREEN_DIR = 'docs/screens/step16';
 const STEP19_SCREEN_DIR = 'docs/screens/step19';
 const STEP20_SCREEN_DIR = 'docs/screens/step20';
 const STEP21B_SCREEN_DIR = 'docs/screens/step21b';
+const STEP21D_SCREEN_DIR = 'docs/screens/step21d';
 
 function findChrome() {
   const candidates = [
@@ -1150,6 +1151,74 @@ async function checkPincodeLocationFlow(page) {
   await logoutFromAnywhere(page);
 }
 
+// Step 21d: onboard as restaurant_cafe, tick a starter stock item, go back to the sector step, and
+// switch to small_manufacturing — the ChangeBusinessTypeSheet's "Remove them and start fresh"
+// clears the restaurant item and lands straight on /setup/3 showing the manufacturing starter list.
+// Also captures the 390px screenshots Light checks asks for, one per radio option.
+async function checkSectorChangeFlow(page) {
+  await mkdir(STEP21D_SCREEN_DIR, { recursive: true });
+  const name = 'Sector Change Flow';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password);
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+
+  await fillStepOne(page, 'Spice Route Diner', '411001', 'Restaurant or cafe');
+  console.log('OK — onboarded as restaurant_cafe.');
+
+  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+
+  // Tick one starter stock item (Chicken, under "Meat & eggs" — restaurant_cafe's own catalogue)
+  // and save it, so there's something for the sector-change sheet to ask about later.
+  await waitForText(page, 'Pick from common items');
+  await clickAndSettle(await findVisible(page, '[aria-label^="Meat & eggs ("]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Chicken. kg"]'));
+  await clickButton(page, '1 selected — Next');
+  await waitForPath(page, '/setup/4');
+  console.log('OK — ticked and saved one restaurant starter item (Chicken).');
+
+  // Going back to the sector step via the wizard's own Back button (client-side navigation, not a
+  // page reload — a reload would re-bootstrap auth and race setup/1's draft-from-`existing` state).
+  await clickAndSettle(await findVisible(page, '[aria-label="Go back"]'));
+  await waitForPath(page, '/setup/3');
+  await clickAndSettle(await findVisible(page, '[aria-label="Go back"]'));
+  await waitForPath(page, '/setup/2');
+  await clickAndSettle(await findVisible(page, '[aria-label="Go back"]'));
+  await waitForPath(page, '/setup/1');
+  await waitForText(page, 'Your business');
+
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Small manufacturing'));
+  await clickButton(page, 'Next');
+  await waitForText(page, "Changing to Small manufacturing. What should happen to them?");
+  console.log('OK — switching the type with an item already added opens the decision sheet.');
+
+  await page.screenshot({ path: `${STEP21D_SCREEN_DIR}/sheet-keep-390.png` });
+  console.log('OK — "Keep my items" is preselected — 390px screenshot captured.');
+
+  await clickAndSettle(await findVisible(page, '[aria-label="Remove them and start fresh"]'));
+  await page.screenshot({ path: `${STEP21D_SCREEN_DIR}/sheet-remove-390.png` });
+  console.log('OK — "Remove them and start fresh" selected — 390px screenshot captured.');
+
+  await clickButton(page, 'Continue');
+  await waitForPath(page, '/setup/3');
+  await waitForText(page, 'Raw material');
+  console.log('OK — "Remove and start fresh" lands straight on the manufacturing starter list.');
+
+  const stillHasChicken = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('*')).some((el) => el.textContent?.trim() === 'Chicken'),
+  );
+  if (stillHasChicken) {
+    fail('sector change flow: Chicken (the removed restaurant item) is still showing on /setup/3');
+  }
+  console.log("OK — the removed restaurant item (Chicken) is gone from the new type's list.");
+
+  await logoutFromAnywhere(page);
+}
+
 async function main() {
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
@@ -1464,6 +1533,7 @@ async function main() {
     await logoutFromAnywhere(page);
     await checkReportsEmptyStateFlow(page);
     await checkPincodeLocationFlow(page);
+    await checkSectorChangeFlow(page);
 
     await captureStep10Screens(page);
     await captureStep12Screens(page, mobile, password);

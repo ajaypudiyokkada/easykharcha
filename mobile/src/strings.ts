@@ -35,6 +35,27 @@ export const strings = {
       body: 'Your session has expired.',
       button: 'Log in again',
     },
+    changeBusinessType: {
+      title: (count: number) => `You've added ${count} item${count === 1 ? '' : 's'}`,
+      body: (newType: string) => `Changing to ${newType}. What should happen to them?`,
+      keepOption: 'Keep my items',
+      keepHint: 'Change the type only; nothing is deleted.',
+      removeOption: 'Remove them and start fresh',
+      removeHint: "Clear the items, then show the new type's starter list.",
+      moreItems: (count: number) => `+ ${count} more`,
+      continueButton: 'Continue',
+      cancelButton: 'Cancel',
+      keepSavedToast: 'Business type updated. Your items were kept.',
+      removedToast: (removed: number, kept: number) =>
+        kept === 0
+          ? `Removed ${removed} item${removed === 1 ? '' : 's'}.`
+          : `Removed ${removed} item${removed === 1 ? '' : 's'}. Kept ${kept} — they have ` +
+            `records or are used by a sell item.`,
+      errors: {
+        network: "Can't reach EasyKharcha. Check your internet and try again.",
+        generic: 'Something went wrong. Please try again.',
+      },
+    },
   },
   nav: {
     home: 'Home',

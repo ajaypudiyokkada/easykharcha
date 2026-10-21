@@ -99,6 +99,9 @@ class BusinessUpdateSerializer(serializers.Serializer):
     dismiss_checklist = serializers.BooleanField(required=False, write_only=True)
     # Write-only: bypasses the pincode/city/state cross-check below, never a model field.
     manual_location = serializers.BooleanField(required=False, write_only=True, default=False)
+    # Write-only: only meaningful alongside a business_type change when items already exist — see
+    # BusinessUpdateView. Never a model field; read there, not applied by save() below.
+    items_action = serializers.ChoiceField(choices=["keep", "remove"], required=False)
 
     def validate(self, attrs: dict) -> dict:
         return validate_pincode_location(attrs, self.instance)
@@ -109,6 +112,8 @@ class BusinessUpdateSerializer(serializers.Serializer):
             if field == "dismiss_checklist":
                 if value:
                     business.checklist_dismissed_at = timezone.now()
+                continue
+            if field == "items_action":
                 continue
             setattr(business, field, value)
         business.save()
