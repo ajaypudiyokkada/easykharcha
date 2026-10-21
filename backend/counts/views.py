@@ -340,8 +340,13 @@ class TodayView(APIView):
         business_date = today_status["business_date"]
 
         def day_bounds():
+            # The business day itself runs day_starts_hour -> day_starts_hour, not midnight ->
+            # midnight — business_date already accounts for the shift, so the window anchored to
+            # it must too, or "today" wastage near midnight would land in the wrong bucket.
             tz = ZoneInfo(business.timezone)
-            start = datetime.combine(business_date, time.min, tzinfo=tz)
+            start = datetime.combine(
+                business_date, time(hour=business.settings.day_starts_hour), tzinfo=tz
+            )
             return start, start + timedelta(days=1)
 
         start, end = day_bounds()
