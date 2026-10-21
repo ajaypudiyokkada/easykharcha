@@ -154,6 +154,10 @@ not built yet.
   Caddy serves `/static/*` from always matches the running build. `deploy.sh` checks
   `https://api.easykharcha.com/static/admin/css/base.css` returns 200 right after the backend's own
   healthcheck passes.
+- **Step 21c — Admin password change.** `accounts/admin.py`'s `UserAdmin` adds a "Change password"
+  link (reimplementing `django.contrib.auth.admin.UserAdmin`'s own mechanism, since that class is
+  tied to `auth.User`'s fields) so a superuser can reset a locked-out/forgotten-password user's
+  password from the admin — no hash shown, change logged in the admin log like any other edit.
 
 ## Permission table
 
