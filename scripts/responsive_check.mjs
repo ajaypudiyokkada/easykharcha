@@ -479,12 +479,13 @@ async function buildOwnerSession(page) {
   await clickButton(page, '2 selected — Next');
   await waitForPath(page, '/setup/4');
 
+  // Step 22a: the wizard's quick dish form is name/price/portion/group only, no ingredient picker —
+  // Paneer Tikka lands here with no recipe; attaching one is Settings' "Add a dish" job instead.
   await waitForText(page, 'Add your own');
   await clickAndSettle(await findVisible(page, '[aria-label="Veg biryani"]'));
   await typeInto(page, 'Selling price', '120', { minCount: 2 });
   await typeInto(page, 'Name', 'Paneer Tikka', { last: true });
   await typeInto(page, 'Selling price', '180', { last: true });
-  await clickAndSettle(await findVisibleByText(page, 'radio', 'Fresh Paneer'));
   await clickButton(page, 'Add item');
   await waitForText(page, 'Paneer Tikka');
   await clickButton(page, 'Next');
@@ -512,7 +513,8 @@ async function buildOwnerSession(page) {
   const headChefPin = '8417';
   await typeInto(page, 'Name', 'Chef Rahul', { last: true });
   await typeInto(page, 'Mobile number', headChefMobile, { last: true });
-  await clickAndSettle(await findVisibleByText(page, 'radio', 'Head chef'));
+  // This business is "Cloud kitchen" — sectorCopy.json's roleLabels shows it as "Head cook".
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Head cook'));
   await typeInto(page, 'PIN', headChefPin, { last: true });
   await clickButton(page, 'Add person');
   await waitForText(page, 'Chef Rahul');
@@ -1045,7 +1047,7 @@ async function main() {
         open: async (page) => {
           await waitForText(page, 'What you sell');
           await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
-          await waitForText(page, 'Edit item sold');
+          await waitForText(page, 'Edit dish');
         },
       },
       // Step 13

@@ -1,6 +1,6 @@
 import { strings } from '../strings';
 import { findDuplicateName } from './groupItems';
-import { validateOptionalNumber, validateRequiredNumber } from './validateNumber';
+import { validateRequiredNumber } from './validateNumber';
 import type { SellItemDraft } from './SellItemForm';
 
 const s4 = strings.setup.step4;
@@ -8,7 +8,6 @@ const s4 = strings.setup.step4;
 export type SellItemFieldErrors = {
   name?: string;
   price?: string;
-  usesQty?: string;
 };
 
 /** Shared by setup/4's inline add form and Settings' SellItemSheet — see validateStockItem.ts's
@@ -33,13 +32,6 @@ export function validateSellItemDraft(
   if (priceCheck === 'required') errors.price = s4.errors.priceRequired;
   else if (priceCheck === 'invalid') errors.price = s4.errors.invalidNumber;
   else if (priceCheck === 'negative') errors.price = s4.errors.negativeNumber;
-
-  if (draft.mainStockItemId !== null && draft.usesQty.trim()) {
-    const usesCheck = validateOptionalNumber(draft.usesQty);
-    if (usesCheck === 'invalid') errors.usesQty = s4.errors.invalidNumber;
-    else if (usesCheck === 'negative') errors.usesQty = s4.errors.negativeNumber;
-    else if (Number(draft.usesQty.trim()) === 0) errors.usesQty = s4.errors.usesQtyPositive;
-  }
 
   return errors;
 }

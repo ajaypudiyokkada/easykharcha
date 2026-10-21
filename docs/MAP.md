@@ -11,7 +11,17 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount, CountLine), views.py, serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants), exceptions.py, urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
-- `stock/` — stock items, sell items; models.py (StockItem, SellItem — Step 19 added `group`, a free-text, blank-allowed, case-insensitively-canonicalised-per-business field; Step 22's `Unit` has 16 pure-label choices, no conversion between any of them), views.py (`_canonical_group`/`_group_resolver`), serializers.py, exceptions.py, urls.py
+- `stock/` — stock items, dishes (SellItem); models.py (StockItem, SellItem — Step 19 added `group`;
+  Step 22's `Unit` has 16 pure-label choices, no backend conversion between any of them; Step 22a
+  replaced `main_stock_item`/`uses_qty` with `SellItemIngredient` (one row per ingredient, qty
+  always in the stock item's own unit) and added `portion_label`/`recipe_status`
+  (none/unconfirmed/confirmed — gap.py, reports/service.py and sector_change.py only trust
+  `confirmed`)), views.py (`SellItemListView.post` is the single dish create with ingredients,
+  always confirmed; `sell-items/bulk/` stays ingredients-free, recipe_status=none, `skip_existing`),
+  serializers.py (`SellItemCreateSerializer`/`IngredientRowSerializer`), exceptions.py, urls.py.
+  Next step plugs in here: a choice screen before "Add what you sell" (scan/upload vs one by one),
+  a bulk-create-without-ingredients caller, `RecipeStatus.UNCONFIRMED`, and
+  `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props — none built yet.
 - `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled; models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
@@ -116,11 +126,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
   — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —
-  edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx`, `settings/sell.tsx` — Step 19:
-  an inline add form (instant-save, GroupedList) + a Sheet for editing an existing item only
-  (StockItemForm/SellItemForm); Step 20 added `settings/stock.tsx`'s "Add from starter list" button,
-  opening `StarterStockPickerSheet`; `settings/alerts.tsx` — the 6 alert settings (Step 18 added
-  expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
+  edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx` — Step 19's inline add
+  (instant-save, GroupedList) + edit Sheet (StockItemForm); Step 20 added its "Add from starter
+  list" button, opening `StarterStockPickerSheet`; `settings/sell.tsx` — the dish list (badges:
+  "Needs ingredients"/"Estimate - confirm"), a quick no-ingredients add box (SellItemForm) and
+  "Add {label}" opening `SellItemSheet` (DishRecipeForm, add or edit); `?filter=needs_ingredients`
+  and `?edit=<id>` query params drive it from Home's nudge and a count-gap reason link;
+  `settings/alerts.tsx` — the 6 alert settings (Step 18 added expiry_warn_days; the hub's "Expiry
+  alerts" row links here too, not its own screen)
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing
 
@@ -139,7 +152,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `constants.ts` — breakpoints (BREAKPOINT_TABLET=600, NAV_SIDE_BREAKPOINT=840), touch/control sizes
 - `EmptyState.tsx` — "nothing here yet" block with optional action
 - `GroupedList.tsx` — Step 19: collapsible group headings (Ungrouped last) over a flat item list —
-  Settings' stock/sell lists, the wizard's "added items" list, the sell-item form's "uses" picker;
+  Settings' stock/sell lists, the wizard's "added items" list, DishRecipeForm's ingredient picker;
   Step 20 added optional `countLabel`/`headerAccessory` props for the starter-stock picker's "N of
   M" + Select all
 - `Icon.tsx` — named lucide-react-native icon registry (IconName union)
@@ -191,13 +204,16 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
   a member, change role (asks for a new secret only when crossing the Manager boundary), reset a
   PIN/password
-- `screens/StockItemSheet.tsx`, `SellItemSheet.tsx` — Settings' add/edit sheets (list screen owns
-  the list, these own the form + save)
+- `screens/StockItemSheet.tsx` — Settings' stock add/edit sheet; `SellItemSheet.tsx` — Step 22a:
+  Settings' dish add/edit sheet, wrapping `DishRecipeForm` (null `editingItem` = create)
 - `screens/StarterStockPicker.tsx` — Step 20: the grouped/searchable starter-stock picker (setup/3
   and Settings); `StarterStockPickerSheet.tsx` wraps it in a Sheet with its own Continue button for
   the Settings entry point
-- `forms/StockItemForm.tsx`, `SellItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared
-  form component each, used by both the setup wizard and Settings
+- `forms/StockItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared form component each,
+  used by both the setup wizard and Settings; `SellItemForm.tsx` — the quick, no-ingredients dish
+  fields (name/price/portion/group) shared by the wizard and Settings' quick-add box only; Step
+  22a's `DishRecipeForm.tsx` (+ `unitConversion.ts`'s g<->kg/ml<->L entry-time conversion,
+  `validateDish.ts`) is the full dish form with ingredients, used only via `SellItemSheet`
 - `forms/PincodeLocationField.tsx` — Step 21b: Country (fixed) + Pincode lookup -> State (read-only) +
   City (the pincode's district(s), first preselected) + optional searchable Area; "Enter city
   yourself" falls back to free-text City + a State picker (sets `manual_location`) when a pincode
@@ -208,7 +224,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `sectorCopy.ts`/`sectorCopy.json` — Step 22: the one config, keyed by all 9 `BusinessType`s, for
   every sector-varying string and unit list (stock/sell nouns, placeholders, group suggestions, the
   "uses" picker label/help, shared/goes-off toggle wording, count/wastage help, `allowedUnits`/
-  `defaultUnit`, the Head-chef role label); `labels.ts` is now a thin wrapper over it
+  `defaultUnit`, the Head-chef role label; Step 22a added `sellGroupSuggestions`/
+  `sellPortionPlaceholder`); `labels.ts` is now a thin wrapper over it
 - `labels.ts` — copy that varies by business type (delegates to sectorCopy.ts)
 - `format.ts` — ₹ and date/time formatting in the business's own timezone
 - `theme/tokens.ts` — colours, spacing, radii, type sizes (closed set)

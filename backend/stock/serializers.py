@@ -2,13 +2,13 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import SellItem, StockItem, Unit
+from .models import SellItem, SellItemIngredient, StockItem, Unit
 
 ZERO = Decimal("0")
-# A sell item's uses_qty states "one unit sold uses this much of the main stock item" — 0 isn't a
-# meaningful answer to that (it just means no main item was chosen, already expressed by leaving
-# uses_qty unset entirely), so a provided value must be a real positive amount.
+# An ingredient quantity states "one portion uses this much of the stock item" — 0 isn't a
+# meaningful answer to that, so a provided value must be a real positive amount.
 MIN_POSITIVE_QTY = Decimal("0.001")
+MAX_INGREDIENT_QTY = Decimal("100000")
 
 
 def _clean_group(value: str) -> str:
@@ -125,15 +125,20 @@ class StockItemSerializer(serializers.ModelSerializer):
         )
 
 
+def _clean_portion_label(value: str) -> str:
+    return value.strip()
+
+
 class SellItemRowSerializer(serializers.Serializer):
+    """One row of a bulk sell-items create — deliberately carries no ingredients (Step 22a): this
+    is the "quick setup" path (the wizard, starter-pack items), always landing at
+    recipe_status=none. Attaching ingredients is the manual dish form's job, see
+    SellItemCreateSerializer below — not exposed anywhere in the UI yet."""
+
     name = serializers.CharField(max_length=120)
     selling_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=ZERO)
-    main_stock_item = serializers.IntegerField(required=False, allow_null=True)
-    # How much of main_stock_item one unit sold uses — only meaningful alongside main_stock_item;
-    # the view rejects it on its own, since that check needs to know whether a stock item ended up
-    # linked at all, which only the view can resolve.
-    uses_qty = serializers.DecimalField(
-        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=MIN_POSITIVE_QTY
+    portion_label = serializers.CharField(
+        max_length=40, required=False, allow_blank=True, default=""
     )
     group = serializers.CharField(max_length=40, required=False, allow_blank=True, default="")
 
@@ -146,21 +151,78 @@ class SellItemRowSerializer(serializers.Serializer):
     def validate_group(self, value: str) -> str:
         return _clean_group(value)
 
+    def validate_portion_label(self, value: str) -> str:
+        return _clean_portion_label(value)
+
+
+class IngredientRowSerializer(serializers.Serializer):
+    """One ingredient row of a dish — quantity is always in the stock item's own unit (the client
+    converts g/ml/pieces to it before sending, see mobile/src/forms/unitConversion.ts)."""
+
+    stock_item = serializers.IntegerField()
+    quantity = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=MIN_POSITIVE_QTY,
+        max_value=MAX_INGREDIENT_QTY,
+    )
+
+
+def _validate_ingredient_rows(rows: list[dict]) -> list[dict]:
+    if not rows:
+        raise serializers.ValidationError("Add at least one ingredient.")
+    seen_stock_item_ids: set[int] = set()
+    for row in rows:
+        if row["stock_item"] in seen_stock_item_ids:
+            raise serializers.ValidationError("Each ingredient can only be used once in a dish.")
+        seen_stock_item_ids.add(row["stock_item"])
+    return rows
+
+
+class SellItemCreateSerializer(serializers.Serializer):
+    """POST sell-items/ — the manual dish form's single-item create, with its full recipe (Step
+    22a). The view resolves `ingredients[].stock_item` against this business's own, non-shared
+    stock items; a dish can't be saved without at least one valid one, so this always lands at
+    recipe_status=confirmed."""
+
+    name = serializers.CharField(max_length=120)
+    selling_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=ZERO)
+    portion_label = serializers.CharField(
+        max_length=40, required=False, allow_blank=True, default=""
+    )
+    group = serializers.CharField(max_length=40, required=False, allow_blank=True, default="")
+    ingredients = IngredientRowSerializer(many=True)
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Enter a name.")
+        return value
+
+    def validate_group(self, value: str) -> str:
+        return _clean_group(value)
+
+    def validate_portion_label(self, value: str) -> str:
+        return _clean_portion_label(value)
+
+    def validate_ingredients(self, value: list[dict]) -> list[dict]:
+        return _validate_ingredient_rows(value)
+
 
 class SellItemUpdateSerializer(serializers.Serializer):
-    """PATCH sell-items/<id>/ — every field optional (partial update). Cross-field checks (the
-    stock item must belong to this business and not be shared, uses_qty needs a main stock item)
-    need the resolved stock item, so the view does those."""
+    """PATCH sell-items/<id>/ — every field optional (partial update). `ingredients`, when present
+    at all, fully replaces the dish's ingredient rows under the same rule as create (at least one,
+    no duplicates) and re-confirms the recipe — editing a dish still goes through the same form.
+    Cross-field checks that need a query (stock items must belong to this business, not be shared)
+    are the view's job, same split as StockItemUpdateSerializer."""
 
     name = serializers.CharField(max_length=120, required=False)
     selling_price = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, min_value=ZERO
     )
-    main_stock_item = serializers.IntegerField(required=False, allow_null=True)
-    uses_qty = serializers.DecimalField(
-        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=MIN_POSITIVE_QTY
-    )
+    portion_label = serializers.CharField(max_length=40, required=False, allow_blank=True)
     group = serializers.CharField(max_length=40, required=False, allow_blank=True)
+    ingredients = IngredientRowSerializer(many=True, required=False)
     active = serializers.BooleanField(required=False)
 
     def validate_name(self, value: str) -> str:
@@ -172,9 +234,24 @@ class SellItemUpdateSerializer(serializers.Serializer):
     def validate_group(self, value: str) -> str:
         return _clean_group(value)
 
+    def validate_portion_label(self, value: str) -> str:
+        return _clean_portion_label(value)
+
+    def validate_ingredients(self, value: list[dict]) -> list[dict]:
+        return _validate_ingredient_rows(value)
+
+
+class SellItemIngredientSerializer(serializers.ModelSerializer):
+    stock_item_name = serializers.CharField(source="stock_item.name", read_only=True)
+    unit = serializers.CharField(source="stock_item.unit", read_only=True)
+
+    class Meta:
+        model = SellItemIngredient
+        fields = ("id", "stock_item", "stock_item_name", "unit", "quantity")
+
 
 class SellItemSerializer(serializers.ModelSerializer):
-    main_stock_item = serializers.PrimaryKeyRelatedField(read_only=True)
+    ingredients = SellItemIngredientSerializer(many=True, read_only=True)
 
     class Meta:
         model = SellItem
@@ -182,8 +259,9 @@ class SellItemSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "selling_price",
-            "main_stock_item",
-            "uses_qty",
+            "portion_label",
+            "recipe_status",
+            "ingredients",
             "group",
             "active",
             "created_at",

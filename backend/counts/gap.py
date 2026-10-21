@@ -9,7 +9,7 @@ from django.db.models import Sum
 from businesses.models import Business
 from purchases.models import PurchaseLine
 from sales.models import Sale
-from stock.models import SellItem
+from stock.models import RecipeStatus, SellItemIngredient
 from wastage.models import WastageEntry
 
 from .models import CountLine, CountLineState, CountType, StockCount
@@ -72,15 +72,35 @@ def gap_for_line(
     if prev_count is None or used_since_last_count is None:
         return {**empty, "gap_reason": {"code": "no_previous_count"}}
 
-    sell_items = list(
-        SellItem.objects.filter(business=business, active=True, main_stock_item=stock_item)
+    ingredient_rows = list(
+        SellItemIngredient.objects.filter(
+            stock_item=stock_item, sell_item__business=business, sell_item__active=True
+        ).select_related("sell_item")
     )
-    if not sell_items:
+    if not ingredient_rows:
         return {**empty, "gap_reason": {"code": "not_sold"}}
 
-    missing_uses = [item for item in sell_items if item.uses_qty is None]
-    if missing_uses:
-        return {**empty, "gap_reason": {"code": "uses_not_set", "count": len(missing_uses)}}
+    # Step 22a: a dish whose recipe isn't confirmed (none — e.g. the no-ingredients bulk endpoint —
+    # or a future AI estimate still awaiting review) can't be trusted for gap maths even if it
+    # happens to carry an ingredient row, so it blocks this stock item's whole computation the same
+    # way a missing uses_qty used to (replaces the old uses_not_set reason).
+    not_confirmed = [
+        row.sell_item
+        for row in ingredient_rows
+        if row.sell_item.recipe_status != RecipeStatus.CONFIRMED
+    ]
+    if not_confirmed:
+        return {
+            **empty,
+            "gap_reason": {
+                "code": "recipe_not_confirmed",
+                "count": len(not_confirmed),
+                "sell_items": [{"id": item.id, "name": item.name} for item in not_confirmed],
+            },
+        }
+
+    sell_items = [row.sell_item for row in ingredient_rows]
+    quantity_by_sell_item_id = {row.sell_item_id: row.quantity for row in ingredient_rows}
 
     window_start, window_end = gap_window(prev_count, count)
     window_dates = []
@@ -120,7 +140,7 @@ def gap_for_line(
             ).aggregate(total=Sum("quantity"))["total"]
             or ZERO
         )
-        expected_used += units_sold * item.uses_qty
+        expected_used += units_sold * quantity_by_sell_item_id[item.id]
 
     gap_qty = used_since_last_count - expected_used
     unit_cost = unit_cost_for(stock_item)

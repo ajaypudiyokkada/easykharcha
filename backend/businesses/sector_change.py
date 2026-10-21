@@ -5,7 +5,7 @@ it reaches into four other apps' models — none of which import this module bac
 from counts.models import CountLine
 from purchases.models import PurchaseLine
 from sales.models import Sale
-from stock.models import SellItem, StockItem
+from stock.models import SellItem, SellItemIngredient, StockItem
 from wastage.models import WastageEntry
 
 
@@ -45,10 +45,11 @@ def remove_items_for_sector_change(business) -> dict:
         )
     )
     # Only the sell items still standing after the delete above count as "in use" — one that was
-    # itself just removed no longer protects the stock item it pointed to.
+    # itself just removed no longer protects the stock item it pointed to (its ingredient rows were
+    # cascade-deleted along with it).
     in_use_ids = set(
-        business.sell_items.exclude(main_stock_item=None).values_list(
-            "main_stock_item_id", flat=True
+        SellItemIngredient.objects.filter(sell_item__business=business).values_list(
+            "stock_item_id", flat=True
         )
     )
 

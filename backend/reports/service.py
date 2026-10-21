@@ -20,6 +20,7 @@ from counts.gap import lines_with_gap, unit_cost_for
 from counts.models import CountType, StockCount
 from purchases.models import Purchase, PurchaseLine
 from sales.models import Sale
+from stock.models import RecipeStatus
 from wastage.models import WastageEntry
 
 ZERO = Decimal("0")
@@ -365,13 +366,18 @@ def _price_trend(business, window_start_dt, window_end_dt, requested_item_id):
 
 
 def _sales_vs_cost(business, buckets, window_start_date, window_end_date):
+    """Step 22a: a dish's cost is the sum of every confirmed ingredient's quantity x its own unit
+    cost — only sell items with recipe_status=confirmed count toward `covered_amount` at all, same
+    rule gap maths uses, so "what fraction of sales do we even know the cost of" stays honest."""
     sales = list(
         Sale.objects.filter(
             business=business,
             is_deleted=False,
             business_date__gte=window_start_date,
             business_date__lte=window_end_date,
-        ).select_related("sell_item", "sell_item__main_stock_item")
+        )
+        .select_related("sell_item")
+        .prefetch_related("sell_item__ingredients__stock_item")
     )
 
     sales_by_date: dict = defaultdict(lambda: ZERO)
@@ -383,14 +389,25 @@ def _sales_vs_cost(business, buckets, window_start_date, window_end_date):
         total_amount += sale.amount
         sales_by_date[sale.business_date] += sale.amount
         sell_item = sale.sell_item
-        if sell_item.uses_qty is not None and sell_item.main_stock_item is not None:
-            covered_amount += sale.amount
-            stock_item = sell_item.main_stock_item
+        ingredients = list(sell_item.ingredients.all())
+        if sell_item.recipe_status != RecipeStatus.CONFIRMED or not ingredients:
+            continue
+
+        unit_cost_per_portion = ZERO
+        every_ingredient_costed = True
+        for ingredient in ingredients:
+            stock_item = ingredient.stock_item
             if stock_item.id not in cost_cache:
                 cost_cache[stock_item.id] = unit_cost_for(stock_item)
             unit_cost = cost_cache[stock_item.id]
-            if unit_cost is not None:
-                cost_by_date[sale.business_date] += sale.quantity * sell_item.uses_qty * unit_cost
+            if unit_cost is None:
+                every_ingredient_costed = False
+                break
+            unit_cost_per_portion += ingredient.quantity * unit_cost
+
+        if every_ingredient_costed:
+            covered_amount += sale.amount
+            cost_by_date[sale.business_date] += sale.quantity * unit_cost_per_portion
 
     rows = []
     total_cost = ZERO

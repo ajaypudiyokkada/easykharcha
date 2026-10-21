@@ -30,8 +30,8 @@ class StockItemUnitLocked(APIException):
 
 
 class StockItemInUse(APIException):
-    """Carries the names of the active sell items still pointing at this stock item as their main
-    item, folded straight into the message — there's no separate client-side lookup for this one."""
+    """Carries the names of the active sell items whose recipe still includes this stock item,
+    folded straight into the message — there's no separate client-side lookup for this one."""
 
     status_code = 422
     default_code = "STOCK_ITEM_IN_USE"
@@ -39,6 +39,6 @@ class StockItemInUse(APIException):
     def __init__(self, sell_item_names: list[str]):
         names = ", ".join(sell_item_names)
         super().__init__(
-            detail=f"Can't deactivate — still used as the main item for: {names}. "
+            detail=f"Can't deactivate — still used as an ingredient in: {names}. "
             "Deactivate those first."
         )

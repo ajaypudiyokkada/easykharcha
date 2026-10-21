@@ -46,10 +46,9 @@ one -> another business's users get 403/404 on every new endpoint.
 
 Then the Step 12 settings flow: renaming a stock item succeeds -> a case-insensitive duplicate name
 is rejected -> changing its unit is refused once it has a purchase -> deactivating it is refused while
-an active sell item still uses it as the main item -> deactivating that sell item, then the stock
-item, both succeed -> a sell item's uses_qty is saved once it has a main stock item, and rejected
-without one -> a Manager gets 403 on every one of these PATCHes -> audit rows exist for the stock and
-sell item updates.
+an active dish still has it as an ingredient -> deactivating that dish, then the stock item, both
+succeed -> editing a dish's ingredients re-confirms its recipe -> a Manager gets 403 on every one of
+these PATCHes -> audit rows exist for the stock and sell item updates.
 
 Then the Step 13 team reset flow: a weak PIN is rejected on reset -> resetting a Helper's PIN
 invalidates the old PIN and their old refresh token, and the new PIN works -> Helper <-> Head chef
@@ -59,14 +58,15 @@ one is given -> removing a member drops their access to the business but their a
 change, and remove, but can still view the team list.
 
 Then the Step 14 sales/stock-gap flow: an opening count (Milk, 12 L) -> a purchase (20 L at Rs 64)
-and wastage (1.5 L) in between -> a closing count (8 L) -> used_since_last_count 22.5 -> a sell item
-("Tea pack", uses 0.2 L milk) sells 100 units in the window -> count review shows expected_used 20,
-gap_qty 2.5, gap_value Rs 160, status ok, flagged (12.5% over the 10% default) -> a second sell item
-using milk with no uses_qty makes the gap not_comparable/uses_not_set -> deactivating it and then
-deleting the window's only sale makes it not_comparable/sales_missing with that date -> a Manager can
-record sales but gets 403 on delete -> a Helper gets 403 on every sales endpoint -> a future-dated
-sale is rejected -> the Owner deletes a sale and the summary updates -> Helper/Head chef count
-endpoints carry no expected/gap field (enforced by the existing 403 on count review).
+and wastage (1.5 L) in between -> a closing count (8 L) -> used_since_last_count 22.5 -> a dish
+("Tea pack", a confirmed recipe using 0.2 L milk) sells 100 units in the window -> count review shows
+expected_used 20, gap_qty 2.5, gap_value Rs 160, status ok, flagged (12.5% over the 10% default) ->
+a second, unrelated dish with no recipe at all (recipe_status=none, no ingredients — the
+no-ingredients bulk endpoint) doesn't touch Milk's gap in any way -> deleting the window's only sale
+makes it not_comparable/sales_missing with that date -> a Manager can record sales but gets 403 on
+delete -> a Helper gets 403 on every sales endpoint -> a future-dated sale is rejected -> the Owner
+deletes a sale and the summary updates -> Helper/Head chef count endpoints carry no expected/gap
+field (enforced by the existing 403 on count review).
 
 Then the Step 15 alerts flow: one business trips count_late (closing_count_hour 0), price_rise (two
 purchases at 60 then one at 70) and wastage_high (2 L wasted against 20 L bought) in a single GET,
@@ -95,6 +95,14 @@ out is a 401. Business create accepts a pincode whose district matches the given
 automatically) -> rejects one whose city doesn't match any of the pincode's areas -> rejects an unknown
 pincode outright -> accepts that same unknown pincode once manual_location is set, saving the typed
 city/state as-is -> a later update giving a mismatched state for an existing pincode is rejected too.
+
+Then the Step 22a dish-recipe flow: a dish can't be saved with zero ingredients -> a shared stock item
+can't be picked as one -> the same stock item twice in one dish is rejected -> a 0.150 kg ingredient
+amount (what the client already converted "150 g" down to) stores and reads back as exactly that ->
+a valid 2-ingredient dish lands at recipe_status=confirmed -> editing it to a different ingredient set
+replaces the rows and keeps it confirmed -> the no-ingredients bulk endpoint always creates
+recipe_status=none, and skip_existing makes repeating the same bulk call a no-op instead of erroring
+on the names it already created.
 """
 
 import binascii
@@ -162,7 +170,9 @@ def request(
     headers = {"Origin": ORIGIN, "Content-Type": content_type or "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(f"{BASE_URL}{path}", data=data, headers=headers, method=method)
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}", data=data, headers=headers, method=method
+    )
     try:
         response = urllib.request.urlopen(req, timeout=10)
     except urllib.error.HTTPError as exc:
@@ -176,7 +186,9 @@ def request(
     return response.status, payload, response.headers
 
 
-def make_png(width: int = 8, height: int = 8, rgb: tuple[int, int, int] = (31, 111, 99)) -> bytes:
+def make_png(
+    width: int = 8, height: int = 8, rgb: tuple[int, int, int] = (31, 111, 99)
+) -> bytes:
     """A minimal valid solid-colour PNG, built by hand (signature + IHDR + IDAT + IEND) so this
     script stays stdlib-only — no Pillow dependency just to prove an upload is a real image."""
 
@@ -210,17 +222,51 @@ def multipart_body(field_name: str, filename: str, content: bytes, content_type:
     return body, f"multipart/form-data; boundary={boundary}"
 
 
+def _create_dish(
+    business_id: str,
+    owner_access: str,
+    name: str,
+    price: str,
+    ingredients: list[tuple[int, str]],
+    group: str | None = None,
+    portion_label: str | None = None,
+) -> tuple[int, dict]:
+    """POSTs sell-items/ — Step 22a's single dish create, the only way to attach ingredients. Always
+    lands at recipe_status=confirmed; fails loudly on anything but 201. Returns (dish_id, body)."""
+    payload: dict = {
+        "name": name,
+        "selling_price": price,
+        "ingredients": [
+            {"stock_item": sid, "quantity": qty} for sid, qty in ingredients
+        ],
+    }
+    if group is not None:
+        payload["group"] = group
+    if portion_label is not None:
+        payload["portion_label"] = portion_label
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/sell-items/", payload, token=owner_access
+    )
+    if status != 201:
+        fail(f"create dish ({name}): expected 201, got {status} ({body})")
+    return body["id"], body
+
+
 def check_health() -> None:
     status, body, headers = request("GET", "/health/")
     if status != 200:
         fail(f"health: expected HTTP 200, got {status}")
     if set(body.keys()) != EXPECTED_HEALTH_KEYS:
-        fail(f"health: unexpected JSON shape, expected keys {EXPECTED_HEALTH_KEYS}, got {body}")
+        fail(
+            f"health: unexpected JSON shape, expected keys {EXPECTED_HEALTH_KEYS}, got {body}"
+        )
     if body.get("status") != "ok" or body.get("database") != "ok":
         fail(f"health: reports a problem: {body}")
     if headers.get("Access-Control-Allow-Origin") != ORIGIN:
         fail(f"health: missing or wrong CORS header for Origin {ORIGIN!r}")
-    print(f"OK — {BASE_URL}/health/ reachable, response shape correct, CORS header present.")
+    print(
+        f"OK — {BASE_URL}/health/ reachable, response shape correct, CORS header present."
+    )
 
 
 def signup_and_login(name: str) -> tuple[str, str, str]:
@@ -234,7 +280,9 @@ def signup_and_login(name: str) -> tuple[str, str, str]:
     )
     if status != 201:
         fail(f"signup ({name}): expected HTTP 201, got {status} ({body})")
-    status, body, _ = request("POST", "/auth/login/", {"mobile": mobile, "secret": password})
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": mobile, "secret": password}
+    )
     if status != 200:
         fail(f"login ({name}): expected HTTP 200, got {status} ({body})")
     return mobile, body["access"], body["refresh"]
@@ -259,7 +307,10 @@ def check_business_flow() -> None:
 
     # PATCH colour (valid)
     status, body, _ = request(
-        "PATCH", f"/businesses/{business_id}/", {"primary_colour": "#4B4FB0"}, token=owner_access
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"primary_colour": "#4B4FB0"},
+        token=owner_access,
     )
     if status != 200 or body.get("primary_colour") != "#4B4FB0":
         fail(
@@ -269,14 +320,19 @@ def check_business_flow() -> None:
 
     # PATCH colour (too light for white text — fails the 4.5:1 check)
     status, body, _ = request(
-        "PATCH", f"/businesses/{business_id}/", {"primary_colour": "#F5F0E8"}, token=owner_access
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"primary_colour": "#F5F0E8"},
+        token=owner_access,
     )
     if status not in (400, 422):
         fail(f"bad colour: expected a validation error, got {status} ({body})")
     print("OK — a too-light colour is rejected.")
 
     # logo upload — a real PNG
-    png_body, png_content_type = multipart_body("logo", "logo.png", make_png(), "image/png")
+    png_body, png_content_type = multipart_body(
+        "logo", "logo.png", make_png(), "image/png"
+    )
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/logo/",
@@ -300,7 +356,9 @@ def check_business_flow() -> None:
         content_type=fake_content_type,
     )
     if status not in (400, 422):
-        fail(f"logo upload: expected a non-image file to be rejected, got {status} ({body})")
+        fail(
+            f"logo upload: expected a non-image file to be rejected, got {status} ({body})"
+        )
     print("OK — a non-image file is rejected regardless of its claimed type.")
 
     # /me shows the business
@@ -317,10 +375,15 @@ def check_business_flow() -> None:
     if business_id in other_business_ids:
         fail(f"isolation: {other_mobile} can see {owner_mobile}'s business")
     status, body, _ = request(
-        "PATCH", f"/businesses/{business_id}/", {"tagline": "hijacked"}, token=other_access
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"tagline": "hijacked"},
+        token=other_access,
     )
     if status not in (403, 404):
-        fail(f"isolation: an unrelated user could update the business, got {status} ({body})")
+        fail(
+            f"isolation: an unrelated user could update the business, got {status} ({body})"
+        )
     print("OK — a second user can neither see nor edit the business.")
 
 
@@ -348,7 +411,9 @@ def check_sector_change_flow() -> None:
         token=owner_access,
     )
     if status != 200 or body.get("business_type") != "homestay":
-        fail(f"sector change flow: type change with no items expected 200, got {status} ({body})")
+        fail(
+            f"sector change flow: type change with no items expected 200, got {status} ({body})"
+        )
     print("OK — a business with no items changes type with no sheet.")
 
     # A business with items: Milk (gets a purchase -> history), Flour (no history of its own, but
@@ -377,24 +442,25 @@ def check_sector_change_flow() -> None:
         token=owner_access,
     )
     if status != 201:
-        fail(f"sector change flow: stock bulk create expected 201, got {status} ({body})")
+        fail(
+            f"sector change flow: stock bulk create expected 201, got {status} ({body})"
+        )
     milk_id = next(i["id"] for i in body if i["name"] == "Milk")
     flour_id = next(i["id"] for i in body if i["name"] == "Flour")
 
+    cake_id, _ = _create_dish(
+        business_id, owner_access, "Cake", "150.00", [(flour_id, "0.200")]
+    )
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sell-items/bulk/",
-        {
-            "items": [
-                {"name": "Cake", "selling_price": "150.00", "main_stock_item": flour_id},
-                {"name": "Smoothie", "selling_price": "60.00"},
-            ]
-        },
+        {"items": [{"name": "Smoothie", "selling_price": "60.00"}]},
         token=owner_access,
     )
     if status != 201:
-        fail(f"sector change flow: sell bulk create expected 201, got {status} ({body})")
-    cake_id = next(i["id"] for i in body if i["name"] == "Cake")
+        fail(
+            f"sector change flow: sell bulk create expected 201, got {status} ({body})"
+        )
 
     status, body, _ = request(
         "POST",
@@ -402,7 +468,14 @@ def check_sector_change_flow() -> None:
         {
             "supplier_name": "Dairy Co",
             "purchase_date_time": _now_iso(),
-            "lines": [{"stock_item": milk_id, "quantity": "10", "unit_price": "60", "line_total": "600"}],
+            "lines": [
+                {
+                    "stock_item": milk_id,
+                    "quantity": "10",
+                    "unit_price": "60",
+                    "line_total": "600",
+                }
+            ],
         },
         token=owner_access,
     )
@@ -413,12 +486,17 @@ def check_sector_change_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sales/",
-        {"business_date": business_date, "lines": [{"sell_item": cake_id, "quantity": "5"}]},
+        {
+            "business_date": business_date,
+            "lines": [{"sell_item": cake_id, "quantity": "5"}],
+        },
         token=owner_access,
     )
     if status != 201:
         fail(f"sector change flow: sale expected 201, got {status} ({body})")
-    print("OK — Milk has a purchase, Flour backs Cake, Cake has a sale; Sugar and Smoothie have nothing.")
+    print(
+        "OK — Milk has a purchase, Flour backs Cake, Cake has a sale; Sugar and Smoothie have nothing."
+    )
 
     # Changing the type without items_action -> 409 with every item's name and the total count.
     status, body, _ = request(
@@ -435,8 +513,12 @@ def check_sector_change_flow() -> None:
         or sorted(summary.get("sell_items", [])) != ["Cake", "Smoothie"]
         or summary.get("total_count") != 5
     ):
-        fail(f"sector change flow: expected 409 items_decision_needed with 5 items, got {status} ({body})")
-    print("OK — changing the type with items and no decision returns 409 with names and counts.")
+        fail(
+            f"sector change flow: expected 409 items_decision_needed with 5 items, got {status} ({body})"
+        )
+    print(
+        "OK — changing the type with items and no decision returns 409 with names and counts."
+    )
 
     before_sector_logs = count_audit_rows("business.sector_change", business_id)
 
@@ -448,17 +530,30 @@ def check_sector_change_flow() -> None:
         token=owner_access,
     )
     if status != 200 or body.get("business_type") != "small_manufacturing":
-        fail(f"sector change flow: keep expected 200 with the new type, got {status} ({body})")
+        fail(
+            f"sector change flow: keep expected 200 with the new type, got {status} ({body})"
+        )
     status, stock_body, _ = request(
-        "GET", f"/businesses/{business_id}/stock-items/?include_inactive=1", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/stock-items/?include_inactive=1",
+        token=owner_access,
     )
     status2, sell_body, _ = request(
-        "GET", f"/businesses/{business_id}/sell-items/?include_inactive=1", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/sell-items/?include_inactive=1",
+        token=owner_access,
     )
     if status != 200 or status2 != 200 or len(stock_body) != 3 or len(sell_body) != 2:
-        fail(f"sector change flow: keep expected all 5 items intact, got {stock_body} / {sell_body}")
-    if count_audit_rows("business.sector_change", business_id) != before_sector_logs + 1:
-        fail("sector change flow: expected one new business.sector_change audit row after keep")
+        fail(
+            f"sector change flow: keep expected all 5 items intact, got {stock_body} / {sell_body}"
+        )
+    if (
+        count_audit_rows("business.sector_change", business_id)
+        != before_sector_logs + 1
+    ):
+        fail(
+            "sector change flow: expected one new business.sector_change audit row after keep"
+        )
     print("OK — 'Keep my items': type changed, all 5 items intact, audit row logged.")
 
     # A failing request (an invalid colour alongside the type change) must change nothing at all.
@@ -474,9 +569,16 @@ def check_sector_change_flow() -> None:
     )
     status_after, after_body, _ = request("GET", "/me/", token=owner_access)
     after_business = next(b for b in after_body["businesses"] if b["id"] == business_id)
-    if status not in (400, 422) or after_business.get("business_type") != "small_manufacturing":
-        fail(f"sector change flow: a failing request should change nothing, got {status} ({body})")
-    print("OK — a request that fails validation rolls back the whole thing, including the type.")
+    if (
+        status not in (400, 422)
+        or after_business.get("business_type") != "small_manufacturing"
+    ):
+        fail(
+            f"sector change flow: a failing request should change nothing, got {status} ({body})"
+        )
+    print(
+        "OK — a request that fails validation rolls back the whole thing, including the type."
+    )
 
     # "Remove them and start fresh" — Sugar and Smoothie (no history, nothing surviving uses them)
     # are gone; Milk (purchase history), Flour (Cake still uses it) and Cake (sale history) remain.
@@ -495,28 +597,50 @@ def check_sector_change_flow() -> None:
         or len(summary.get("stock_items_kept", [])) != 2
         or len(summary.get("sell_items_kept", [])) != 1
     ):
-        fail(f"sector change flow: remove expected 1+1 removed, 2+1 kept, got {status} ({body})")
+        fail(
+            f"sector change flow: remove expected 1+1 removed, 2+1 kept, got {status} ({body})"
+        )
     kept_stock_names = {row["name"] for row in summary["stock_items_kept"]}
     if kept_stock_names != {"Milk", "Flour"}:
-        fail(f"sector change flow: expected Milk and Flour kept, got {kept_stock_names}")
-    print("OK — 'Remove and start fresh': Sugar and Smoothie gone; Milk, Flour and Cake kept and reported.")
+        fail(
+            f"sector change flow: expected Milk and Flour kept, got {kept_stock_names}"
+        )
+    print(
+        "OK — 'Remove and start fresh': Sugar and Smoothie gone; Milk, Flour and Cake kept and reported."
+    )
 
     status, stock_body, _ = request(
-        "GET", f"/businesses/{business_id}/stock-items/?include_inactive=1", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/stock-items/?include_inactive=1",
+        token=owner_access,
     )
     status2, sell_body, _ = request(
-        "GET", f"/businesses/{business_id}/sell-items/?include_inactive=1", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/sell-items/?include_inactive=1",
+        token=owner_access,
     )
     stock_names = {item["name"] for item in stock_body}
     sell_names = {item["name"] for item in sell_body}
-    if status != 200 or status2 != 200 or stock_names != {"Milk", "Flour"} or sell_names != {"Cake"}:
+    if (
+        status != 200
+        or status2 != 200
+        or stock_names != {"Milk", "Flour"}
+        or sell_names != {"Cake"}
+    ):
         fail(
             "sector change flow: expected only Milk/Flour and Cake left, got "
             f"{stock_names} / {sell_names}"
         )
-    if count_audit_rows("business.sector_change", business_id) != before_sector_logs + 2:
-        fail("sector change flow: expected 2 new business.sector_change audit rows (409 doesn't log)")
-    print("OK — the surviving items match on a fresh read, and every sector change is audit-logged.")
+    if (
+        count_audit_rows("business.sector_change", business_id)
+        != before_sector_logs + 2
+    ):
+        fail(
+            "sector change flow: expected 2 new business.sector_change audit rows (409 doesn't log)"
+        )
+    print(
+        "OK — the surviving items match on a fresh read, and every sector change is audit-logged."
+    )
 
 
 def check_stock_flow() -> None:
@@ -559,13 +683,19 @@ def check_stock_flow() -> None:
     if status not in (400, 422) or not body.get("row_errors"):
         fail(f"stock bulk create bad row: expected row_errors, got {status} ({body})")
     if not any(e["row"] == 2 for e in body["row_errors"]):
-        fail(f"stock bulk create bad row: expected an error for row 2, got {body['row_errors']}")
-    status, body, _ = request("GET", f"/businesses/{business_id}/stock-items/", token=owner_access)
+        fail(
+            f"stock bulk create bad row: expected an error for row 2, got {body['row_errors']}"
+        )
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
     if "Salt" in [i["name"] for i in body]:
         fail(
             "stock bulk create bad row: all-or-nothing violated — Salt was saved despite a bad row"
         )
-    print("OK — a bad row in a bulk stock save returns per-row errors and saves nothing.")
+    print(
+        "OK — a bad row in a bulk stock save returns per-row errors and saves nothing."
+    )
 
     # duplicate name rejected, case-insensitive, against existing rows
     status, body, _ = request(
@@ -578,36 +708,28 @@ def check_stock_flow() -> None:
         fail(f"stock bulk duplicate: expected a row error, got {status} ({body})")
     print("OK — a duplicate stock item name (case-insensitive) is rejected.")
 
-    # a sell item linked to a shared stock item is rejected
+    # a dish can't pick a shared stock item as an ingredient
     status, body, _ = request(
         "POST",
-        f"/businesses/{business_id}/sell-items/bulk/",
+        f"/businesses/{business_id}/sell-items/",
         {
-            "items": [
-                {"name": "Veg Biryani", "selling_price": "150.00", "main_stock_item": rice_id},
-                {"name": "Bad Link", "selling_price": "10.00", "main_stock_item": oil_id},
-            ]
+            "name": "Bad Link",
+            "selling_price": "10.00",
+            "ingredients": [{"stock_item": oil_id, "quantity": "0.010"}],
         },
         token=owner_access,
     )
-    if status not in (400, 422) or not body.get("row_errors"):
-        fail(f"sell item linked to a shared item: expected a row error, got {status} ({body})")
-    if not any(e["row"] == 2 and e["field"] == "main_stock_item" for e in body["row_errors"]):
+    if status not in (400, 422):
         fail(
-            f"sell item linked to a shared item: expected the error on row 2, got {body['row_errors']}"
+            f"dish with a shared ingredient: expected rejection, got {status} ({body})"
         )
-    print("OK — a sell item linked to a shared stock item is rejected.")
+    print("OK — a dish can't pick a shared stock item as an ingredient.")
 
-    # the same call, minus the bad row, succeeds
-    status, body, _ = request(
-        "POST",
-        f"/businesses/{business_id}/sell-items/bulk/",
-        {"items": [{"name": "Veg Biryani", "selling_price": "150.00", "main_stock_item": rice_id}]},
-        token=owner_access,
+    # the same shape, minus the shared item, succeeds
+    _create_dish(
+        business_id, owner_access, "Veg Biryani", "150.00", [(rice_id, "0.300")]
     )
-    if status != 201 or len(body) != 1:
-        fail(f"sell item bulk create: expected 201 with 1 item, got {status} ({body})")
-    print("OK — bulk sell items created with a valid stock-item link.")
+    print("OK — a dish with a valid (non-shared) ingredient is created.")
 
     # skip is rejected on step 2 (only steps 3-6 are skippable)
     status, body, _ = request(
@@ -633,7 +755,9 @@ def check_stock_flow() -> None:
 
     # a second, unrelated user gets 403/404 on both endpoints
     _, other_access, _ = signup_and_login("Stock Intruder")
-    status, body, _ = request("GET", f"/businesses/{business_id}/stock-items/", token=other_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=other_access
+    )
     if status not in (403, 404):
         fail(f"stock isolation: expected 403/404, got {status} ({body})")
     status, body, _ = request(
@@ -644,13 +768,16 @@ def check_stock_flow() -> None:
     )
     if status not in (403, 404):
         fail(f"sell item isolation: expected 403/404, got {status} ({body})")
-    print("OK — a second user gets 403/404 on both the stock-items and sell-items endpoints.")
+    print(
+        "OK — a second user gets 403/404 on both the stock-items and sell-items endpoints."
+    )
 
 
 def check_item_setup_flow() -> None:
     """Step 19: groups (and their case-insensitive canonicalisation) and the input-robustness
-    fixes — goes_off needing a real shelf life, uses_qty needing a real positive amount, whitespace
-    names, comma-decimals."""
+    fixes — goes_off needing a real shelf life, whitespace names, comma-decimals. Also Step 22a's
+    dish-recipe rules: an ingredient amount needing a real positive value, >=1 ingredient required,
+    no duplicate ingredient in one dish."""
     owner_mobile, owner_access, _ = signup_and_login("Item Setup Owner")
     status, body, _ = request(
         "POST",
@@ -683,7 +810,9 @@ def check_item_setup_flow() -> None:
         fail(
             f"item setup flow: expected both items under 'Dairy', got {milk['group']!r}/{paneer['group']!r}"
         )
-    print("OK — a differently-cased group typed later folds into the existing group's own casing.")
+    print(
+        "OK — a differently-cased group typed later folds into the existing group's own casing."
+    )
 
     # same canonicalisation on PATCH, excluding the item being edited from the match.
     status, body, _ = request(
@@ -717,7 +846,9 @@ def check_item_setup_flow() -> None:
             f"item setup flow: goes_off with no shelf life expected a row error, got {status} ({body})"
         )
     if "shelf life" not in body["row_errors"][0]["message"].lower():
-        fail(f"item setup flow: expected a shelf-life message, got {body['row_errors']}")
+        fail(
+            f"item setup flow: expected a shelf-life message, got {body['row_errors']}"
+        )
     print(
         'OK — "goes off" with no shelf life is rejected with a plain message, not silently saved.'
     )
@@ -730,7 +861,9 @@ def check_item_setup_flow() -> None:
         token=owner_access,
     )
     if status not in (400, 422) or not body.get("row_errors"):
-        fail(f"item setup flow: whitespace-only name expected a row error, got {status} ({body})")
+        fail(
+            f"item setup flow: whitespace-only name expected a row error, got {status} ({body})"
+        )
     print("OK — a whitespace-only name is rejected the same as a blank one.")
 
     # a comma-decimal price doesn't crash or silently truncate — it's a clear 400, not a 500.
@@ -741,28 +874,95 @@ def check_item_setup_flow() -> None:
         token=owner_access,
     )
     if status not in (400, 422) or not body.get("row_errors"):
-        fail(f"item setup flow: comma-decimal price expected a row error, got {status} ({body})")
+        fail(
+            f"item setup flow: comma-decimal price expected a row error, got {status} ({body})"
+        )
     print('OK — a comma-decimal price ("1,5") is a clear row error, not a crash.')
 
-    # uses_qty must be a real positive amount, not 0.
+    # a dish can't be saved with zero ingredients
     status, body, _ = request(
         "POST",
-        f"/businesses/{business_id}/sell-items/bulk/",
+        f"/businesses/{business_id}/sell-items/",
+        {"name": "Paneer Tikka", "selling_price": "150.00", "ingredients": []},
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"dish with zero ingredients: expected rejection, got {status} ({body})")
+    print("OK — a dish can't be saved with zero ingredients.")
+
+    # an ingredient amount of exactly 0 is rejected, not saved as a silent no-op
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/",
         {
-            "items": [
-                {
-                    "name": "Paneer Tikka",
-                    "selling_price": "150.00",
-                    "main_stock_item": paneer["id"],
-                    "uses_qty": "0",
-                }
-            ]
+            "name": "Paneer Tikka",
+            "selling_price": "150.00",
+            "ingredients": [{"stock_item": paneer["id"], "quantity": "0"}],
         },
         token=owner_access,
     )
-    if status not in (400, 422) or not body.get("row_errors"):
-        fail(f"item setup flow: uses_qty 0 expected a row error, got {status} ({body})")
-    print("OK — a sell item's uses_qty of exactly 0 is rejected, not saved as a silent no-op.")
+    if status not in (400, 422):
+        fail(
+            f"dish with a zero ingredient amount: expected rejection, got {status} ({body})"
+        )
+    print(
+        "OK — an ingredient amount of exactly 0 is rejected, not saved as a silent no-op."
+    )
+
+    # the same stock item twice in one dish is rejected
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/",
+        {
+            "name": "Paneer Tikka",
+            "selling_price": "150.00",
+            "ingredients": [
+                {"stock_item": paneer["id"], "quantity": "0.100"},
+                {"stock_item": paneer["id"], "quantity": "0.050"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(
+            f"dish with a duplicate ingredient: expected rejection, got {status} ({body})"
+        )
+    print("OK — the same stock item can't appear twice in one dish.")
+
+    # 150 g of a kg-denominated item is what the client converts and sends before saving — stores
+    # and reads back as exactly 0.150, the stock item's own unit (unitConversion.ts does the g->kg
+    # conversion client-side; the server only ever sees the converted number).
+    paneer_tikka_id, created = _create_dish(
+        business_id, owner_access, "Paneer Tikka", "150.00", [(paneer["id"], "0.150")]
+    )
+    if (
+        created["recipe_status"] != "confirmed"
+        or created["ingredients"][0]["quantity"] != "0.150"
+    ):
+        fail(f"dish create: expected confirmed with quantity 0.150, got {created}")
+    print(
+        "OK — a 150 g amount (converted client-side) stores and reads back as 0.150 kg, confirmed."
+    )
+
+    # editing a dish's ingredient set replaces the rows and keeps it confirmed
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{paneer_tikka_id}/",
+        {"ingredients": [{"stock_item": milk["id"], "quantity": "0.050"}]},
+        token=owner_access,
+    )
+    if (
+        status != 200
+        or body["recipe_status"] != "confirmed"
+        or len(body["ingredients"]) != 1
+        or body["ingredients"][0]["stock_item"] != milk["id"]
+    ):
+        fail(
+            f"dish edit: expected the ingredient set replaced and still confirmed, got {status} ({body})"
+        )
+    print(
+        "OK — editing a dish's ingredients replaces the set and keeps the recipe confirmed."
+    )
 
     # sell items get their own group namespace, canonicalised the same way, separate from stock.
     status, body, _ = request(
@@ -770,18 +970,46 @@ def check_item_setup_flow() -> None:
         f"/businesses/{business_id}/sell-items/bulk/",
         {
             "items": [
-                {"name": "Paneer Tikka", "selling_price": "150.00", "group": "Starters"},
-                {"name": "Paneer Roll", "selling_price": "120.00", "group": "starters"},
+                {"name": "Lassi", "selling_price": "40.00", "group": "Starters"},
+                {"name": "Chaas", "selling_price": "20.00", "group": "starters"},
             ]
         },
         token=owner_access,
     )
     if status != 201:
-        fail(f"item setup flow: sell item group bulk create expected 201, got {status} ({body})")
+        fail(
+            f"item setup flow: sell item group bulk create expected 201, got {status} ({body})"
+        )
     if body[0]["group"] != "Starters" or body[1]["group"] != "Starters":
         fail(f"item setup flow: expected both sell items under 'Starters', got {body}")
+    if body[0]["recipe_status"] != "none" or body[1]["recipe_status"] != "none":
+        fail(
+            f"item setup flow: expected both bulk-created sell items at recipe_status=none, got {body}"
+        )
     print(
         "OK — sell-item groups canonicalise the same way, in their own namespace from stock groups."
+    )
+
+    # the no-ingredients bulk endpoint is idempotent on duplicate names with skip_existing — repeating
+    # the same call (Lassi/Chaas already exist) quietly drops them instead of erroring the batch.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {"name": "Lassi", "selling_price": "40.00"},
+                {"name": "Mango Shake", "selling_price": "45.00"},
+            ],
+            "skip_existing": True,
+        },
+        token=owner_access,
+    )
+    if status != 201 or [i["name"] for i in body] != ["Mango Shake"]:
+        fail(
+            f"sell item bulk skip_existing: expected only Mango Shake created, got {status} ({body})"
+        )
+    print(
+        "OK — sell-items/bulk/'s skip_existing drops already-there names instead of erroring."
     )
 
 
@@ -792,7 +1020,11 @@ def check_starter_pack_flow() -> None:
     status, body, _ = request(
         "POST",
         "/businesses/",
-        {"name": "Starter Pack Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        {
+            "name": "Starter Pack Biz",
+            "business_type": "restaurant_cafe",
+            "city": "Pune",
+        },
         token=owner_access,
     )
     if status != 201:
@@ -803,7 +1035,9 @@ def check_starter_pack_flow() -> None:
         "GET", "/starter-packs/restaurant_cafe/", token=owner_access
     )
     if status != 200 or not pack.get("stock_items"):
-        fail(f"starter pack flow: starter-packs GET expected 200 with items, got {status} ({pack})")
+        fail(
+            f"starter pack flow: starter-packs GET expected 200 with items, got {status} ({pack})"
+        )
     groups = {item["group"] for item in pack["stock_items"]}
     if len(groups) < 2:
         fail(f"starter pack flow: expected items across multiple groups, got {groups}")
@@ -830,10 +1064,15 @@ def check_starter_pack_flow() -> None:
         "skip_existing": True,
     }
     status, created, _ = request(
-        "POST", f"/businesses/{business_id}/stock-items/bulk/", payload, token=owner_access
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        payload,
+        token=owner_access,
     )
     if status != 201 or len(created) != 2:
-        fail(f"starter pack flow: bulk save expected 201 with 2 items, got {status} ({created})")
+        fail(
+            f"starter pack flow: bulk save expected 201 with 2 items, got {status} ({created})"
+        )
     print("OK — ticking items across two groups creates both in one bulk request.")
 
     status, items, _ = request(
@@ -841,13 +1080,18 @@ def check_starter_pack_flow() -> None:
     )
     seen_groups = {item["group"] for item in items}
     if first_group not in seen_groups or second_group not in seen_groups:
-        fail(f"starter pack flow: expected both groups in the stock list, got {seen_groups}")
+        fail(
+            f"starter pack flow: expected both groups in the stock list, got {seen_groups}"
+        )
     print("OK — the saved items come back grouped under the same headings.")
 
     # Repeating the exact same bulk call (as the picker would if Continue is tapped twice, or the
     # owner reopens "Add from starter list") skips the duplicates instead of erroring.
     status, repeat_created, _ = request(
-        "POST", f"/businesses/{business_id}/stock-items/bulk/", payload, token=owner_access
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        payload,
+        token=owner_access,
     )
     if status != 201 or repeat_created != []:
         fail(
@@ -862,7 +1106,9 @@ def check_starter_pack_flow() -> None:
             f"starter pack flow: repeat bulk created duplicates — had {len(items)}, "
             f"now {len(items_after)}"
         )
-    print("OK — repeating the same bulk save with skip_existing is a no-op, not a duplicate.")
+    print(
+        "OK — repeating the same bulk save with skip_existing is a no-op, not a duplicate."
+    )
 
     # Without skip_existing, the same repeat is still a clear row error — existing callers (the
     # inline add-your-own) keep their original behaviour.
@@ -873,8 +1119,12 @@ def check_starter_pack_flow() -> None:
         token=owner_access,
     )
     if status not in (400, 422) or not body.get("row_errors"):
-        fail(f"starter pack flow: repeat without skip_existing expected a row error, got {status} ({body})")
-    print("OK — without skip_existing, a duplicate name is still a row error as before.")
+        fail(
+            f"starter pack flow: repeat without skip_existing expected a row error, got {status} ({body})"
+        )
+    print(
+        "OK — without skip_existing, a duplicate name is still a row error as before."
+    )
 
 
 def check_sector_units_flow() -> None:
@@ -900,7 +1150,9 @@ def check_sector_units_flow() -> None:
         token=owner_access,
     )
     if status != 201 or created[0]["unit"] != "sheet":
-        fail(f"sector units flow: bulk save of a 'sheet' unit expected 201, got {status} ({created})")
+        fail(
+            f"sector units flow: bulk save of a 'sheet' unit expected 201, got {status} ({created})"
+        )
     print("OK — a small_manufacturing stock item saves with the new 'sheet' unit.")
 
     status, items, _ = request(
@@ -908,15 +1160,23 @@ def check_sector_units_flow() -> None:
     )
     saved = next((item for item in items if item["name"] == "Steel sheet"), None)
     if saved is None or saved["unit"] != "sheet" or saved["group"] != "Raw materials":
-        fail(f"sector units flow: expected 'Steel sheet' saved as sheet/Raw materials, got {saved}")
-    print("OK — it comes back from GET with the same unit and group, not silently dropped.")
+        fail(
+            f"sector units flow: expected 'Steel sheet' saved as sheet/Raw materials, got {saved}"
+        )
+    print(
+        "OK — it comes back from GET with the same unit and group, not silently dropped."
+    )
 
     status, pack, _ = request("GET", "/starter-packs/homestay/", token=owner_access)
     if status != 200:
-        fail(f"sector units flow: homestay starter-packs GET expected 200, got {status} ({pack})")
+        fail(
+            f"sector units flow: homestay starter-packs GET expected 200, got {status} ({pack})"
+        )
     groups = {item["group"] for item in pack.get("stock_items", [])}
     if any("kitchen" in group.lower() for group in groups):
-        fail(f"sector units flow: homestay starter pack still has a 'kitchen' group — {groups}")
+        fail(
+            f"sector units flow: homestay starter pack still has a 'kitchen' group — {groups}"
+        )
     print("OK — the homestay starter pack has no 'kitchen' wording left in its groups.")
 
 
@@ -939,14 +1199,17 @@ def check_team_flow() -> None:
             f"/businesses/{business_id}/team/",
             {
                 "name": "Weak Pin",
-                "mobile": random.choice("6789") + "".join(random.choices("0123456789", k=9)),
+                "mobile": random.choice("6789")
+                + "".join(random.choices("0123456789", k=9)),
                 "role": "helper",
                 "secret": weak_pin,
             },
             token=owner_access,
         )
         if status not in (400, 422):
-            fail(f"weak PIN rejected: expected a validation error, got {status} ({body})")
+            fail(
+                f"weak PIN rejected: expected a validation error, got {status} ({body})"
+            )
     print("OK — weak PINs (1111, 1234) are rejected.")
 
     # add a Helper with a valid PIN
@@ -955,7 +1218,12 @@ def check_team_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/team/",
-        {"name": "Helper One", "mobile": helper_mobile, "role": "helper", "secret": helper_pin},
+        {
+            "name": "Helper One",
+            "mobile": helper_mobile,
+            "role": "helper",
+            "secret": helper_pin,
+        },
         token=owner_access,
     )
     if status != 201:
@@ -966,7 +1234,9 @@ def check_team_flow() -> None:
         fail(
             f"team member mobile should be masked except the last 4 digits, got {body.get('mobile')}"
         )
-    print(f"OK — added a Helper for {owner_mobile} with a PIN (mobile returned masked).")
+    print(
+        f"OK — added a Helper for {owner_mobile} with a PIN (mobile returned masked)."
+    )
 
     # that person can log in with the PIN
     status, body, _ = request(
@@ -978,10 +1248,14 @@ def check_team_flow() -> None:
     print("OK — the Helper can log in with their PIN.")
 
     # a Helper gets 403 on the team and settings endpoints
-    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=helper_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/team/", token=helper_access
+    )
     if status != 403:
         fail(f"helper team access: expected 403, got {status} ({body})")
-    status, body, _ = request("GET", f"/businesses/{business_id}/settings/", token=helper_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/settings/", token=helper_access
+    )
     if status != 403:
         fail(f"helper settings access: expected 403, got {status} ({body})")
     print("OK — a Helper gets 403 on the team and settings endpoints.")
@@ -993,7 +1267,12 @@ def check_team_flow() -> None:
     status, body, _ = request(
         "POST",
         "/auth/signup/",
-        {"name": "Pre Existing", "mobile": pre_mobile, "password": pre_password, "consent": True},
+        {
+            "name": "Pre Existing",
+            "mobile": pre_mobile,
+            "password": pre_password,
+            "consent": True,
+        },
     )
     if status != 201:
         fail(f"pre-existing signup: expected 201, got {status} ({body})")
@@ -1014,12 +1293,16 @@ def check_team_flow() -> None:
         "POST", "/auth/login/", {"mobile": pre_mobile, "secret": pre_password}
     )
     if status != 200:
-        fail(f"existing user's original credential should still work, got {status} ({body})")
+        fail(
+            f"existing user's original credential should still work, got {status} ({body})"
+        )
     status, body, _ = request(
         "POST", "/auth/login/", {"mobile": pre_mobile, "secret": "TotallyDifferent999!"}
     )
     if status == 200:
-        fail("existing user's credential should not have been changed by the team-add secret")
+        fail(
+            "existing user's credential should not have been changed by the team-add secret"
+        )
     print(
         "OK — adding an existing mobile to the team only adds Access; their credential is untouched."
     )
@@ -1032,15 +1315,21 @@ def check_team_flow() -> None:
         token=owner_access,
     )
     if status not in (400, 422):
-        fail(f"settings out-of-range: expected a validation error, got {status} ({body})")
+        fail(
+            f"settings out-of-range: expected a validation error, got {status} ({body})"
+        )
     print("OK — an out-of-range settings value is rejected.")
 
     # an unrelated user (no access at all) gets 403/404
     _, stranger_access, _ = signup_and_login("Team Stranger")
-    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=stranger_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/team/", token=stranger_access
+    )
     if status not in (403, 404):
         fail(f"stranger team access: expected 403/404, got {status} ({body})")
-    status, body, _ = request("GET", f"/businesses/{business_id}/settings/", token=stranger_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/settings/", token=stranger_access
+    )
     if status not in (403, 404):
         fail(f"stranger settings access: expected 403/404, got {status} ({body})")
     print("OK — an unrelated user gets 403/404 on the team and settings endpoints.")
@@ -1050,7 +1339,9 @@ def check_team_flow() -> None:
         "POST", f"/businesses/{business_id}/onboarding/complete/", token=owner_access
     )
     if status != 200 or body.get("onboarding_completed_at") is not None:
-        fail(f"onboarding complete (too early): expected no completed_at, got {status} ({body})")
+        fail(
+            f"onboarding complete (too early): expected no completed_at, got {status} ({body})"
+        )
 
     for step in (1, 2):
         status, body, _ = request(
@@ -1093,7 +1384,9 @@ def check_team_reset_flow() -> None:
         fail(f"team reset flow: business create expected 201, got {status} ({body})")
     business_id = body["id"]
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/team/", token=owner_access
+    )
     if status != 200:
         fail(f"team reset flow: list expected 200, got {status} ({body})")
     owner_access_id = next(row["id"] for row in body if row["role"] == "owner")
@@ -1104,7 +1397,12 @@ def check_team_reset_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/team/",
-        {"name": "Reset Helper", "mobile": helper_mobile, "role": "helper", "secret": helper_pin},
+        {
+            "name": "Reset Helper",
+            "mobile": helper_mobile,
+            "role": "helper",
+            "secret": helper_pin,
+        },
         token=owner_access,
     )
     if status != 201:
@@ -1126,7 +1424,9 @@ def check_team_reset_flow() -> None:
         token=owner_access,
     )
     if status not in (400, 422):
-        fail(f"team reset flow: weak PIN reset expected a validation error, got {status} ({body})")
+        fail(
+            f"team reset flow: weak PIN reset expected a validation error, got {status} ({body})"
+        )
     print("OK — a weak PIN is rejected on reset.")
 
     # reset the Helper's PIN
@@ -1145,12 +1445,16 @@ def check_team_reset_flow() -> None:
     )
     if status == 200:
         fail("team reset flow: old PIN should no longer work after reset")
-    status, body, _ = request("POST", "/auth/login/", {"mobile": helper_mobile, "secret": new_pin})
+    status, body, _ = request(
+        "POST", "/auth/login/", {"mobile": helper_mobile, "secret": new_pin}
+    )
     if status != 200:
         fail(f"team reset flow: new PIN should work, got {status} ({body})")
     status, body, _ = request("POST", "/auth/refresh/", {"refresh": helper_refresh})
     if status == 200:
-        fail("team reset flow: the Helper's old refresh token should be rejected after reset")
+        fail(
+            "team reset flow: the Helper's old refresh token should be rejected after reset"
+        )
     print(
         "OK — resetting a PIN invalidates the old PIN and the old refresh token, and the new PIN works."
     )
@@ -1163,7 +1467,9 @@ def check_team_reset_flow() -> None:
         token=owner_access,
     )
     if status != 200 or body.get("role") != "head_chef":
-        fail(f"team reset flow: Helper -> Head chef expected 200, got {status} ({body})")
+        fail(
+            f"team reset flow: Helper -> Head chef expected 200, got {status} ({body})"
+        )
     print("OK — changing Helper to Head chef needs no secret.")
 
     # crossing into Manager without a secret is rejected
@@ -1190,11 +1496,15 @@ def check_team_reset_flow() -> None:
         fail(
             f"team reset flow: role change to Manager with a password expected 200, got {status} ({body})"
         )
-    print("OK — changing to Manager without a secret is rejected, and succeeds once one is given.")
+    print(
+        "OK — changing to Manager without a secret is rejected, and succeeds once one is given."
+    )
 
     # remove the member: their login to this business fails, but the user account still exists
     status, body, _ = request(
-        "DELETE", f"/businesses/{business_id}/team/{helper_access_id}/", token=owner_access
+        "DELETE",
+        f"/businesses/{business_id}/team/{helper_access_id}/",
+        token=owner_access,
     )
     if status != 204:
         fail(f"team reset flow: remove member expected 204, got {status} ({body})")
@@ -1202,9 +1512,13 @@ def check_team_reset_flow() -> None:
         "POST", "/auth/login/", {"mobile": helper_mobile, "secret": manager_password}
     )
     if status != 200:
-        fail(f"team reset flow: removed member's account should still exist, got {status} ({body})")
+        fail(
+            f"team reset flow: removed member's account should still exist, got {status} ({body})"
+        )
     removed_access = body["access"]
-    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=removed_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/team/", token=removed_access
+    )
     if status not in (403, 404):
         fail(
             f"team reset flow: removed member's access to the business expected 403/404, got {status} ({body})"
@@ -1225,7 +1539,9 @@ def check_team_reset_flow() -> None:
             f"team reset flow: Owner reset-self expected a validation error, got {status} ({body})"
         )
     status, body, _ = request(
-        "DELETE", f"/businesses/{business_id}/team/{owner_access_id}/", token=owner_access
+        "DELETE",
+        f"/businesses/{business_id}/team/{owner_access_id}/",
+        token=owner_access,
     )
     if status not in (400, 422):
         fail(
@@ -1239,14 +1555,17 @@ def check_team_reset_flow() -> None:
         f"/businesses/{business_id}/team/",
         {
             "name": "Reset Head Chef",
-            "mobile": random.choice("6789") + "".join(random.choices("0123456789", k=9)),
+            "mobile": random.choice("6789")
+            + "".join(random.choices("0123456789", k=9)),
             "role": "head_chef",
             "secret": "6204",
         },
         token=owner_access,
     )
     if status != 201:
-        fail(f"team reset flow: add second head chef expected 201, got {status} ({body})")
+        fail(
+            f"team reset flow: add second head chef expected 201, got {status} ({body})"
+        )
     target_access_id = body["id"]
 
     manager_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
@@ -1278,7 +1597,9 @@ def check_team_reset_flow() -> None:
         token=manager_access,
     )
     if status != 403:
-        fail(f"team reset flow: manager reset-secret expected 403, got {status} ({body})")
+        fail(
+            f"team reset flow: manager reset-secret expected 403, got {status} ({body})"
+        )
     status, body, _ = request(
         "PATCH",
         f"/businesses/{business_id}/team/{target_access_id}/",
@@ -1286,16 +1607,22 @@ def check_team_reset_flow() -> None:
         token=manager_access,
     )
     if status != 403:
-        fail(f"team reset flow: manager role change expected 403, got {status} ({body})")
+        fail(
+            f"team reset flow: manager role change expected 403, got {status} ({body})"
+        )
     status, body, _ = request(
-        "DELETE", f"/businesses/{business_id}/team/{target_access_id}/", token=manager_access
+        "DELETE",
+        f"/businesses/{business_id}/team/{target_access_id}/",
+        token=manager_access,
     )
     if status != 403:
         fail(f"team reset flow: manager remove expected 403, got {status} ({body})")
     print("OK — a Manager gets 403 on reset, role change, and remove.")
 
     # but a Manager can still see the team list (team.view)
-    status, body, _ = request("GET", f"/businesses/{business_id}/team/", token=manager_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/team/", token=manager_access
+    )
     if status != 200:
         fail(f"team reset flow: manager list view expected 200, got {status} ({body})")
     print("OK — a Manager can still view the team list.")
@@ -1352,11 +1679,20 @@ def check_auth_flow() -> None:
     status, body, _ = request(
         "POST",
         "/auth/signup/",
-        {"name": "Not a bot", "mobile": honeypot_mobile, "password": password, "consent": True},
+        {
+            "name": "Not a bot",
+            "mobile": honeypot_mobile,
+            "password": password,
+            "consent": True,
+        },
     )
     if status != 201:
-        fail(f"honeypot signup created a real row: follow-up signup got {status} ({body})")
-    print("OK — honeypot signup created nothing (confirmed via a follow-up real signup).")
+        fail(
+            f"honeypot signup created a real row: follow-up signup got {status} ({body})"
+        )
+    print(
+        "OK — honeypot signup created nothing (confirmed via a follow-up real signup)."
+    )
 
     # wrong password
     status, body, _ = request(
@@ -1364,11 +1700,15 @@ def check_auth_flow() -> None:
     )
     expected_message = "Mobile number or password is not right."
     if status != 401 or body.get("error", {}).get("message") != expected_message:
-        fail(f"wrong password: expected 401 with generic message, got {status} ({body})")
+        fail(
+            f"wrong password: expected 401 with generic message, got {status} ({body})"
+        )
     print("OK — wrong password gives the generic error message.")
 
     # real login
-    status, body, headers = request("POST", "/auth/login/", {"mobile": mobile, "secret": password})
+    status, body, headers = request(
+        "POST", "/auth/login/", {"mobile": mobile, "secret": password}
+    )
     if status != 200 or "access" not in body or "refresh" not in body:
         fail(f"login: expected HTTP 200 with access+refresh, got {status} ({body})")
     if headers.get("Access-Control-Allow-Origin") != ORIGIN:
@@ -1448,8 +1788,18 @@ def check_purchase_flow() -> None:
             "supplier_name": "Sunrise Supplies",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"},
-                {"stock_item": flour_id, "quantity": "15", "unit_price": "48", "line_total": "720"},
+                {
+                    "stock_item": milk_id,
+                    "quantity": "20",
+                    "unit_price": "64",
+                    "line_total": "1280",
+                },
+                {
+                    "stock_item": flour_id,
+                    "quantity": "15",
+                    "unit_price": "48",
+                    "line_total": "720",
+                },
             ],
         },
         token=owner_access,
@@ -1459,17 +1809,24 @@ def check_purchase_flow() -> None:
     purchase_id = body["id"]
     if body.get("total_amount") != "2000.00":
         fail(f"purchase create: expected total 2000.00, got {body.get('total_amount')}")
-    print(f"OK — purchase {purchase_id} created with 2 lines, total {body['total_amount']}.")
+    print(
+        f"OK — purchase {purchase_id} created with 2 lines, total {body['total_amount']}."
+    )
 
     # list shows it and the summary adds up
-    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/purchases/", token=owner_access
+    )
     if status != 200:
         fail(f"purchase list: expected 200, got {status} ({body})")
     ids = [p["id"] for p in body.get("results", [])]
     if purchase_id not in ids:
         fail(f"purchase list: expected purchase {purchase_id} in results, got {ids}")
     summary = body.get("summary", {})
-    if float(summary.get("bought_today", 0)) < 2000 or float(summary.get("last_7_days", 0)) < 2000:
+    if (
+        float(summary.get("bought_today", 0)) < 2000
+        or float(summary.get("last_7_days", 0)) < 2000
+    ):
         fail(f"purchase list: summary doesn't add up, got {summary}")
     print("OK — the purchase list shows the new purchase and the summary adds up.")
 
@@ -1481,13 +1838,20 @@ def check_purchase_flow() -> None:
             "supplier_name": "Bad Math Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "10", "unit_price": "60", "line_total": "999"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "10",
+                    "unit_price": "60",
+                    "line_total": "999",
+                }
             ],
         },
         token=owner_access,
     )
     if status not in (400, 422) or not body.get("row_errors"):
-        fail(f"purchase create bad line total: expected row_errors, got {status} ({body})")
+        fail(
+            f"purchase create bad line total: expected row_errors, got {status} ({body})"
+        )
     print("OK — a line total that doesn't match quantity x price is rejected.")
 
     # a Manager can create but gets 403 on edit and delete
@@ -1520,7 +1884,12 @@ def check_purchase_flow() -> None:
             "supplier_name": "Manager's Supplier",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "5", "unit_price": "60", "line_total": "300"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "5",
+                    "unit_price": "60",
+                    "line_total": "300",
+                }
             ],
         },
         token=manager_access,
@@ -1536,7 +1905,12 @@ def check_purchase_flow() -> None:
             "supplier_name": "x",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "1", "unit_price": "1", "line_total": "1"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "1",
+                    "unit_price": "1",
+                    "line_total": "1",
+                }
             ],
         },
         token=manager_access,
@@ -1544,7 +1918,9 @@ def check_purchase_flow() -> None:
     if status != 403:
         fail(f"manager edit purchase: expected 403, got {status} ({body})")
     status, body, _ = request(
-        "DELETE", f"/businesses/{business_id}/purchases/{purchase_id}/", token=manager_access
+        "DELETE",
+        f"/businesses/{business_id}/purchases/{purchase_id}/",
+        token=manager_access,
     )
     if status != 403:
         fail(f"manager delete purchase: expected 403, got {status} ({body})")
@@ -1556,7 +1932,12 @@ def check_purchase_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/team/",
-        {"name": "Helper One", "mobile": helper_mobile, "role": "helper", "secret": helper_pin},
+        {
+            "name": "Helper One",
+            "mobile": helper_mobile,
+            "role": "helper",
+            "secret": helper_pin,
+        },
         token=owner_access,
     )
     if status != 201:
@@ -1568,7 +1949,9 @@ def check_purchase_flow() -> None:
         fail(f"helper login: expected 200, got {status} ({body})")
     helper_access = body["access"]
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=helper_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/purchases/", token=helper_access
+    )
     if status != 403:
         fail(f"helper purchases list: expected 403, got {status} ({body})")
     status, body, _ = request(
@@ -1578,7 +1961,12 @@ def check_purchase_flow() -> None:
             "supplier_name": "x",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "1", "unit_price": "1", "line_total": "1"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "1",
+                    "unit_price": "1",
+                    "line_total": "1",
+                }
             ],
         },
         token=helper_access,
@@ -1596,21 +1984,32 @@ def check_purchase_flow() -> None:
             "purchase_date_time": _now_iso(),
             "note": "Edited by owner",
             "lines": [
-                {"stock_item": milk_id, "quantity": "25", "unit_price": "64", "line_total": "1600"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "25",
+                    "unit_price": "64",
+                    "line_total": "1600",
+                }
             ],
         },
         token=owner_access,
     )
     if status != 200 or body.get("total_amount") != "1600.00":
-        fail(f"owner edit purchase: expected 200 with recalculated total, got {status} ({body})")
+        fail(
+            f"owner edit purchase: expected 200 with recalculated total, got {status} ({body})"
+        )
     print("OK — the Owner edits a purchase and the total is recalculated.")
 
     status, body, _ = request(
-        "DELETE", f"/businesses/{business_id}/purchases/{purchase_id}/", token=owner_access
+        "DELETE",
+        f"/businesses/{business_id}/purchases/{purchase_id}/",
+        token=owner_access,
     )
     if status != 204:
         fail(f"owner delete purchase: expected 204, got {status} ({body})")
-    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/purchases/", token=owner_access
+    )
     ids = [p["id"] for p in body.get("results", [])]
     if purchase_id in ids:
         fail(f"deleted purchase still in the list: {ids}")
@@ -1619,15 +2018,23 @@ def check_purchase_flow() -> None:
     )
     if status != 404:
         fail(f"deleted purchase detail: expected 404, got {status} ({body})")
-    print("OK — the Owner deletes a purchase; it disappears from the list and its own detail.")
+    print(
+        "OK — the Owner deletes a purchase; it disappears from the list and its own detail."
+    )
 
     # another business's user gets 403/404
     other_mobile, other_access, _ = signup_and_login("Unrelated Purchase User")
-    status, body, _ = request("GET", f"/businesses/{business_id}/purchases/", token=other_access)
-    if status not in (403, 404):
-        fail(f"isolation: unrelated user on purchase list, expected 403/404, got {status} ({body})")
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/purchases/{manager_purchase_id}/", token=other_access
+        "GET", f"/businesses/{business_id}/purchases/", token=other_access
+    )
+    if status not in (403, 404):
+        fail(
+            f"isolation: unrelated user on purchase list, expected 403/404, got {status} ({body})"
+        )
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{business_id}/purchases/{manager_purchase_id}/",
+        token=other_access,
     )
     if status not in (403, 404):
         fail(
@@ -1706,7 +2113,11 @@ def _add_team_member(
 ) -> tuple[str, str, int]:
     """Returns (mobile, access, user_id)."""
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
-    secret = "7392" if role in ("head_chef", "helper") else f"Kharcha{random.randint(1000, 9999)}!"
+    secret = (
+        "7392"
+        if role in ("head_chef", "helper")
+        else f"Kharcha{random.randint(1000, 9999)}!"
+    )
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/team/",
@@ -1715,7 +2126,9 @@ def _add_team_member(
     )
     if status != 201:
         fail(f"add {role} ({name}): expected 201, got {status} ({body})")
-    status, login_body, _ = request("POST", "/auth/login/", {"mobile": mobile, "secret": secret})
+    status, login_body, _ = request(
+        "POST", "/auth/login/", {"mobile": mobile, "secret": secret}
+    )
     if status != 200:
         fail(f"{role} login ({name}): expected 200, got {status} ({login_body})")
     return mobile, login_body["access"], body["user_id"]
@@ -1755,11 +2168,15 @@ def check_count_and_wastage_flow() -> None:
     _, headchef_access, _ = _add_team_member(
         business_id, owner_access, "Count Head Chef", "head_chef"
     )
-    _, manager_access, _ = _add_team_member(business_id, owner_access, "Count Manager", "manager")
+    _, manager_access, _ = _add_team_member(
+        business_id, owner_access, "Count Manager", "manager"
+    )
 
     # the blind form returns only id/name/unit — no last count, no expected, no prices, no usual
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/counts/form/?type=opening", token=helper_access
+        "GET",
+        f"/businesses/{business_id}/counts/form/?type=opening",
+        token=helper_access,
     )
     if status != 200:
         fail(f"counts form: expected 200, got {status} ({body})")
@@ -1768,11 +2185,15 @@ def check_count_and_wastage_flow() -> None:
         fail(f"counts form: expected 2 items, got {items}")
     for item in items:
         if set(item.keys()) != {"id", "name", "unit"}:
-            fail(f"counts form: expected only id/name/unit, got keys {set(item.keys())}")
+            fail(
+                f"counts form: expected only id/name/unit, got keys {set(item.keys())}"
+            )
     print("OK — the blind count form returns only id, name and unit.")
 
     # a Helper gets 403 on purchases and stock detail
-    status, _, _ = request("GET", f"/businesses/{business_id}/purchases/", token=helper_access)
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/purchases/", token=helper_access
+    )
     if status != 403:
         fail(f"helper purchases: expected 403, got {status}")
     status, _, _ = request(
@@ -1820,7 +2241,9 @@ def check_count_and_wastage_flow() -> None:
 
     # a Helper gets 403 on count review
     status, _, _ = request(
-        "GET", f"/businesses/{business_id}/counts/{opening_count_id}/", token=helper_access
+        "GET",
+        f"/businesses/{business_id}/counts/{opening_count_id}/",
+        token=helper_access,
     )
     if status != 403:
         fail(f"helper count review: expected 403, got {status}")
@@ -1835,7 +2258,12 @@ def check_count_and_wastage_flow() -> None:
             "supplier_name": "Between Counts Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "5", "unit_price": "60", "line_total": "300"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "5",
+                    "unit_price": "60",
+                    "line_total": "300",
+                }
             ],
         },
         token=owner_access,
@@ -1878,12 +2306,20 @@ def check_count_and_wastage_flow() -> None:
         token=helper_access,
     )
     if status != 409 or body.get("error", {}).get("code") != "needs_confirmation":
-        fail(f"unusual closing count: expected 409 needs_confirmation, got {status} ({body})")
+        fail(
+            f"unusual closing count: expected 409 needs_confirmation, got {status} ({body})"
+        )
     if body.get("item_ids") != [milk_id]:
-        fail(f"unusual closing count: expected item_ids [{milk_id}], got {body.get('item_ids')}")
+        fail(
+            f"unusual closing count: expected item_ids [{milk_id}], got {body.get('item_ids')}"
+        )
     if set(body.keys()) - {"error", "item_ids"}:
-        fail(f"unusual closing count: response should carry no numbers, got extra keys {body}")
-    print("OK — a very high value returns 409 needs_confirmation with item ids and no numbers.")
+        fail(
+            f"unusual closing count: response should carry no numbers, got extra keys {body}"
+        )
+    print(
+        "OK — a very high value returns 409 needs_confirmation with item ids and no numbers."
+    )
 
     # re-sent with confirm_ids -> succeeds, and is late
     status, body, _ = request(
@@ -1897,11 +2333,15 @@ def check_count_and_wastage_flow() -> None:
     closing_count_id = body["id"]
     if not body.get("is_late") or not body.get("minutes_late", 0) > 0:
         fail(f"confirmed closing count: expected is_late/minutes_late set, got {body}")
-    print("OK — re-sending with confirm_ids succeeds, and the late deadline is recorded.")
+    print(
+        "OK — re-sending with confirm_ids succeeds, and the late deadline is recorded."
+    )
 
     # count review (Owner): list for the date
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/counts/?date={business_date}", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/counts/?date={business_date}",
+        token=owner_access,
     )
     if status != 200:
         fail(f"count review list: expected 200, got {status} ({body})")
@@ -1910,17 +2350,25 @@ def check_count_and_wastage_flow() -> None:
         fail(f"count review list: missing counts, got {body}")
     closing_entry = next(c for c in body if c["id"] == closing_count_id)
     if not closing_entry["is_late"] or closing_entry["minutes_late"] <= 0:
-        fail(f"count review list: expected the closing count marked late, got {closing_entry}")
-    print("OK — count review lists both counts with who, when, late/on-time and item counts.")
+        fail(
+            f"count review list: expected the closing count marked late, got {closing_entry}"
+        )
+    print(
+        "OK — count review lists both counts with who, when, late/on-time and item counts."
+    )
 
     # count review (Owner): detail — the known used_since_last_count case, flagged item first
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/counts/{closing_count_id}/",
+        token=owner_access,
     )
     if status != 200:
         fail(f"count review detail: expected 200, got {status} ({body})")
     if body["lines"][0]["stock_item"] != milk_id:
-        fail(f"count review detail: expected the flagged item (Milk) first, got {body['lines'][0]}")
+        fail(
+            f"count review detail: expected the flagged item (Milk) first, got {body['lines'][0]}"
+        )
     milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
     if Decimal(milk_line["previous_counted_qty"]) != Decimal("10"):
         fail(f"count review detail: expected previous_counted_qty 10, got {milk_line}")
@@ -1929,8 +2377,12 @@ def check_count_and_wastage_flow() -> None:
     if Decimal(milk_line["quantity_wasted_since"]) != Decimal("2"):
         fail(f"count review detail: expected quantity_wasted_since 2, got {milk_line}")
     if Decimal(milk_line["used_since_last_count"]) != Decimal("-22"):
-        fail(f"count review detail: expected used_since_last_count -22, got {milk_line}")
-    print("OK — count review detail's used_since_last_count is correct for a known case.")
+        fail(
+            f"count review detail: expected used_since_last_count -22, got {milk_line}"
+        )
+    print(
+        "OK — count review detail's used_since_last_count is correct for a known case."
+    )
 
     # Step 14: this business has no sell item linking to Milk, so its gap is not_comparable
     # (not_sold) rather than computed — and a Helper/Head chef still can't reach this endpoint at
@@ -1939,16 +2391,25 @@ def check_count_and_wastage_flow() -> None:
         milk_line.get("gap_status") != "not_comparable"
         or milk_line.get("gap_reason", {}).get("code") != "not_sold"
     ):
-        fail(f"count review detail: expected Milk's gap not_comparable/not_sold, got {milk_line}")
-    if milk_line.get("expected_used") is not None or milk_line.get("gap_qty") is not None:
+        fail(
+            f"count review detail: expected Milk's gap not_comparable/not_sold, got {milk_line}"
+        )
+    if (
+        milk_line.get("expected_used") is not None
+        or milk_line.get("gap_qty") is not None
+    ):
         fail(
             f"count review detail: not_comparable lines should have null gap fields, got {milk_line}"
         )
-    print("OK — a stock item with no linked sell item shows a not_comparable gap (not_sold).")
+    print(
+        "OK — a stock item with no linked sell item shows a not_comparable gap (not_sold)."
+    )
 
     # Manager also has count review access
     status, _, _ = request(
-        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=manager_access
+        "GET",
+        f"/businesses/{business_id}/counts/{closing_count_id}/",
+        token=manager_access,
     )
     if status != 200:
         fail(f"manager count review: expected 200, got {status}")
@@ -1967,7 +2428,9 @@ def check_count_and_wastage_flow() -> None:
         fail(f"head chef wastage create: value should be omitted, got {body}")
 
     # Helper sees only their own entry
-    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=helper_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/wastage/", token=helper_access
+    )
     if status != 200:
         fail(f"helper wastage list: expected 200, got {status} ({body})")
     result_ids = {e["id"] for e in body["results"]}
@@ -1975,10 +2438,14 @@ def check_count_and_wastage_flow() -> None:
         fail(f"helper wastage list: expected only their own entry, got {result_ids}")
     if any("value" in e for e in body["results"]) or "summary" in body:
         fail(f"helper wastage list: value/summary should never appear, got {body}")
-    print("OK — a Helper sees only their own wastage entries, with no values or summary.")
+    print(
+        "OK — a Helper sees only their own wastage entries, with no values or summary."
+    )
 
     # Head chef sees every entry, without values
-    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=headchef_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/wastage/", token=headchef_access
+    )
     if status != 200:
         fail(f"head chef wastage list: expected 200, got {status} ({body})")
     result_ids = {e["id"] for e in body["results"]}
@@ -1989,11 +2456,15 @@ def check_count_and_wastage_flow() -> None:
     print("OK — a Head chef sees every entry today, with no values.")
 
     # Manager sees values and a summary, but gets 403 on create and delete
-    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=manager_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/wastage/", token=manager_access
+    )
     if status != 200:
         fail(f"manager wastage list: expected 200, got {status} ({body})")
     if not body["results"] or not all("value" in e for e in body["results"]):
-        fail(f"manager wastage list: expected a value on every entry, got {body['results']}")
+        fail(
+            f"manager wastage list: expected a value on every entry, got {body['results']}"
+        )
     if "summary" not in body:
         fail(f"manager wastage list: expected a summary, got {body}")
     status, _, _ = request(
@@ -2005,7 +2476,9 @@ def check_count_and_wastage_flow() -> None:
     if status != 403:
         fail(f"manager wastage create: expected 403, got {status}")
     status, _, _ = request(
-        "DELETE", f"/businesses/{business_id}/wastage/{helper_wastage_id}/", token=manager_access
+        "DELETE",
+        f"/businesses/{business_id}/wastage/{helper_wastage_id}/",
+        token=manager_access,
     )
     if status != 403:
         fail(f"manager wastage delete: expected 403, got {status}")
@@ -2014,7 +2487,9 @@ def check_count_and_wastage_flow() -> None:
     # today/: both counts already submitted, so both show "done" (is_late is a separate, historical
     # fact recorded on the StockCount itself, checked above via count review) -> team_progress only
     # for Head chef
-    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/today/", token=owner_access
+    )
     if status != 200:
         fail(f"today (owner): expected 200, got {status} ({body})")
     if body["opening"]["state"] != "done" or body["closing"]["state"] != "done":
@@ -2024,18 +2499,24 @@ def check_count_and_wastage_flow() -> None:
     if "team_progress" in body:
         fail(f"today (owner): team_progress should not appear for Owner, got {body}")
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=headchef_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/today/", token=headchef_access
+    )
     if status != 200:
         fail(f"today (head chef): expected 200, got {status} ({body})")
     if body.get("team_progress", {}).get("total") != 2:
         fail(f"today (head chef): expected team_progress for 2 items, got {body}")
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=helper_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/today/", token=helper_access
+    )
     if status != 200:
         fail(f"today (helper): expected 200, got {status} ({body})")
     if "team_progress" in body:
         fail(f"today (helper): team_progress should not appear for Helper, got {body}")
-    print("OK — today/ reflects count state per role, with team progress only for Head chef.")
+    print(
+        "OK — today/ reflects count state per role, with team progress only for Head chef."
+    )
 
     # late-count reminder: Owner only
     status, body, _ = request(
@@ -2060,11 +2541,15 @@ def check_count_and_wastage_flow() -> None:
 
     # Owner soft-deletes a wastage entry — it leaves the list
     status, _, _ = request(
-        "DELETE", f"/businesses/{business_id}/wastage/{helper_wastage_id}/", token=owner_access
+        "DELETE",
+        f"/businesses/{business_id}/wastage/{helper_wastage_id}/",
+        token=owner_access,
     )
     if status != 204:
         fail(f"owner wastage delete: expected 204, got {status}")
-    status, body, _ = request("GET", f"/businesses/{business_id}/wastage/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/wastage/", token=owner_access
+    )
     result_ids = {e["id"] for e in body["results"]}
     if helper_wastage_id in result_ids:
         fail(f"deleted wastage entry still in the list: {result_ids}")
@@ -2075,7 +2560,11 @@ def check_count_and_wastage_flow() -> None:
     probes = [
         ("GET", f"/businesses/{business_id}/counts/form/?type=opening", None),
         ("GET", f"/businesses/{business_id}/counts/?date={business_date}", None),
-        ("POST", f"/businesses/{business_id}/counts/", {"type": "opening", "lines": []}),
+        (
+            "POST",
+            f"/businesses/{business_id}/counts/",
+            {"type": "opening", "lines": []},
+        ),
         ("GET", f"/businesses/{business_id}/counts/{opening_count_id}/", None),
         (
             "POST",
@@ -2094,7 +2583,9 @@ def check_count_and_wastage_flow() -> None:
     for method, path, probe_body in probes:
         status, resp_body, _ = request(method, path, probe_body, token=stranger_access)
         if status not in (403, 404):
-            fail(f"isolation: {method} {path} expected 403/404, got {status} ({resp_body})")
+            fail(
+                f"isolation: {method} {path} expected 403/404, got {status} ({resp_body})"
+            )
     print("OK — another business's users get 403/404 on every new endpoint.")
 
 
@@ -2134,7 +2625,9 @@ def check_settings_flow() -> None:
         token=owner_access,
     )
     if status != 200 or body.get("name") != "Basmati Rice":
-        fail(f"rename stock item: expected 200 with the new name, got {status} ({body})")
+        fail(
+            f"rename stock item: expected 200 with the new name, got {status} ({body})"
+        )
     print("OK — renamed a stock item.")
 
     # duplicate name, case-insensitive
@@ -2156,7 +2649,12 @@ def check_settings_flow() -> None:
             "supplier_name": "Settings Supplies",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": rice_id, "quantity": "5", "unit_price": "60", "line_total": "300"}
+                {
+                    "stock_item": rice_id,
+                    "quantity": "5",
+                    "unit_price": "60",
+                    "line_total": "300",
+                }
             ],
         },
         token=owner_access,
@@ -2170,20 +2668,19 @@ def check_settings_flow() -> None:
         {"unit": "g"},
         token=owner_access,
     )
-    if status not in (400, 422) or body.get("error", {}).get("code") != "STOCK_ITEM_UNIT_LOCKED":
-        fail(f"unit change after purchase: expected STOCK_ITEM_UNIT_LOCKED, got {status} ({body})")
+    if (
+        status not in (400, 422)
+        or body.get("error", {}).get("code") != "STOCK_ITEM_UNIT_LOCKED"
+    ):
+        fail(
+            f"unit change after purchase: expected STOCK_ITEM_UNIT_LOCKED, got {status} ({body})"
+        )
     print("OK — changing a stock item's unit is refused once it has a purchase.")
 
-    # a sell item depends on Basmati Rice as its main item
-    status, body, _ = request(
-        "POST",
-        f"/businesses/{business_id}/sell-items/bulk/",
-        {"items": [{"name": "Rice Bowl", "selling_price": "99.00", "main_stock_item": rice_id}]},
-        token=owner_access,
+    # a dish has Basmati Rice as an ingredient
+    rice_bowl_id, _ = _create_dish(
+        business_id, owner_access, "Rice Bowl", "99.00", [(rice_id, "0.200")]
     )
-    if status != 201:
-        fail(f"settings flow: sell item create expected 201, got {status} ({body})")
-    rice_bowl_id = body[0]["id"]
 
     # deactivating the stock item is refused while that sell item is still active
     status, body, _ = request(
@@ -2192,13 +2689,20 @@ def check_settings_flow() -> None:
         {"active": False},
         token=owner_access,
     )
-    if status not in (400, 422) or body.get("error", {}).get("code") != "STOCK_ITEM_IN_USE":
-        fail(f"deactivate stock item in use: expected STOCK_ITEM_IN_USE, got {status} ({body})")
+    if (
+        status not in (400, 422)
+        or body.get("error", {}).get("code") != "STOCK_ITEM_IN_USE"
+    ):
+        fail(
+            f"deactivate stock item in use: expected STOCK_ITEM_IN_USE, got {status} ({body})"
+        )
     if "Rice Bowl" not in body.get("error", {}).get("message", ""):
         fail(
             f"deactivate stock item in use: expected the sell item named in the message, got {body}"
         )
-    print("OK — deactivating a stock item in use is refused, naming the sell item in the message.")
+    print(
+        "OK — deactivating a stock item in use is refused, naming the sell item in the message."
+    )
 
     # deactivating the sell item first, then the stock item, both succeed
     status, body, _ = request(
@@ -2219,7 +2723,7 @@ def check_settings_flow() -> None:
         fail(f"deactivate stock item: expected 200 inactive, got {status} ({body})")
     print("OK — deactivating the sell item, then the stock item it used, both succeed.")
 
-    # a second pair of items to exercise uses_qty
+    # a second pair of items to exercise editing a dish's ingredients
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/stock-items/bulk/",
@@ -2227,7 +2731,9 @@ def check_settings_flow() -> None:
         token=owner_access,
     )
     if status != 201:
-        fail(f"settings flow: second stock item create expected 201, got {status} ({body})")
+        fail(
+            f"settings flow: second stock item create expected 201, got {status} ({body})"
+        )
     flour_id = body[0]["id"]
 
     status, body, _ = request(
@@ -2237,30 +2743,46 @@ def check_settings_flow() -> None:
         token=owner_access,
     )
     if status != 201:
-        fail(f"settings flow: second sell item create expected 201, got {status} ({body})")
+        fail(
+            f"settings flow: second sell item create expected 201, got {status} ({body})"
+        )
     bread_id = body[0]["id"]
+    if body[0]["recipe_status"] != "none":
+        fail(
+            f"settings flow: expected Bread at recipe_status=none fresh off bulk create, got {body}"
+        )
 
-    # uses_qty is rejected without a main stock item
+    # PATCHing a dish's ingredients down to zero is rejected the same as on create
     status, body, _ = request(
         "PATCH",
         f"/businesses/{business_id}/sell-items/{bread_id}/",
-        {"uses_qty": "0.3"},
+        {"ingredients": []},
         token=owner_access,
     )
     if status not in (400, 422):
-        fail(f"uses_qty without a main item: expected rejection, got {status} ({body})")
-    print("OK — uses_qty is rejected without a main stock item.")
+        fail(
+            f"dish edit with zero ingredients: expected rejection, got {status} ({body})"
+        )
+    print(
+        "OK — editing a dish's ingredients down to zero is rejected, same as on create."
+    )
 
-    # setting a main stock item and uses_qty together succeeds
+    # setting a real ingredient confirms the recipe
     status, body, _ = request(
         "PATCH",
         f"/businesses/{business_id}/sell-items/{bread_id}/",
-        {"main_stock_item": flour_id, "uses_qty": "0.300"},
+        {"ingredients": [{"stock_item": flour_id, "quantity": "0.300"}]},
         token=owner_access,
     )
-    if status != 200 or body.get("uses_qty") != "0.300":
-        fail(f"uses_qty with a main item: expected 200 with uses_qty saved, got {status} ({body})")
-    print("OK — uses_qty is saved once a main stock item is set.")
+    if (
+        status != 200
+        or body.get("recipe_status") != "confirmed"
+        or body["ingredients"][0]["quantity"] != "0.300"
+    ):
+        fail(
+            f"dish edit with a real ingredient: expected 200 confirmed 0.300, got {status} ({body})"
+        )
+    print("OK — setting a dish's ingredients via PATCH confirms its recipe.")
 
     # a Manager gets 403 on every one of these PATCHes
     manager_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
@@ -2327,24 +2849,9 @@ def check_sales_and_gap_flow() -> None:
         fail(f"sales flow: stock bulk create expected 201, got {status} ({body})")
     milk_id = body[0]["id"]
 
-    status, body, _ = request(
-        "POST",
-        f"/businesses/{business_id}/sell-items/bulk/",
-        {
-            "items": [
-                {
-                    "name": "Tea pack",
-                    "selling_price": "20.00",
-                    "main_stock_item": milk_id,
-                    "uses_qty": "0.200",
-                }
-            ]
-        },
-        token=owner_access,
+    tea_pack_id, _ = _create_dish(
+        business_id, owner_access, "Tea pack", "20.00", [(milk_id, "0.200")]
     )
-    if status != 201:
-        fail(f"sales flow: sell item create expected 201, got {status} ({body})")
-    tea_pack_id = body[0]["id"]
 
     # opening count: Milk 12 L (the "previous" count the gap window starts from)
     status, body, _ = request(
@@ -2369,7 +2876,12 @@ def check_sales_and_gap_flow() -> None:
             "supplier_name": "Dairy Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "20",
+                    "unit_price": "64",
+                    "line_total": "1280",
+                }
             ],
         },
         token=owner_access,
@@ -2406,7 +2918,10 @@ def check_sales_and_gap_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sales/",
-        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "100"}]},
+        {
+            "business_date": business_date,
+            "lines": [{"sell_item": tea_pack_id, "quantity": "100"}],
+        },
         token=owner_access,
     )
     if status != 201 or len(body) != 1:
@@ -2416,10 +2931,14 @@ def check_sales_and_gap_flow() -> None:
         fail(
             f"sales create: expected amount to default to quantity x price (2000.00), got {body[0]}"
         )
-    print("OK — recorded 100 Tea packs sold; amount defaulted to quantity x selling price.")
+    print(
+        "OK — recorded 100 Tea packs sold; amount defaulted to quantity x selling price."
+    )
 
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/counts/{closing_count_id}/",
+        token=owner_access,
     )
     if status != 200:
         fail(f"sales flow: count review detail expected 200, got {status} ({body})")
@@ -2433,44 +2952,44 @@ def check_sales_and_gap_flow() -> None:
     if Decimal(milk_line["gap_value"]) != Decimal("160.00"):
         fail(f"sales flow: expected gap_value 160.00, got {milk_line}")
     if milk_line["gap_status"] != "ok" or milk_line["flagged"] is not True:
-        fail(f"sales flow: expected gap_status ok and flagged true (12.5% > 10%), got {milk_line}")
-    print("OK — count review shows expected_used 20, gap_qty 2.5, gap_value Rs 160, ok, flagged.")
+        fail(
+            f"sales flow: expected gap_status ok and flagged true (12.5% > 10%), got {milk_line}"
+        )
+    print(
+        "OK — count review shows expected_used 20, gap_qty 2.5, gap_value Rs 160, ok, flagged."
+    )
 
-    # a second active sell item using Milk with no uses_qty -> not_comparable / uses_not_set
+    # a second, unrelated dish with no recipe at all (bulk create, no ingredients) doesn't touch
+    # Milk's gap in any way — recipe_status=none only matters for stock items it actually names as
+    # an ingredient, and this one names none.
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sell-items/bulk/",
-        {"items": [{"name": "Milk Shake", "selling_price": "40.00", "main_stock_item": milk_id}]},
+        {"items": [{"name": "Milk Shake", "selling_price": "40.00"}]},
         token=owner_access,
     )
-    if status != 201:
-        fail(f"sales flow: second sell item create expected 201, got {status} ({body})")
-    milk_shake_id = body[0]["id"]
+    if status != 201 or body[0]["recipe_status"] != "none":
+        fail(
+            f"sales flow: second sell item create expected 201 recipe_status=none, got {status} ({body})"
+        )
 
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/counts/{closing_count_id}/",
+        token=owner_access,
     )
     milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
-    if (
-        milk_line["gap_status"] != "not_comparable"
-        or milk_line["gap_reason"]["code"] != "uses_not_set"
+    if milk_line["gap_status"] != "ok" or Decimal(milk_line["gap_qty"]) != Decimal(
+        "2.5"
     ):
-        fail(f"sales flow: expected not_comparable/uses_not_set, got {milk_line}")
-    if milk_line["expected_used"] is not None or milk_line["gap_qty"] is not None:
-        fail(f"sales flow: not_comparable should have null gap fields, got {milk_line}")
+        fail(
+            f"sales flow: expected Milk's gap unaffected by an unlinked dish, got {milk_line}"
+        )
     print(
-        "OK — a second sell item on Milk with no uses_qty makes the gap not_comparable (uses_not_set)."
+        "OK — a second dish with no recipe at all doesn't affect an unrelated stock item's gap."
     )
 
-    # deactivate it, then delete the window's only sale -> not_comparable / sales_missing
-    status, body, _ = request(
-        "PATCH",
-        f"/businesses/{business_id}/sell-items/{milk_shake_id}/",
-        {"active": False},
-        token=owner_access,
-    )
-    if status != 200:
-        fail(f"sales flow: deactivate Milk Shake expected 200, got {status} ({body})")
+    # delete the window's only sale -> not_comparable / sales_missing
     status, body, _ = request(
         "DELETE", f"/businesses/{business_id}/sales/{sale_id}/", token=owner_access
     )
@@ -2478,7 +2997,9 @@ def check_sales_and_gap_flow() -> None:
         fail(f"sales flow: delete sale expected 204, got {status} ({body})")
 
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/counts/{closing_count_id}/", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/counts/{closing_count_id}/",
+        token=owner_access,
     )
     milk_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == milk_id)
     if (
@@ -2495,32 +3016,46 @@ def check_sales_and_gap_flow() -> None:
     )
 
     # a Manager can record sales but gets 403 on delete; a Helper gets 403 on every sales endpoint
-    _, manager_access, _ = _add_team_member(business_id, owner_access, "Sales Manager", "manager")
-    _, helper_access, _ = _add_team_member(business_id, owner_access, "Sales Helper", "helper")
+    _, manager_access, _ = _add_team_member(
+        business_id, owner_access, "Sales Manager", "manager"
+    )
+    _, helper_access, _ = _add_team_member(
+        business_id, owner_access, "Sales Helper", "helper"
+    )
 
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sales/",
-        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "3"}]},
+        {
+            "business_date": business_date,
+            "lines": [{"sell_item": tea_pack_id, "quantity": "3"}],
+        },
         token=manager_access,
     )
     if status != 201:
         fail(f"sales flow: manager create expected 201, got {status} ({body})")
     manager_sale_id = body[0]["id"]
     status, _, _ = request(
-        "DELETE", f"/businesses/{business_id}/sales/{manager_sale_id}/", token=manager_access
+        "DELETE",
+        f"/businesses/{business_id}/sales/{manager_sale_id}/",
+        token=manager_access,
     )
     if status != 403:
         fail(f"sales flow: manager delete expected 403, got {status}")
     print("OK — a Manager can record sales but gets 403 on delete.")
 
-    status, _, _ = request("GET", f"/businesses/{business_id}/sales/", token=helper_access)
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/sales/", token=helper_access
+    )
     if status != 403:
         fail(f"sales flow: helper list expected 403, got {status}")
     status, _, _ = request(
         "POST",
         f"/businesses/{business_id}/sales/",
-        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "1"}]},
+        {
+            "business_date": business_date,
+            "lines": [{"sell_item": tea_pack_id, "quantity": "1"}],
+        },
         token=helper_access,
     )
     if status != 403:
@@ -2533,7 +3068,10 @@ def check_sales_and_gap_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sales/",
-        {"business_date": future_date, "lines": [{"sell_item": tea_pack_id, "quantity": "1"}]},
+        {
+            "business_date": future_date,
+            "lines": [{"sell_item": tea_pack_id, "quantity": "1"}],
+        },
         token=owner_access,
     )
     if status not in (400, 422):
@@ -2541,16 +3079,22 @@ def check_sales_and_gap_flow() -> None:
     print("OK — a future-dated sale is rejected.")
 
     # the Owner deletes the Manager's sale and the summary updates
-    status, body, _ = request("GET", f"/businesses/{business_id}/sales/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/sales/", token=owner_access
+    )
     if status != 200:
         fail(f"sales flow: list expected 200, got {status} ({body})")
     before_items = Decimal(body["summary"]["items_sold_today"])
     status, _, _ = request(
-        "DELETE", f"/businesses/{business_id}/sales/{manager_sale_id}/", token=owner_access
+        "DELETE",
+        f"/businesses/{business_id}/sales/{manager_sale_id}/",
+        token=owner_access,
     )
     if status != 204:
         fail(f"sales flow: owner delete expected 204, got {status}")
-    status, body, _ = request("GET", f"/businesses/{business_id}/sales/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/sales/", token=owner_access
+    )
     after_items = Decimal(body["summary"]["items_sold_today"])
     if after_items != before_items - Decimal("3"):
         fail(
@@ -2593,7 +3137,12 @@ def check_alerts_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/stock-items/bulk/",
-        {"items": [{"name": "Flour", "unit": "kg"}, {"name": "Cooking Oil", "unit": "L"}]},
+        {
+            "items": [
+                {"name": "Flour", "unit": "kg"},
+                {"name": "Cooking Oil", "unit": "L"},
+            ]
+        },
         token=owner_access,
     )
     if status != 201:
@@ -2622,7 +3171,9 @@ def check_alerts_flow() -> None:
             token=owner_access,
         )
         if status != 201:
-            fail(f"alerts flow: flour purchase at {price} expected 201, got {status} ({body})")
+            fail(
+                f"alerts flow: flour purchase at {price} expected 201, got {status} ({body})"
+            )
 
     # wastage_high: 2 L wasted against 20 L bought — default wastage_alert_pct is 5, and 2/20 = 10%
     status, body, _ = request(
@@ -2632,7 +3183,12 @@ def check_alerts_flow() -> None:
             "supplier_name": "Oil Depot",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": oil_id, "quantity": "20", "unit_price": "150", "line_total": "3000"}
+                {
+                    "stock_item": oil_id,
+                    "quantity": "20",
+                    "unit_price": "150",
+                    "line_total": "3000",
+                }
             ],
         },
         token=owner_access,
@@ -2648,25 +3204,37 @@ def check_alerts_flow() -> None:
     if status != 201:
         fail(f"alerts flow: oil wastage expected 201, got {status} ({body})")
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=owner_access
+    )
     if status != 200:
         fail(f"alerts flow: list expected 200, got {status} ({body})")
     by_type = {a["type"]: a for a in body["results"]}
     if set(by_type) != {"count_late", "price_rise", "wastage_high"}:
-        fail(f"alerts flow: expected count_late/price_rise/wastage_high, got {set(by_type)}")
+        fail(
+            f"alerts flow: expected count_late/price_rise/wastage_high, got {set(by_type)}"
+        )
     if body["counts"]["total"] != 3:
         fail(f"alerts flow: expected 3 total alerts, got {body['counts']}")
     if (
         by_type["count_late"]["severity"] != "warning"
         or by_type["wastage_high"]["severity"] != "warning"
     ):
-        fail(f"alerts flow: expected count_late/wastage_high severity warning, got {by_type}")
+        fail(
+            f"alerts flow: expected count_late/wastage_high severity warning, got {by_type}"
+        )
     if by_type["price_rise"]["severity"] != "danger":
-        fail(f"alerts flow: expected price_rise severity danger, got {by_type['price_rise']}")
+        fail(
+            f"alerts flow: expected price_rise severity danger, got {by_type['price_rise']}"
+        )
     if Decimal(by_type["price_rise"]["numbers"]["pct_increase"]) != Decimal("16.67"):
-        fail(f"alerts flow: expected price_rise pct_increase 16.67, got {by_type['price_rise']}")
+        fail(
+            f"alerts flow: expected price_rise pct_increase 16.67, got {by_type['price_rise']}"
+        )
     if Decimal(by_type["wastage_high"]["numbers"]["pct"]) != Decimal("10.00"):
-        fail(f"alerts flow: expected wastage_high pct 10.00, got {by_type['wastage_high']}")
+        fail(
+            f"alerts flow: expected wastage_high pct 10.00, got {by_type['wastage_high']}"
+        )
     if by_type["price_rise"]["next_action"]["route"] != f"/stock/{flour_id}":
         fail(
             f"alerts flow: expected price_rise route /stock/{flour_id}, got {by_type['price_rise']}"
@@ -2679,7 +3247,9 @@ def check_alerts_flow() -> None:
         "OK — one business trips count_late, price_rise and wastage_high with the right severities and numbers."
     )
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/today/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/today/", token=owner_access
+    )
     if status != 200 or body.get("alerts_count") != 3:
         fail(f"alerts flow: today expected alerts_count 3, got {status} ({body})")
     print("OK — GET today/ carries the same alerts_count for the Owner.")
@@ -2687,26 +3257,42 @@ def check_alerts_flow() -> None:
     # check the wastage_high alert -> it disappears and the counts drop
     wastage_key = by_type["wastage_high"]["key"]
     status, body, _ = request(
-        "POST", f"/businesses/{business_id}/alerts/check/", {"key": wastage_key}, token=owner_access
+        "POST",
+        f"/businesses/{business_id}/alerts/check/",
+        {"key": wastage_key},
+        token=owner_access,
     )
     if status != 204:
         fail(f"alerts flow: check expected 204, got {status} ({body})")
-    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=owner_access
+    )
     if body["counts"]["total"] != 2 or body["counts"]["wastage_high"] != 0:
-        fail(f"alerts flow: expected total 2 and wastage_high 0 after check, got {body['counts']}")
+        fail(
+            f"alerts flow: expected total 2 and wastage_high 0 after check, got {body['counts']}"
+        )
     if wastage_key in {a["key"] for a in body["results"]}:
         fail(f"alerts flow: checked alert still present, got {body['results']}")
     print("OK — checking an alert hides it and the counts drop.")
 
     # re-checking the same key is rejected (no longer open)
     status, _, _ = request(
-        "POST", f"/businesses/{business_id}/alerts/check/", {"key": wastage_key}, token=owner_access
+        "POST",
+        f"/businesses/{business_id}/alerts/check/",
+        {"key": wastage_key},
+        token=owner_access,
     )
     if status not in (400, 422):
-        fail(f"alerts flow: re-check of a closed alert expected rejection, got {status}")
+        fail(
+            f"alerts flow: re-check of a closed alert expected rejection, got {status}"
+        )
 
-    _, helper_access, _ = _add_team_member(business_id, owner_access, "Alerts Helper", "helper")
-    status, _, _ = request("GET", f"/businesses/{business_id}/alerts/", token=helper_access)
+    _, helper_access, _ = _add_team_member(
+        business_id, owner_access, "Alerts Helper", "helper"
+    )
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=helper_access
+    )
     if status != 403:
         fail(f"alerts flow: helper list expected 403, got {status}")
     status, _, _ = request(
@@ -2724,10 +3310,16 @@ def check_alerts_flow() -> None:
         fail("alerts flow: helper's today should carry no alerts_count")
     print("OK — a Helper gets 403 on alerts, and sees no alerts_count on today.")
 
-    _, manager_access, _ = _add_team_member(business_id, owner_access, "Alerts Manager", "manager")
-    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=manager_access)
+    _, manager_access, _ = _add_team_member(
+        business_id, owner_access, "Alerts Manager", "manager"
+    )
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=manager_access
+    )
     if status != 200 or body["counts"]["total"] != 2:
-        fail(f"alerts flow: manager list expected 200 with total 2, got {status} ({body})")
+        fail(
+            f"alerts flow: manager list expected 200 with total 2, got {status} ({body})"
+        )
     status, _, _ = request(
         "POST",
         f"/businesses/{business_id}/alerts/check/",
@@ -2736,9 +3328,13 @@ def check_alerts_flow() -> None:
     )
     if status != 204:
         fail(f"alerts flow: manager check expected 204, got {status}")
-    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=manager_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=manager_access
+    )
     if body["counts"]["total"] != 1:
-        fail(f"alerts flow: expected total 1 after manager's check, got {body['counts']}")
+        fail(
+            f"alerts flow: expected total 1 after manager's check, got {body['counts']}"
+        )
     print("OK — a Manager can view and check alerts.")
 
     # gap_flagged: its own business, exact Step 14 numbers (12 L opening, 20 L bought, 1.5 L wasted,
@@ -2761,22 +3357,9 @@ def check_alerts_flow() -> None:
         token=gap_owner_access,
     )
     milk_id = body[0]["id"]
-    status, body, _ = request(
-        "POST",
-        f"/businesses/{gap_business_id}/sell-items/bulk/",
-        {
-            "items": [
-                {
-                    "name": "Tea pack",
-                    "selling_price": "20.00",
-                    "main_stock_item": milk_id,
-                    "uses_qty": "0.200",
-                }
-            ]
-        },
-        token=gap_owner_access,
+    tea_pack_id, _ = _create_dish(
+        gap_business_id, gap_owner_access, "Tea pack", "20.00", [(milk_id, "0.200")]
     )
-    tea_pack_id = body[0]["id"]
 
     status, body, _ = request(
         "POST",
@@ -2795,7 +3378,12 @@ def check_alerts_flow() -> None:
             "supplier_name": "Dairy Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "20",
+                    "unit_price": "64",
+                    "line_total": "1280",
+                }
             ],
         },
         token=gap_owner_access,
@@ -2819,7 +3407,10 @@ def check_alerts_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{gap_business_id}/sales/",
-        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "100"}]},
+        {
+            "business_date": business_date,
+            "lines": [{"sell_item": tea_pack_id, "quantity": "100"}],
+        },
         token=gap_owner_access,
     )
     if status != 201:
@@ -2832,14 +3423,18 @@ def check_alerts_flow() -> None:
         fail(f"alerts flow: gap alerts list expected 200, got {status} ({body})")
     gap_alerts = [a for a in body["results"] if a["type"] == "gap_flagged"]
     if len(gap_alerts) != 1:
-        fail(f"alerts flow: expected exactly 1 gap_flagged alert, got {body['results']}")
+        fail(
+            f"alerts flow: expected exactly 1 gap_flagged alert, got {body['results']}"
+        )
     gap_alert = gap_alerts[0]
     if gap_alert["severity"] != "danger":
         fail(f"alerts flow: expected gap_flagged severity danger, got {gap_alert}")
     if Decimal(gap_alert["numbers"]["gap_qty"]) != Decimal("2.5"):
         fail(f"alerts flow: expected gap_qty 2.5, got {gap_alert}")
     if gap_alert["next_action"]["route"] != f"/counts/{closing_count_id}":
-        fail(f"alerts flow: expected gap_flagged route /counts/{closing_count_id}, got {gap_alert}")
+        fail(
+            f"alerts flow: expected gap_flagged route /counts/{closing_count_id}, got {gap_alert}"
+        )
     print(
         "OK — a separate business's flagged gap line surfaces as a danger-severity gap_flagged alert."
     )
@@ -2874,8 +3469,18 @@ def check_expiry_alerts_flow() -> None:
         f"/businesses/{business_id}/stock-items/bulk/",
         {
             "items": [
-                {"name": "Tomatoes", "unit": "kg", "goes_off": True, "shelf_life_days": 3},
-                {"name": "Paneer", "unit": "kg", "goes_off": True, "shelf_life_days": 3},
+                {
+                    "name": "Tomatoes",
+                    "unit": "kg",
+                    "goes_off": True,
+                    "shelf_life_days": 3,
+                },
+                {
+                    "name": "Paneer",
+                    "unit": "kg",
+                    "goes_off": True,
+                    "shelf_life_days": 3,
+                },
                 {"name": "Milk", "unit": "L"},
             ]
         },
@@ -2914,7 +3519,12 @@ def check_expiry_alerts_flow() -> None:
             "supplier_name": "Dairy Co",
             "purchase_date_time": _days_ago_iso(7),
             "lines": [
-                {"stock_item": paneer_id, "quantity": "4", "unit_price": "100", "line_total": "400"}
+                {
+                    "stock_item": paneer_id,
+                    "quantity": "4",
+                    "unit_price": "100",
+                    "line_total": "400",
+                }
             ],
         },
         token=owner_access,
@@ -2948,7 +3558,12 @@ def check_expiry_alerts_flow() -> None:
             "supplier_name": "Dairy Co",
             "purchase_date_time": _days_ago_iso(10),
             "lines": [
-                {"stock_item": milk_id, "quantity": "5", "unit_price": "20", "line_total": "100"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "5",
+                    "unit_price": "20",
+                    "line_total": "100",
+                }
             ],
         },
         token=owner_access,
@@ -2972,13 +3587,21 @@ def check_expiry_alerts_flow() -> None:
     if status != 201:
         fail(f"expiry flow: closing count expected 201, got {status} ({body})")
 
-    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=owner_access
+    )
     if status != 200:
         fail(f"expiry flow: alerts list expected 200, got {status} ({body})")
-    by_item = {a["numbers"]["item_name"]: a for a in body["results"] if a["type"] == "expiry_soon"}
+    by_item = {
+        a["numbers"]["item_name"]: a
+        for a in body["results"]
+        if a["type"] == "expiry_soon"
+    }
 
     if set(by_item) != {"Tomatoes", "Paneer"}:
-        fail(f"expiry flow: expected expiry_soon for Tomatoes and Paneer only, got {set(by_item)}")
+        fail(
+            f"expiry flow: expected expiry_soon for Tomatoes and Paneer only, got {set(by_item)}"
+        )
     print(
         "OK — expiry_soon fires for Tomatoes and Paneer, and never for Milk (no shelf_life_days)."
     )
@@ -3013,7 +3636,9 @@ def check_expiry_alerts_flow() -> None:
     _, head_chef_access, _ = _add_team_member(
         business_id, owner_access, "Expiry Head Chef", "head_chef"
     )
-    status, _, _ = request("GET", f"/businesses/{business_id}/alerts/", token=head_chef_access)
+    status, _, _ = request(
+        "GET", f"/businesses/{business_id}/alerts/", token=head_chef_access
+    )
     if status != 403:
         fail(f"expiry flow: head chef alerts list expected 403, got {status}")
     print(
@@ -3044,24 +3669,9 @@ def check_reports_flow() -> None:
     milk_id = body[0]["id"]
     flour_id = body[1]["id"]
 
-    status, body, _ = request(
-        "POST",
-        f"/businesses/{business_id}/sell-items/bulk/",
-        {
-            "items": [
-                {
-                    "name": "Tea pack",
-                    "selling_price": "20.00",
-                    "main_stock_item": milk_id,
-                    "uses_qty": "0.200",
-                }
-            ]
-        },
-        token=owner_access,
+    tea_pack_id, _ = _create_dish(
+        business_id, owner_access, "Tea pack", "20.00", [(milk_id, "0.200")]
     )
-    if status != 201:
-        fail(f"reports flow: sell item create expected 201, got {status} ({body})")
-    tea_pack_id = body[0]["id"]
 
     opening_lines = [
         {"stock_item": milk_id, "state": "counted", "counted_qty": "12"},
@@ -3084,7 +3694,12 @@ def check_reports_flow() -> None:
             "supplier_name": "Dairy Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": milk_id, "quantity": "20", "unit_price": "64", "line_total": "1280"}
+                {
+                    "stock_item": milk_id,
+                    "quantity": "20",
+                    "unit_price": "64",
+                    "line_total": "1280",
+                }
             ],
         },
         token=owner_access,
@@ -3103,7 +3718,12 @@ def check_reports_flow() -> None:
             "supplier_name": "Mill Co",
             "purchase_date_time": older,
             "lines": [
-                {"stock_item": flour_id, "quantity": "10", "unit_price": "60", "line_total": "600"}
+                {
+                    "stock_item": flour_id,
+                    "quantity": "10",
+                    "unit_price": "60",
+                    "line_total": "600",
+                }
             ],
         },
         token=owner_access,
@@ -3117,7 +3737,12 @@ def check_reports_flow() -> None:
             "supplier_name": "Mill Co",
             "purchase_date_time": _now_iso(),
             "lines": [
-                {"stock_item": flour_id, "quantity": "10", "unit_price": "70", "line_total": "700"}
+                {
+                    "stock_item": flour_id,
+                    "quantity": "10",
+                    "unit_price": "70",
+                    "line_total": "700",
+                }
             ],
         },
         token=owner_access,
@@ -3150,44 +3775,63 @@ def check_reports_flow() -> None:
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/sales/",
-        {"business_date": business_date, "lines": [{"sell_item": tea_pack_id, "quantity": "100"}]},
+        {
+            "business_date": business_date,
+            "lines": [{"sell_item": tea_pack_id, "quantity": "100"}],
+        },
         token=owner_access,
     )
     if status != 201:
         fail(f"reports flow: sale expected 201, got {status} ({body})")
     if Decimal(body[0]["amount"]) != Decimal("2000.00"):
         fail(f"reports flow: expected sale amount 2000.00, got {body}")
-    print("OK — Reports Test Biz seeded: Milk's 160 gap, Flour's 60 -> 70 price rise, a 2000 sale.")
+    print(
+        "OK — Reports Test Biz seeded: Milk's 160 gap, Flour's 60 -> 70 price rise, a 2000 sale."
+    )
 
     status, body, _ = request(
-        "GET", f"/businesses/{business_id}/reports/summary/?period=7d", token=owner_access
+        "GET",
+        f"/businesses/{business_id}/reports/summary/?period=7d",
+        token=owner_access,
     )
     if status != 200:
         fail(f"reports flow: summary expected 200, got {status} ({body})")
 
     money_went = body["money_went"]
     if Decimal(money_went["total"]["gap_value"]) != Decimal("160.00"):
-        fail(f"reports flow: expected money_went gap_value 160.00, got {money_went['total']}")
+        fail(
+            f"reports flow: expected money_went gap_value 160.00, got {money_went['total']}"
+        )
     if Decimal(money_went["total"]["bought"]) != Decimal("2580.00"):
-        fail(f"reports flow: expected money_went bought 2580.00, got {money_went['total']}")
+        fail(
+            f"reports flow: expected money_went bought 2580.00, got {money_went['total']}"
+        )
     if Decimal(money_went["total"]["wastage_value"]) != Decimal("96.00"):
-        fail(f"reports flow: expected money_went wastage_value 96.00, got {money_went['total']}")
+        fail(
+            f"reports flow: expected money_went wastage_value 96.00, got {money_went['total']}"
+        )
     print("OK — money_went totals (bought 2580, wastage 96, gap 160) add up over 7d.")
 
     biggest_gaps = body["biggest_gaps"]["items"]
     if len(biggest_gaps) != 1 or biggest_gaps[0]["name"] != "Milk":
-        fail(f"reports flow: expected biggest_gaps to show only Milk, got {biggest_gaps}")
+        fail(
+            f"reports flow: expected biggest_gaps to show only Milk, got {biggest_gaps}"
+        )
     if Decimal(biggest_gaps[0]["value"]) != Decimal("160.00"):
-        fail(f"reports flow: expected Milk's biggest_gaps value 160.00, got {biggest_gaps}")
+        fail(
+            f"reports flow: expected Milk's biggest_gaps value 160.00, got {biggest_gaps}"
+        )
     print("OK — biggest_gaps shows Milk at Rs 160.")
 
     used_vs_expected = body["used_vs_expected"]["items"]
     if len(used_vs_expected) != 1 or used_vs_expected[0]["name"] != "Milk":
-        fail(f"reports flow: expected used_vs_expected to show only Milk, got {used_vs_expected}")
+        fail(
+            f"reports flow: expected used_vs_expected to show only Milk, got {used_vs_expected}"
+        )
     milk_row = used_vs_expected[0]
-    if Decimal(milk_row["used"]) != Decimal("22.5") or Decimal(milk_row["expected"]) != Decimal(
-        "20"
-    ):
+    if Decimal(milk_row["used"]) != Decimal("22.5") or Decimal(
+        milk_row["expected"]
+    ) != Decimal("20"):
         fail(f"reports flow: expected Milk used 22.5 / expected 20, got {milk_row}")
     print("OK — used_vs_expected shows Milk's used 22.5 against expected 20.")
 
@@ -3200,12 +3844,16 @@ def check_reports_flow() -> None:
     if prices != [Decimal("60.00"), Decimal("70.00")]:
         fail(f"reports flow: expected Flour's prices [60, 70], got {prices}")
     if Decimal(price_trend["pct_change"]) != Decimal("16.7"):
-        fail(f"reports flow: expected Flour's pct_change 16.7, got {price_trend['pct_change']}")
+        fail(
+            f"reports flow: expected Flour's pct_change 16.7, got {price_trend['pct_change']}"
+        )
     print("OK — price_trend defaults to Flour's 60 -> 70 rise, +16.7%.")
 
     sales_vs_cost = body["sales_vs_cost"]
     if Decimal(sales_vs_cost["total"]["sales"]) != Decimal("2000.00"):
-        fail(f"reports flow: expected sales total 2000.00, got {sales_vs_cost['total']}")
+        fail(
+            f"reports flow: expected sales total 2000.00, got {sales_vs_cost['total']}"
+        )
     if Decimal(sales_vs_cost["total"]["cost"]) != Decimal("1280.00"):
         fail(f"reports flow: expected cost total 1280.00, got {sales_vs_cost['total']}")
     if Decimal(sales_vs_cost["cost_pct"]) != Decimal("64.0"):
@@ -3213,10 +3861,15 @@ def check_reports_flow() -> None:
     print("OK — sales_vs_cost: (100 x 0.2 x 64) / 2000 = 64.0% cost.")
 
     wastage_trend = body["wastage_trend"]
-    if Decimal(wastage_trend["total"]["quantity_by_unit"].get("L", "0")) != Decimal("1.5"):
-        fail(f"reports flow: expected wastage_trend L total 1.5, got {wastage_trend['total']}")
+    if Decimal(wastage_trend["total"]["quantity_by_unit"].get("L", "0")) != Decimal(
+        "1.5"
+    ):
+        fail(
+            f"reports flow: expected wastage_trend L total 1.5, got {wastage_trend['total']}"
+        )
     bucket_qty_total = sum(
-        Decimal(bucket["quantity_by_unit"].get("L", "0")) for bucket in wastage_trend["buckets"]
+        Decimal(bucket["quantity_by_unit"].get("L", "0"))
+        for bucket in wastage_trend["buckets"]
     )
     if bucket_qty_total != Decimal("1.5"):
         fail(
@@ -3224,9 +3877,13 @@ def check_reports_flow() -> None:
         )
     print("OK — wastage_trend's bucket quantities add up to the period total.")
 
-    _, helper_access, _ = _add_team_member(business_id, owner_access, "Reports Helper", "helper")
+    _, helper_access, _ = _add_team_member(
+        business_id, owner_access, "Reports Helper", "helper"
+    )
     status, _, _ = request(
-        "GET", f"/businesses/{business_id}/reports/summary/?period=7d", token=helper_access
+        "GET",
+        f"/businesses/{business_id}/reports/summary/?period=7d",
+        token=helper_access,
     )
     if status != 403:
         fail(f"reports flow: helper summary expected 403, got {status}")
@@ -3249,7 +3906,9 @@ def check_reports_flow() -> None:
         token=fresh_owner_access,
     )
     if status != 200:
-        fail(f"reports flow: empty business summary expected 200, got {status} ({body})")
+        fail(
+            f"reports flow: empty business summary expected 200, got {status} ({body})"
+        )
     if Decimal(body["money_went"]["total"]["bought"]) != Decimal("0.00"):
         fail(
             f"reports flow: expected empty business money_went bought 0.00, got {body['money_went']}"
@@ -3257,10 +3916,16 @@ def check_reports_flow() -> None:
     if body["biggest_gaps"]["items"] != [] or body["used_vs_expected"]["items"] != []:
         fail(f"reports flow: expected empty business gap lists empty, got {body}")
     if body["price_trend"]["item"] is not None or body["price_trend"]["points"] != []:
-        fail(f"reports flow: expected empty business price_trend empty, got {body['price_trend']}")
+        fail(
+            f"reports flow: expected empty business price_trend empty, got {body['price_trend']}"
+        )
     if body["sales_vs_cost"]["cost_pct"] is not None:
-        fail(f"reports flow: expected empty business cost_pct null, got {body['sales_vs_cost']}")
-    print("OK — a brand-new business returns every report block present but empty, no errors.")
+        fail(
+            f"reports flow: expected empty business cost_pct null, got {body['sales_vs_cost']}"
+        )
+    print(
+        "OK — a brand-new business returns every report block present but empty, no errors."
+    )
 
 
 def check_pincode_geo_flow() -> None:
@@ -3273,20 +3938,26 @@ def check_pincode_geo_flow() -> None:
     if body.get("state") != "Karnataka" or "Bengaluru" not in body.get("districts", []):
         fail(f"pincode lookup: expected Karnataka/Bengaluru, got {body}")
     if "Koramangala" not in body.get("areas", []):
-        fail(f"pincode lookup: expected Koramangala among areas, got {body.get('areas')}")
+        fail(
+            f"pincode lookup: expected Koramangala among areas, got {body.get('areas')}"
+        )
     print("OK — 560034 resolves to Karnataka / Bengaluru, areas include Koramangala.")
 
     # an unknown pincode
     status, body, _ = request("GET", "/geo/pincode/999999/", token=access)
     if status != 404:
-        fail(f"pincode lookup: expected HTTP 404 for an unknown pincode, got {status} ({body})")
+        fail(
+            f"pincode lookup: expected HTTP 404 for an unknown pincode, got {status} ({body})"
+        )
     print("OK — an unknown pincode returns 404.")
 
     # a badly-shaped pincode (too short, and one starting with 0)
     for bad in ("12345", "012345"):
         status, body, _ = request("GET", f"/geo/pincode/{bad}/", token=access)
         if status != 400:
-            fail(f"pincode lookup: expected HTTP 400 for {bad!r}, got {status} ({body})")
+            fail(
+                f"pincode lookup: expected HTTP 400 for {bad!r}, got {status} ({body})"
+            )
     print("OK — a badly-shaped pincode is rejected with 400, not treated as unknown.")
 
     # no token at all
@@ -3308,9 +3979,13 @@ def check_pincode_geo_flow() -> None:
         token=access,
     )
     if status != 201 or body.get("state") != "Karnataka":
-        fail(f"business create with pincode: expected HTTP 201 and state Karnataka, got {status} ({body})")
+        fail(
+            f"business create with pincode: expected HTTP 201 and state Karnataka, got {status} ({body})"
+        )
     business_id = body["id"]
-    print("OK — business create with a matching pincode/city fills in state automatically.")
+    print(
+        "OK — business create with a matching pincode/city fills in state automatically."
+    )
 
     # business create: city that doesn't match the pincode is rejected
     status, body, _ = request(
@@ -3325,18 +4000,27 @@ def check_pincode_geo_flow() -> None:
         token=access,
     )
     if status != 400:
-        fail(f"business create: expected HTTP 400 for a mismatched city, got {status} ({body})")
+        fail(
+            f"business create: expected HTTP 400 for a mismatched city, got {status} ({body})"
+        )
     print("OK — a city that isn't one of the pincode's areas is rejected.")
 
     # business create: an unknown pincode without manual_location is rejected
     status, body, _ = request(
         "POST",
         "/businesses/",
-        {"name": "Unknown Pin Biz", "business_type": "cloud_kitchen", "city": "Nowhere", "pincode": "999999"},
+        {
+            "name": "Unknown Pin Biz",
+            "business_type": "cloud_kitchen",
+            "city": "Nowhere",
+            "pincode": "999999",
+        },
         token=access,
     )
     if status != 400:
-        fail(f"business create: expected HTTP 400 for an unknown pincode, got {status} ({body})")
+        fail(
+            f"business create: expected HTTP 400 for an unknown pincode, got {status} ({body})"
+        )
     print("OK — an unknown pincode without manual_location is rejected.")
 
     # business create: the same unknown pincode saves once manual_location is set
@@ -3354,7 +4038,9 @@ def check_pincode_geo_flow() -> None:
         token=access,
     )
     if status != 201 or body.get("city") != "Nowhere" or body.get("state") != "Delhi":
-        fail(f"business create: expected manual_location to save as typed, got {status} ({body})")
+        fail(
+            f"business create: expected manual_location to save as typed, got {status} ({body})"
+        )
     print("OK — manual_location saves an unknown pincode with the typed city/state.")
 
     # business update: mismatched state/city against an existing pincode is rejected
@@ -3365,7 +4051,9 @@ def check_pincode_geo_flow() -> None:
         token=access,
     )
     if status != 400:
-        fail(f"business update: expected HTTP 400 for a mismatched state, got {status} ({body})")
+        fail(
+            f"business update: expected HTTP 400 for a mismatched state, got {status} ({body})"
+        )
     print("OK — a business update with a mismatched state/pincode is rejected.")
 
 

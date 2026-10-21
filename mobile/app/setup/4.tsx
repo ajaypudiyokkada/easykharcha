@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError, type RowError } from '../../src/api/client';
-import type { SellItem, StarterPack, StockItem } from '../../src/api/stock';
+import type { SellItem, StarterPack } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { groupItems } from '../../src/forms/groupItems';
@@ -13,7 +13,6 @@ import {
   SellItemForm,
   type SellItemDraft,
 } from '../../src/forms/SellItemForm';
-import type { StockItemDraft } from '../../src/forms/StockItemForm';
 import { validateSellItemDraft } from '../../src/forms/validateSellItem';
 import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { sellItemLabel } from '../../src/labels';
@@ -49,7 +48,6 @@ export default function SetupStepFour() {
   const [starterPrices, setStarterPrices] = useState<Record<string, string>>({});
   const [starterErrors, setStarterErrors] = useState<Record<string, string>>({});
 
-  const [stockItems, setStockItems] = useState<StockItem[] | null>(null);
   const [items, setItems] = useState<SellItem[] | null>(null);
   const [addFieldErrors, setAddFieldErrors] = useState<ReturnType<typeof validateSellItemDraft>>(
     {},
@@ -68,9 +66,6 @@ export default function SetupStepFour() {
     authedFetch<StarterPack>(`/starter-packs/${onboardingBusiness.business_type}/`)
       .then(setStarterPack)
       .catch(() => setStarterPack({ stock_items: [], sell_items: [] }));
-    authedFetch<StockItem[]>(`/businesses/${onboardingBusiness.id}/stock-items/`)
-      .then(setStockItems)
-      .catch(() => setStockItems([]));
     authedFetch<SellItem[]>(`/businesses/${onboardingBusiness.id}/sell-items/`)
       .then(setItems)
       .catch(() => setItems([]));
@@ -86,8 +81,9 @@ export default function SetupStepFour() {
       id: 0,
       name: draft.name.trim(),
       selling_price: draft.sellingPrice.trim(),
-      main_stock_item: draft.mainStockItemId,
-      uses_qty: draft.usesQty.trim() || null,
+      portion_label: draft.portionLabel.trim(),
+      recipe_status: 'none',
+      ingredients: [],
       group: draft.group.trim(),
       active: true,
       created_at: new Date().toISOString(),
@@ -102,7 +98,7 @@ export default function SetupStepFour() {
               {
                 name: draft.name.trim(),
                 selling_price: draft.sellingPrice.trim(),
-                main_stock_item: draft.mainStockItemId ?? undefined,
+                portion_label: draft.portionLabel.trim() || undefined,
                 group: draft.group.trim() || undefined,
               },
             ],
@@ -150,36 +146,9 @@ export default function SetupStepFour() {
   const business = onboardingBusiness;
 
   const label = sellItemLabel(business.business_type);
-  const linkableStockItems = (stockItems ?? []).filter((item) => !item.shared);
   const allItems = items ?? [];
   const existingGroups = [...new Set(allItems.map((item) => item.group).filter(Boolean))];
   const addedGroups = groupItems(allItems);
-
-  async function handleAddStockItem(stockDraft: StockItemDraft): Promise<StockItem> {
-    const results = await authedFetch<StockItem[]>(`/businesses/${business.id}/stock-items/bulk/`, {
-      method: 'POST',
-      body: {
-        items: [
-          {
-            name: stockDraft.name.trim(),
-            unit: stockDraft.unit,
-            usual_price: stockDraft.usualPrice.trim() || undefined,
-            supplier: stockDraft.supplier.trim() || undefined,
-            shared: stockDraft.shared,
-            goes_off: stockDraft.goesOff,
-            shelf_life_days:
-              stockDraft.goesOff && stockDraft.shelfLifeDays.trim()
-                ? Number(stockDraft.shelfLifeDays)
-                : undefined,
-            group: stockDraft.group.trim() || undefined,
-          },
-        ],
-      },
-    });
-    const created = results[0];
-    setStockItems((current) => [created, ...(current ?? [])]);
-    return created;
-  }
 
   async function handleAdd() {
     setAddFormError(null);
@@ -395,14 +364,13 @@ export default function SetupStepFour() {
             groups={addedGroups}
             getKey={(item) => item.id}
             renderItem={(item) => {
-              const linked = linkableStockItems.find((stock) => stock.id === item.main_stock_item);
               return (
                 <View style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}>
                   <View style={styles.itemRowCopy}>
                     <Body style={styles.itemRowName}>{item.name}</Body>
                     <Small style={styles.itemRowMeta}>
                       ₹{item.selling_price}
-                      {linked ? ` · ${linked.name}` : ''}
+                      {item.portion_label ? ` · ${item.portion_label}` : ''}
                     </Small>
                   </View>
                   <Pressable
@@ -429,8 +397,6 @@ export default function SetupStepFour() {
           onChange={instant.setDraft}
           errors={addFieldErrors}
           businessType={business.business_type}
-          stockItems={stockItems === null ? null : linkableStockItems}
-          onAddStockItem={handleAddStockItem}
           existingGroups={existingGroups}
           nameFieldRef={instant.nameFieldRef}
         />

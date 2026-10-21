@@ -1,40 +1,44 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../api/client';
 import type { SellItem, StockItem } from '../api/stock';
 import { useAuth } from '../auth/AuthContext';
 import {
-  EMPTY_SELL_ITEM_DRAFT,
-  SellItemForm,
-  sellItemToDraft,
-  type SellItemDraft,
-} from '../forms/SellItemForm';
+  DishRecipeForm,
+  dishToDraft,
+  EMPTY_DISH_DRAFT,
+  ingredientsPayload,
+  type DishDraft,
+} from '../forms/DishRecipeForm';
 import type { StockItemDraft } from '../forms/StockItemForm';
-import { validateSellItemDraft } from '../forms/validateSellItem';
+import { validateDishDraft } from '../forms/validateDish';
 import { strings } from '../strings';
-import { Banner, Button, Sheet } from '../ui';
 import { spacing } from '../theme/tokens';
+import { Sheet } from '../ui';
 
-const ss = strings.settings.sell;
+const sd = strings.dishForm;
 
 type Props = {
   visible: boolean;
   onClose: () => void;
   /** Called once the save succeeds, with a toast message to show. */
   onSaved: (message: string) => void;
-  /** Linkable (non-shared) stock items for the "main stock item" picker — null while loading. */
+  /** Linkable (non-shared, active) stock items for the ingredient picker — null while loading. */
   stockItems: StockItem[] | null;
   /** New stock items added inline via the picker's "+ Add a new item" land here too, so the
    * picker's own list (and Settings' "What you buy", once reopened) sees them. */
   onStockItemAdded: (item: StockItem) => void;
-  editingItem: SellItem;
+  /** null means "Add a dish" (create); otherwise this is the dish being edited. */
+  editingItem: SellItem | null;
   existingItems: SellItem[];
 };
 
 /**
- * Edit sheet for one sell item — Settings' "What you sell" list. *Adding* a new item (Step 19) is
- * inline on the list screen itself now, not a sheet — see settings/sell.tsx and setup/4.tsx.
+ * Settings' "What you sell" add/edit sheet (Step 22a) — one dish, its portion and its full
+ * ingredient list, via DishRecipeForm. Create (editingItem null) posts sell-items/; edit PATCHes
+ * sell-items/<id>/ — both always land at recipe_status=confirmed, since the form requires at least
+ * one valid ingredient before Save does anything.
  */
 export function SellItemSheet({
   visible,
@@ -48,30 +52,34 @@ export function SellItemSheet({
   const { authedFetch, businesses } = useAuth();
   const business = businesses[0];
 
-  const [draft, setDraft] = useState<SellItemDraft>(EMPTY_SELL_ITEM_DRAFT);
-  const [errors, setErrors] = useState<ReturnType<typeof validateSellItemDraft>>({});
+  const [draft, setDraft] = useState<DishDraft>(EMPTY_DISH_DRAFT);
+  const [errors, setErrors] = useState<ReturnType<typeof validateDishDraft>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const existingGroups = [...new Set(existingItems.map((item) => item.group).filter(Boolean))];
+  const stockItemsById = useMemo(() => {
+    const map = new Map<number, StockItem>();
+    for (const item of stockItems ?? []) map.set(item.id, item);
+    return map;
+  }, [stockItems]);
 
   useEffect(() => {
     if (!visible) return;
-    setDraft(sellItemToDraft(editingItem));
+    setDraft(editingItem ? dishToDraft(editingItem) : EMPTY_DISH_DRAFT);
     setErrors({});
     setFormError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, editingItem.id]);
+  }, [visible, editingItem]);
 
   function mapError(err: unknown) {
     if (err instanceof ApiError && err.rowErrors && err.rowErrors[0]) {
       setFormError(err.rowErrors[0].message);
     } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
-      setFormError(ss.errors.network);
+      setFormError(sd.errors.network);
     } else if (err instanceof ApiError) {
-      setFormError(err.message || ss.errors.generic);
+      setFormError(err.message || sd.errors.generic);
     } else {
-      setFormError(ss.errors.generic);
+      setFormError(sd.errors.generic);
     }
   }
 
@@ -106,27 +114,33 @@ export function SellItemSheet({
 
   async function handleSave() {
     setFormError(null);
-    const nextErrors = validateSellItemDraft(
+    const nextErrors = validateDishDraft(
       draft,
-      existingItems.filter((item) => item.id !== editingItem.id),
+      existingItems.filter((item) => item.id !== editingItem?.id),
     );
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0 || !business) return;
 
+    const body = {
+      name: draft.name.trim(),
+      selling_price: draft.sellingPrice.trim(),
+      portion_label: draft.portionLabel.trim(),
+      group: draft.group.trim(),
+      ingredients: ingredientsPayload(draft, stockItemsById),
+      ...(editingItem ? { active: draft.active } : {}),
+    };
+
     setSaving(true);
     try {
-      await authedFetch(`/businesses/${business.id}/sell-items/${editingItem.id}/`, {
-        method: 'PATCH',
-        body: {
-          name: draft.name.trim(),
-          selling_price: draft.sellingPrice.trim(),
-          main_stock_item: draft.mainStockItemId,
-          uses_qty: draft.mainStockItemId !== null ? draft.usesQty.trim() || null : null,
-          group: draft.group.trim(),
-          active: draft.active,
-        },
-      });
-      onSaved(ss.savedToast);
+      if (editingItem) {
+        await authedFetch(`/businesses/${business.id}/sell-items/${editingItem.id}/`, {
+          method: 'PATCH',
+          body,
+        });
+      } else {
+        await authedFetch(`/businesses/${business.id}/sell-items/`, { method: 'POST', body });
+      }
+      onSaved(editingItem ? sd.savedToast : sd.addedToast);
     } catch (err) {
       mapError(err);
     } finally {
@@ -135,34 +149,32 @@ export function SellItemSheet({
   }
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={ss.editSheetTitle}>
-      {formError ? (
-        <View style={styles.banner}>
-          <Banner kind="error">{formError}</Banner>
-        </View>
-      ) : null}
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title={editingItem ? sd.editSheetTitle : sd.addSheetTitle}
+    >
       <View style={styles.formWrap}>
-        <SellItemForm
+        <DishRecipeForm
           value={draft}
           onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
           errors={errors}
           businessType={business?.business_type ?? ''}
           stockItems={stockItems}
           onAddStockItem={handleAddStockItem}
-          showUsesQty
-          showActive
           existingGroups={existingGroups}
+          showActive={Boolean(editingItem)}
+          formError={formError}
+          onSave={handleSave}
+          saving={saving}
+          saveLabel={sd.save}
         />
       </View>
-      <Button label={ss.save} variant="primary" onPress={handleSave} loading={saving} />
     </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  banner: {
-    marginBottom: spacing.md,
-  },
   formWrap: {
     marginBottom: spacing.lg,
   },
