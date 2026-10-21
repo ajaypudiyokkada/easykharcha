@@ -197,11 +197,11 @@
   },
   "homestay": {
     "stock_items": [
-      { "name": "Eggs", "unit": "piece", "group": "Breakfast & kitchen", "goes_off": true, "shelf_life_days": 14 },
-      { "name": "Milk", "unit": "L", "group": "Breakfast & kitchen", "goes_off": true, "shelf_life_days": 2 },
-      { "name": "Bread", "unit": "pack", "group": "Breakfast & kitchen", "goes_off": true, "shelf_life_days": 3 },
-      { "name": "Butter", "unit": "kg", "group": "Breakfast & kitchen", "goes_off": true, "shelf_life_days": 30 },
-      { "name": "Jam", "unit": "kg", "group": "Breakfast & kitchen" },
+      { "name": "Eggs", "unit": "piece", "group": "Breakfast & pantry", "goes_off": true, "shelf_life_days": 14 },
+      { "name": "Milk", "unit": "L", "group": "Breakfast & pantry", "goes_off": true, "shelf_life_days": 2 },
+      { "name": "Bread", "unit": "pack", "group": "Breakfast & pantry", "goes_off": true, "shelf_life_days": 3 },
+      { "name": "Butter", "unit": "kg", "group": "Breakfast & pantry", "goes_off": true, "shelf_life_days": 30 },
+      { "name": "Jam", "unit": "kg", "group": "Breakfast & pantry" },
       { "name": "Tea bags", "unit": "pack", "group": "Beverages" },
       { "name": "Coffee powder", "unit": "kg", "group": "Beverages" },
       { "name": "Drinking water bottles", "unit": "piece", "group": "Beverages" },
@@ -273,7 +273,7 @@
       { "name": "Custom order" },
       { "name": "Handmade item" },
       { "name": "Tailoring service" },
-      { "name": "Home-cooked meal" },
+      { "name": "Meal service" },
       { "name": "Tuition class" },
       { "name": "Craft workshop" }
     ]

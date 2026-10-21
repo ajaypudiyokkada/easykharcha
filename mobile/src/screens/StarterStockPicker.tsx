@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { StarterPackStockItem } from '../api/stock';
 import { findDuplicateName, groupItems } from '../forms/groupItems';
-import { EMPTY_STOCK_ITEM_DRAFT, StockItemForm, type StockItemDraft } from '../forms/StockItemForm';
+import { emptyStockItemDraft, StockItemForm, type StockItemDraft } from '../forms/StockItemForm';
 import { strings } from '../strings';
 import { Banner, Checkbox, GroupedList, Icon, Small, TextField } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
@@ -70,6 +70,7 @@ type Props = {
   existingItems: { name: string }[];
   value: StarterPickerValue;
   onChange: (value: StarterPickerValue) => void;
+  businessType: string;
 };
 
 /**
@@ -78,9 +79,15 @@ type Props = {
  * own" quick add. Nothing here saves on its own — the caller turns `value` into one bulk-create
  * request (see buildStarterBulkPayload) on its own Continue/Next action.
  */
-export function StarterStockPicker({ catalogue, existingItems, value, onChange }: Props) {
+export function StarterStockPicker({
+  catalogue,
+  existingItems,
+  value,
+  onChange,
+  businessType,
+}: Props) {
   const [search, setSearch] = useState('');
-  const [addDraft, setAddDraft] = useState<StockItemDraft>(EMPTY_STOCK_ITEM_DRAFT);
+  const [addDraft, setAddDraft] = useState<StockItemDraft>(() => emptyStockItemDraft(businessType));
   const [addError, setAddError] = useState<string | null>(null);
 
   const alreadyAdded = new Set(existingItems.map((item) => item.name.toLowerCase()));
@@ -136,7 +143,7 @@ export function StarterStockPicker({ catalogue, existingItems, value, onChange }
       ...value,
       custom: [...value.custom, { name, unit: addDraft.unit, group: addDraft.group.trim() }],
     });
-    setAddDraft(EMPTY_STOCK_ITEM_DRAFT);
+    setAddDraft(emptyStockItemDraft(businessType));
     setAddError(null);
   }
 
@@ -210,6 +217,7 @@ export function StarterStockPicker({ catalogue, existingItems, value, onChange }
           value={addDraft}
           onChange={(patch) => setAddDraft((current) => ({ ...current, ...patch }))}
           existingGroups={existingGroups}
+          businessType={businessType}
           minimal
         />
         <Pressable accessibilityRole="button" onPress={handleAddCustom} style={styles.addButton}>

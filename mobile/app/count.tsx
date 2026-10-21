@@ -7,6 +7,7 @@ import type { CountFormItem, CountType, TodayStatus } from '../src/api/counts';
 import { useAuth } from '../src/auth/AuthContext';
 import { can } from '../src/auth/permissions';
 import { countDraftStorage, type CountDraftLine } from '../src/screens/countDraftStorage';
+import { sectorCopyFor } from '../src/sectorCopy';
 import { strings } from '../src/strings';
 import { colours, fonts, radii, spacing } from '../src/theme/tokens';
 import {
@@ -234,7 +235,9 @@ export default function Count() {
     <AppShell active="home">
       <Screen maxWidth={HOME_CONTENT_WIDTH}>
         <Heading level={1}>{s.title}</Heading>
-        <Body style={styles.subtitle}>{s.subtitle}</Body>
+        <Body style={styles.subtitle}>
+          {sectorCopyFor(business?.business_type ?? '').countHelp}
+        </Body>
 
         {failed ? (
           <ReadError onRetry={load} loading={loading} />

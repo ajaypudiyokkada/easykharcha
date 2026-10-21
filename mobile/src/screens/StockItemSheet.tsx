@@ -111,6 +111,7 @@ export function StockItemSheet({ visible, onClose, onSaved, editingItem, existin
           value={draft}
           onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
           errors={errors}
+          businessType={business?.business_type ?? ''}
           existingGroups={existingGroups}
           showActive
         />

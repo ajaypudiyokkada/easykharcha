@@ -46,7 +46,7 @@ class StockItemRowSerializer(serializers.Serializer):
             attrs["shelf_life_days"] = None
         elif attrs.get("shelf_life_days") is None:
             raise serializers.ValidationError(
-                {"shelf_life_days": 'Enter a shelf life in days, or turn off "Perishable item".'}
+                {"shelf_life_days": "Enter a shelf life in days, or turn that off."}
             )
         return attrs
 
@@ -84,7 +84,7 @@ class StockItemUpdateSerializer(serializers.Serializer):
             attrs["shelf_life_days"] = None
         elif attrs.get("goes_off") and attrs.get("shelf_life_days") is None:
             raise serializers.ValidationError(
-                {"shelf_life_days": 'Enter a shelf life in days, or turn off "Perishable item".'}
+                {"shelf_life_days": "Enter a shelf life in days, or turn that off."}
             )
         return attrs
 

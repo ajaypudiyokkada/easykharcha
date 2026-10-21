@@ -682,6 +682,49 @@ def check_starter_pack_flow() -> None:
     print("OK — without skip_existing, a duplicate name is still a row error as before.")
 
 
+def check_sector_units_flow() -> None:
+    """Sector-aware copy/units step: a non-food business type can save a stock item in one of the
+    new unit choices (not just kg/g/L/ml/piece/pack), and the starter pack for a non-food type
+    carries no food-flavoured grouping (the client-side guard is scripts/check_sector_copy.py; this
+    just proves the unit actually round-trips through the real API)."""
+    owner_mobile, owner_access, _ = signup_and_login("Sector Units Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Steel Works", "business_type": "small_manufacturing", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"sector units flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, created, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Steel sheet", "unit": "sheet", "group": "Raw materials"}]},
+        token=owner_access,
+    )
+    if status != 201 or created[0]["unit"] != "sheet":
+        fail(f"sector units flow: bulk save of a 'sheet' unit expected 201, got {status} ({created})")
+    print("OK — a small_manufacturing stock item saves with the new 'sheet' unit.")
+
+    status, items, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
+    saved = next((item for item in items if item["name"] == "Steel sheet"), None)
+    if saved is None or saved["unit"] != "sheet" or saved["group"] != "Raw materials":
+        fail(f"sector units flow: expected 'Steel sheet' saved as sheet/Raw materials, got {saved}")
+    print("OK — it comes back from GET with the same unit and group, not silently dropped.")
+
+    status, pack, _ = request("GET", "/starter-packs/homestay/", token=owner_access)
+    if status != 200:
+        fail(f"sector units flow: homestay starter-packs GET expected 200, got {status} ({pack})")
+    groups = {item["group"] for item in pack.get("stock_items", [])}
+    if any("kitchen" in group.lower() for group in groups):
+        fail(f"sector units flow: homestay starter pack still has a 'kitchen' group — {groups}")
+    print("OK — the homestay starter pack has no 'kitchen' wording left in its groups.")
+
+
 def check_team_flow() -> None:
     owner_mobile, owner_access, _ = signup_and_login("Team Owner")
     status, body, _ = request(
@@ -2614,7 +2657,7 @@ def check_expiry_alerts_flow() -> None:
     (b) Paneer — an old 4 kg batch from 7 days ago plus a fresh 10 kg batch bought today, counted 14
         kg (both still on hand) -> the FIFO walk has to dig past the fresh batch into the old one to
         cover the count, so the old batch is what gets flagged, not the fresh one.
-    (c) Milk — not marked "Perishable item" at all (Step 19 requires a shelf life whenever that's
+    (c) Milk — not marked as going off at all (Step 19 requires a shelf life whenever that's
         on, so "perishable with no shelf life" isn't a reachable state via the API any more) ->
         never alerts, however old its purchase.
     All three share one closing count (one call, one line per item), since compute_alerts looks at
@@ -3138,6 +3181,7 @@ def main() -> None:
     check_stock_flow()
     check_item_setup_flow()
     check_starter_pack_flow()
+    check_sector_units_flow()
     check_team_flow()
     check_team_reset_flow()
     check_purchase_flow()
