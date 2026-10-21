@@ -15,6 +15,7 @@ from django.db.models import Avg, Count, F, OuterRef, Subquery, Sum
 from django.utils import timezone
 
 from businesses.models import AccessRole, Business
+from counts.business_day import business_date_for
 from counts.gap import lines_with_gap, unit_cost_for
 from counts.models import CountLine, CountLineState, CountType, StockCount
 from purchases.models import PurchaseLine
@@ -31,7 +32,14 @@ MIN_PRIOR_PURCHASES = 2
 # alternative — no estimate at all — is worse), just flagged as needing a recount to confirm.
 EXPIRY_STALE_COUNT_DAYS = 3
 
-ALERT_TYPES = ("count_late", "price_rise", "wastage_high", "gap_flagged", "expiry_soon")
+ALERT_TYPES = (
+    "opening_late",
+    "closing_late",
+    "price_rise",
+    "wastage_high",
+    "gap_flagged",
+    "expiry_soon",
+)
 
 # Danger alerts (price_rise, gap_flagged) sort ahead of warnings (count_late, wastage_high); within
 # a tier, the alert with the bigger rupee value behind it sorts first.
@@ -44,7 +52,10 @@ def _business_today(business: Business):
 
 
 def _count_late_alerts(business: Business, role: str | None) -> list[dict]:
-    today = _business_today(business)
+    # Step 23b: this one alert uses the business-day-aware date (day_starts_hour), not the plain
+    # calendar date the other alert types below still use — it's tied to the same one-opening/
+    # one-closing-per-business-date rule counts/views.py enforces.
+    today = business_date_for(business)
     now = timezone.now()
     tz = ZoneInfo(business.timezone)
     submitted_types = set(
@@ -55,9 +66,23 @@ def _count_late_alerts(business: Business, role: str | None) -> list[dict]:
     is_owner = role == AccessRole.OWNER
 
     alerts = []
-    for count_type, hour_field, label in (
-        (CountType.OPENING, "count_deadline_hour", "Opening"),
-        (CountType.CLOSING, "closing_count_hour", "Closing"),
+    for count_type, hour_field, label, alert_type, key in (
+        (
+            CountType.OPENING,
+            "count_deadline_hour",
+            "Opening",
+            "opening_late",
+            # Kept exactly as it was before the opening/closing split, so an already-checked
+            # opening_late alert for today stays checked.
+            f"count_late:{CountType.OPENING}:{today.isoformat()}",
+        ),
+        (
+            CountType.CLOSING,
+            "closing_count_hour",
+            "Closing",
+            "closing_late",
+            f"closing_late:{today.isoformat()}",
+        ),
     ):
         if count_type in submitted_types:
             continue
@@ -68,8 +93,8 @@ def _count_late_alerts(business: Business, role: str | None) -> list[dict]:
         minutes_late = int((now - deadline_at).total_seconds() // 60)
         alerts.append(
             {
-                "key": f"count_late:{count_type}:{today.isoformat()}",
-                "type": "count_late",
+                "key": key,
+                "type": alert_type,
                 "title": f"{label} count is late",
                 "detail": (f"Late by {minutes_late} min. Due by {deadline_at.strftime('%H:%M')}."),
                 "severity": "warning",

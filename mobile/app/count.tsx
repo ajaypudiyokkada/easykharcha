@@ -3,10 +3,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ApiError } from '../src/api/client';
-import type { CountFormItem, CountType, TodayStatus } from '../src/api/counts';
+import type { CountFormItem, CountsTodayStatus, CountType } from '../src/api/counts';
 import { useAuth } from '../src/auth/AuthContext';
 import { can } from '../src/auth/permissions';
 import { countDraftStorage, type CountDraftLine } from '../src/screens/countDraftStorage';
+import { formatDateTime } from '../src/format';
 import { sectorCopyFor } from '../src/sectorCopy';
 import { strings } from '../src/strings';
 import { colours, fonts, radii, spacing } from '../src/theme/tokens';
@@ -50,6 +51,8 @@ export default function Count() {
   const [failed, setFailed] = useState(false);
   const [countType, setCountType] = useState<CountType | null>(null);
   const [bothDone, setBothDone] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [today, setToday] = useState<CountsTodayStatus | null>(null);
   const [items, setItems] = useState<CountFormItem[]>([]);
   const [lines, setLines] = useState<Record<number, LineState>>({});
   const [guardItemId, setGuardItemId] = useState<number | null>(null);
@@ -64,16 +67,22 @@ export default function Count() {
     if (!business) return;
     setLoading(true);
     setFailed(false);
+    setLocked(false);
     try {
-      const today = await authedFetch<TodayStatus>(`/businesses/${business.id}/today/`);
-      const nextType: CountType | null =
-        today.opening.state === 'not_started'
-          ? 'opening'
-          : today.closing.state === 'not_started'
-            ? 'closing'
-            : null;
-      if (!nextType) {
+      const todayStatus = await authedFetch<CountsTodayStatus>(
+        `/businesses/${business.id}/counts/today/`,
+      );
+      setToday(todayStatus);
+      if (todayStatus.next_action === 'none') {
         setBothDone(true);
+        setLoading(false);
+        return;
+      }
+      const nextType: CountType = todayStatus.next_action;
+      // Defensive: next_action only ever resolves to 'closing' once it's unlocked, but if it's
+      // somehow still locked, explain why instead of rendering a form nobody can submit.
+      if (nextType === 'closing' && todayStatus.closing.state === 'locked') {
+        setLocked(true);
         setLoading(false);
         return;
       }
@@ -244,10 +253,39 @@ export default function Count() {
         ) : loading ? (
           <SkeletonList count={4} height={140} />
         ) : bothDone ? (
-          <Body style={styles.subtitle}>{s.savedBody}</Body>
+          <View style={styles.doneWrap}>
+            <Heading level={3}>{s.bothDoneTitle}</Heading>
+            {today?.opening.done_at && today.opening.by ? (
+              <Body style={styles.subtitle}>
+                {s.doneAt(
+                  'Opening',
+                  formatDateTime(today.opening.done_at, business?.timezone ?? 'Asia/Kolkata'),
+                  today.opening.by,
+                )}
+              </Body>
+            ) : null}
+            {today?.closing.done_at && today.closing.by ? (
+              <Body style={styles.subtitle}>
+                {s.doneAt(
+                  'Closing',
+                  formatDateTime(today.closing.done_at, business?.timezone ?? 'Asia/Kolkata'),
+                  today.closing.by,
+                )}
+              </Body>
+            ) : null}
+          </View>
+        ) : locked ? (
+          <View style={styles.doneWrap}>
+            <Heading level={3}>{s.lockedTitle}</Heading>
+            <Body style={styles.subtitle}>{s.lockedBody}</Body>
+            <Button label={s.lockedButton} variant="primary" onPress={load} />
+          </View>
         ) : (
           <>
             {resumedDraft ? <Small style={styles.resumedNote}>{s.draftResumed}</Small> : null}
+            {countType === 'closing' && today?.closing.missing_opening ? (
+              <Small style={styles.resumedNote}>{s.missingOpeningNote}</Small>
+            ) : null}
             <View style={styles.progressCard}>
               <Small style={styles.progressLabel}>{s.progress(doneCount, items.length)}</Small>
               <Small style={styles.progressHint}>{s.progressHint}</Small>
@@ -362,6 +400,9 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: colours.muted,
+  },
+  doneWrap: {
+    gap: spacing.sm,
   },
   resumedNote: {
     color: colours.muted,

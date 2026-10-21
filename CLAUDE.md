@@ -16,6 +16,9 @@ web first. Development is on Windows with PowerShell — every command and scrip
   end-to-end) that prove the frontend and backend work together, the pwa-check script that proves the
   offline/service-worker behaviour, and the responsive script that checks every screen at seven widths.
   Keep it fast.
+- **Run only the checks the change needs.** Backend/permission-only change: `npm run check` + smoke.
+  UI change: add the flow once. Run responsive only when layouts change. Never run a suite twice unless
+  something failed. If a step runs past about 45 minutes, stop and report what is done.
 - **Don't add scope.** Build exactly what the current step asks for, nothing it doesn't mention. Flag
   gaps and open questions instead of guessing past them.
 - **Git workflow.** See the "Git workflow" section below — every step goes through GitHub now, never

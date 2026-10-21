@@ -31,6 +31,9 @@ export default function AlertRulesSettings() {
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
 
+  const [dayStartsHour, setDayStartsHour] = useState(
+    String(DEFAULT_BUSINESS_SETTINGS.day_starts_hour),
+  );
   const [countDeadlineHour, setCountDeadlineHour] = useState(
     String(DEFAULT_BUSINESS_SETTINGS.count_deadline_hour),
   );
@@ -61,6 +64,7 @@ export default function AlertRulesSettings() {
     if (!business) return;
     authedFetch<BusinessSettings>(`/businesses/${business.id}/settings/`)
       .then((settings) => {
+        setDayStartsHour(String(settings.day_starts_hour));
         setCountDeadlineHour(String(settings.count_deadline_hour));
         setClosingCountHour(String(settings.closing_count_hour));
         setTargetCostPct(settings.target_cost_pct);
@@ -115,6 +119,7 @@ export default function AlertRulesSettings() {
         method: 'PATCH',
         body: DEFAULT_BUSINESS_SETTINGS,
       });
+      setDayStartsHour(String(DEFAULT_BUSINESS_SETTINGS.day_starts_hour));
       setCountDeadlineHour(String(DEFAULT_BUSINESS_SETTINGS.count_deadline_hour));
       setClosingCountHour(String(DEFAULT_BUSINESS_SETTINGS.closing_count_hour));
       setTargetCostPct(String(DEFAULT_BUSINESS_SETTINGS.target_cost_pct));
@@ -137,6 +142,7 @@ export default function AlertRulesSettings() {
       await authedFetch(`/businesses/${business.id}/settings/`, {
         method: 'PATCH',
         body: {
+          day_starts_hour: Number(dayStartsHour),
           count_deadline_hour: Number(countDeadlineHour),
           closing_count_hour: Number(closingCountHour),
           target_cost_pct: targetCostPct,
@@ -176,6 +182,13 @@ export default function AlertRulesSettings() {
               disabled={saving}
             />
 
+            <TextField
+              label={sa.dayStartsHourLabel}
+              value={dayStartsHour}
+              onChangeText={setDayStartsHour}
+              keyboardType="number-pad"
+              hint={sa.dayStartsHourMechanism(dayStartsHour)}
+            />
             <TextField
               label={s6.countDeadlineLabel}
               value={countDeadlineHour}

@@ -44,6 +44,14 @@ expected/gap field anywhere -> wastage: a Helper sees only their own entries, a 
 entry with no values, a Manager sees values but gets 403 on create/delete, and the Owner soft-deletes
 one -> another business's users get 403/404 on every new endpoint.
 
+Then the Step 23b daily-counts flow: a closing before any opening, with neither deadline passed, is
+rejected opening_required (counts/today/ agrees: closing locked, next_action opening) -> once both
+deadlines are in the past with no opening done, counts/today/ flags missing_opening and the closing
+now succeeds, flagged missing_opening on the saved row -> a duplicate closing is still rejected, and
+a late opening after closing still succeeds -> day_starts_hour=3 shifts counts/today/'s business_date
+by the same formula computed independently here -> a second business trips both opening_late and
+closing_late at once, and checking one leaves the other open.
+
 Then the Step 12 settings flow: renaming a stock item succeeds -> a case-insensitive duplicate name
 is rejected -> changing its unit is refused once it has a purchase -> deactivating it is refused while
 an active dish still has it as an ingredient -> deactivating that dish, then the stock item, both
@@ -68,13 +76,13 @@ delete -> a Helper gets 403 on every sales endpoint -> a future-dated sale is re
 deletes a sale and the summary updates -> Helper/Head chef count endpoints carry no expected/gap
 field (enforced by the existing 403 on count review).
 
-Then the Step 15 alerts flow: one business trips count_late (closing_count_hour 0), price_rise (two
+Then the Step 15 alerts flow: one business trips closing_late (closing_count_hour 0), price_rise (two
 purchases at 60 then one at 70) and wastage_high (2 L wasted against 20 L bought) in a single GET,
 with the right severities, numbers and next-action routes -> today/ carries the same alerts_count for
 the Owner -> checking one alert hides it and the counts drop, and checking it again is rejected ->
 a Helper gets 403 on both alerts endpoints and sees no alerts_count -> a Manager can view and check.
 A second business reuses the Step 14 gap numbers to prove a flagged gap line surfaces as a danger
-gap_flagged alert (count_late and gap_flagged can't both appear in one business/day — a submitted
+gap_flagged alert (closing_late and gap_flagged can't both appear in one business/day — a submitted
 opening count is unavoidably needed as the gap's "previous" baseline, which leaves no count-type slot
 free to be late that same day).
 
@@ -117,6 +125,7 @@ import urllib.request
 import zlib
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 ORIGIN = "http://localhost:8081"
@@ -2370,6 +2379,10 @@ def check_count_and_wastage_flow() -> None:
     closing_count_id = body["id"]
     if not body.get("is_late") or not body.get("minutes_late", 0) > 0:
         fail(f"confirmed closing count: expected is_late/minutes_late set, got {body}")
+    if body.get("missing_opening") is not False:
+        fail(
+            f"confirmed closing count: expected missing_opening False (opening was done), got {body}"
+        )
     print(
         "OK — re-sending with confirm_ids succeeds, and the late deadline is recorded."
     )
@@ -2649,6 +2662,191 @@ def check_count_and_wastage_flow() -> None:
     print("OK — another business's users get 403/404 on every new endpoint.")
 
 
+def check_daily_counts_flow() -> None:
+    # Scenario A: a closing attempted before any opening, with neither deadline passed yet, is
+    # rejected with opening_required. day_starts_hour: 0 first, so business_date is the plain
+    # calendar date (no midnight-shift ambiguity) — then pushing both hours to 23 keeps the
+    # opening "not missed" regardless of what time of day this script happens to run (mirrors the
+    # closing_count_hour: 0 "always late" trick below, just aimed the other way). Without pinning
+    # day_starts_hour first, a run between 23:00 and the (shifted) day's start would see
+    # yesterday's 23:00 deadline as already passed.
+    _, owner_access, _ = signup_and_login("Daily Counts Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Daily Counts Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"daily counts flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Tea Leaves", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"daily counts flow: stock bulk create expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/settings/",
+        {"day_starts_hour": 0, "count_deadline_hour": 23, "closing_count_hour": 23},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"daily counts flow: settings patch expected 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
+    tea_id = body[0]["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
+        token=owner_access,
+    )
+    if status != 409 or body.get("error", {}).get("code") != "opening_required":
+        fail(
+            f"daily counts flow: closing before opening expected 409 opening_required, got {status} ({body})"
+        )
+    print("OK — a closing count before any opening, and before the deadline, is rejected.")
+
+    # the Today status agrees: closing is locked, next_action is opening.
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/today/", token=owner_access
+    )
+    if status != 200 or body["closing"]["state"] != "locked" or body["next_action"] != "opening":
+        fail(f"daily counts flow: expected closing locked/next_action opening, got {status} ({body})")
+    print("OK — counts/today/ reports closing locked and next_action opening.")
+
+    # Scenario B: both deadlines already passed (hour 0, always in the past for "today"), no
+    # opening done — the closing is now allowed, and recorded with missing_opening true.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/settings/",
+        {"count_deadline_hour": 0, "closing_count_hour": 0},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"daily counts flow: settings patch expected 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/today/", token=owner_access
+    )
+    if status != 200 or body["closing"]["missing_opening"] is not True:
+        fail(
+            f"daily counts flow: expected closing.missing_opening True once opening is missed, got {status} ({body})"
+        )
+    print("OK — counts/today/ flags missing_opening once the opening is missed.")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"daily counts flow: missed-opening closing expected 201, got {status} ({body})")
+    if body.get("missing_opening") is not True:
+        fail(f"daily counts flow: expected missing_opening True on the saved count, got {body}")
+    print("OK — a closing with the opening missed succeeds, flagged missing_opening.")
+
+    # a duplicate closing for the same date is still rejected, unchanged.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
+        token=owner_access,
+    )
+    if status != 409:
+        fail(f"daily counts flow: duplicate closing expected 409, got {status} ({body})")
+
+    # a late opening after the fact is still allowed — there's no reverse-order restriction.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "opening", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"daily counts flow: opening after closing expected 201, got {status} ({body})")
+    print("OK — a duplicate closing is rejected; a late opening after closing still succeeds.")
+
+    # Scenario C: day_starts_hour shifts the business date — verified against the same formula,
+    # since there's no way to control the wall clock from here.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/settings/",
+        {"day_starts_hour": 3},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"daily counts flow: settings patch expected 200, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/today/", token=owner_access
+    )
+    if status != 200:
+        fail(f"daily counts flow: counts/today/ expected 200, got {status} ({body})")
+    now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+    expected_business_date = (now_ist - timedelta(hours=3)).date().isoformat()
+    if body["business_date"] != expected_business_date:
+        fail(
+            f"daily counts flow: expected business_date {expected_business_date} for "
+            f"day_starts_hour=3, got {body['business_date']}"
+        )
+    print("OK — day_starts_hour shifts the business date per the same formula.")
+
+    # Scenario D: opening_late and closing_late fire and dismiss independently.
+    _, owner2_access, _ = signup_and_login("Daily Counts Alerts Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Daily Counts Alerts Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner2_access,
+    )
+    if status != 201:
+        fail(f"daily counts flow: second business create expected 201, got {status} ({body})")
+    business2_id = body["id"]
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business2_id}/settings/",
+        {"count_deadline_hour": 0, "closing_count_hour": 0},
+        token=owner2_access,
+    )
+    if status != 200:
+        fail(f"daily counts flow: second settings patch expected 200, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{business2_id}/alerts/", token=owner2_access
+    )
+    if status != 200 or set(a["type"] for a in body["results"]) != {"opening_late", "closing_late"}:
+        fail(
+            f"daily counts flow: expected opening_late and closing_late, got {status} ({body})"
+        )
+    by_type2 = {a["type"]: a for a in body["results"]}
+    status, _, _ = request(
+        "POST",
+        f"/businesses/{business2_id}/alerts/check/",
+        {"key": by_type2["opening_late"]["key"]},
+        token=owner2_access,
+    )
+    if status != 204:
+        fail(f"daily counts flow: check opening_late expected 204, got {status}")
+    status, body, _ = request(
+        "GET", f"/businesses/{business2_id}/alerts/", token=owner2_access
+    )
+    remaining_types = {a["type"] for a in body["results"]}
+    if remaining_types != {"closing_late"}:
+        fail(
+            f"daily counts flow: expected only closing_late left after checking opening_late, got {remaining_types}"
+        )
+    print("OK — opening_late and closing_late fire and dismiss independently.")
+
+
 def check_settings_flow() -> None:
     _, owner_access, _ = signup_and_login("Settings Owner")
     status, body, _ = request(
@@ -2898,6 +3096,21 @@ def check_sales_and_gap_flow() -> None:
     if status != 201:
         fail(f"sales flow: business create expected 201, got {status} ({body})")
     business_id = body["id"]
+
+    # Step 23b: day_starts_hour: 0 keeps this business's business_date the plain calendar date —
+    # this test reuses the opening count's business_date to date a sale below, then checks that
+    # sale against the sales summary's own "today" (sales/views.py's own, unshifted notion of
+    # "today" — out of this step's scope to touch). Those two would only ever disagree during the
+    # 0 -> day_starts_hour window with the real default (5), so pinning it to 0 here removes that
+    # window entirely rather than leaving this test occasionally flaky overnight.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/settings/",
+        {"day_starts_hour": 0},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"sales flow: settings patch expected 200, got {status} ({body})")
 
     status, body, _ = request(
         "POST",
@@ -3167,9 +3380,9 @@ def check_sales_and_gap_flow() -> None:
 
 
 def check_alerts_flow() -> None:
-    # count_late + price_rise + wastage_high all live on one business — a submitted opening count
+    # closing_late + price_rise + wastage_high all live on one business — a submitted opening count
     # is unavoidably needed as the "previous" data point for any gap_flagged line (the only other
-    # count slot in a day), so getting a count_late alert in the same business as gap_flagged in the
+    # count slot in a day), so getting a closing_late alert in the same business as gap_flagged in the
     # same GET is structurally impossible via the real API; gap_flagged gets its own business below,
     # reusing the exact Step 14 numbers.
     _, owner_access, _ = signup_and_login("Alerts Owner")
@@ -3184,11 +3397,14 @@ def check_alerts_flow() -> None:
     business_id = body["id"]
 
     # closing late today; opening's deadline pushed to the end of the day (not yet passed, whatever
-    # time this script happens to run) so exactly one count_late alert fires, deterministically
+    # time this script happens to run) so exactly one closing_late alert fires, deterministically.
+    # day_starts_hour: 0 keeps business_date the plain calendar date, so "today 23:00" can't
+    # already belong to yesterday's (already-passed) business date overnight — see the same note
+    # in check_sales_and_gap_flow.
     status, body, _ = request(
         "PATCH",
         f"/businesses/{business_id}/settings/",
-        {"closing_count_hour": 0, "count_deadline_hour": 23},
+        {"day_starts_hour": 0, "closing_count_hour": 0, "count_deadline_hour": 23},
         token=owner_access,
     )
     if status != 200:
@@ -3270,18 +3486,18 @@ def check_alerts_flow() -> None:
     if status != 200:
         fail(f"alerts flow: list expected 200, got {status} ({body})")
     by_type = {a["type"]: a for a in body["results"]}
-    if set(by_type) != {"count_late", "price_rise", "wastage_high"}:
+    if set(by_type) != {"closing_late", "price_rise", "wastage_high"}:
         fail(
-            f"alerts flow: expected count_late/price_rise/wastage_high, got {set(by_type)}"
+            f"alerts flow: expected closing_late/price_rise/wastage_high, got {set(by_type)}"
         )
     if body["counts"]["total"] != 3:
         fail(f"alerts flow: expected 3 total alerts, got {body['counts']}")
     if (
-        by_type["count_late"]["severity"] != "warning"
+        by_type["closing_late"]["severity"] != "warning"
         or by_type["wastage_high"]["severity"] != "warning"
     ):
         fail(
-            f"alerts flow: expected count_late/wastage_high severity warning, got {by_type}"
+            f"alerts flow: expected closing_late/wastage_high severity warning, got {by_type}"
         )
     if by_type["price_rise"]["severity"] != "danger":
         fail(
@@ -3299,12 +3515,12 @@ def check_alerts_flow() -> None:
         fail(
             f"alerts flow: expected price_rise route /stock/{flour_id}, got {by_type['price_rise']}"
         )
-    if by_type["count_late"]["next_action"]["label"] != "Prepare reminder":
+    if by_type["closing_late"]["next_action"]["label"] != "Prepare reminder":
         fail(
-            f"alerts flow: expected Owner's count_late action 'Prepare reminder', got {by_type['count_late']}"
+            f"alerts flow: expected Owner's closing_late action 'Prepare reminder', got {by_type['closing_late']}"
         )
     print(
-        "OK — one business trips count_late, price_rise and wastage_high with the right severities and numbers."
+        "OK — one business trips closing_late, price_rise and wastage_high with the right severities and numbers."
     )
 
     status, body, _ = request(
@@ -3358,7 +3574,7 @@ def check_alerts_flow() -> None:
     status, _, _ = request(
         "POST",
         f"/businesses/{business_id}/alerts/check/",
-        {"key": by_type["count_late"]["key"]},
+        {"key": by_type["closing_late"]["key"]},
         token=helper_access,
     )
     if status != 403:
@@ -4131,6 +4347,7 @@ def main() -> None:
     check_team_reset_flow()
     check_purchase_flow()
     check_count_and_wastage_flow()
+    check_daily_counts_flow()
     check_settings_flow()
     check_sales_and_gap_flow()
     check_alerts_flow()

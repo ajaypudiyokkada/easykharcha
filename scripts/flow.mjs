@@ -57,6 +57,7 @@ const STEP21B_SCREEN_DIR = 'docs/screens/step21b';
 const STEP21D_SCREEN_DIR = 'docs/screens/step21d';
 const STEP22A_SCREEN_DIR = 'docs/screens/step22a';
 const STEP23A_SCREEN_DIR = 'docs/screens/step23a';
+const STEP23B_SCREEN_DIR = 'docs/screens/step23b';
 
 function findChrome() {
   const candidates = [
@@ -251,7 +252,10 @@ async function logoutFromAnywhere(page) {
  * opposite adjustment, so neither the opening count this flow is about to submit nor the closing
  * count it hasn't submitted yet reads as already "late" regardless of what time of day this script
  * happens to run. Without it, checkOwnerOpeningCount's assertions that the opening count is "done"
- * and the closing one is still just "due by" a time would depend on running before 11 AM/8 PM. */
+ * and the closing one is still just "due by" a time would depend on running before 11 AM/8 PM.
+ * day_starts_hour: 0 keeps the business date the plain calendar date too — otherwise, overnight
+ * between midnight and the real default day_starts_hour (5), "today" would already be yesterday's
+ * business date, whose 23:00 deadline has already passed (opening_required instead of "not late"). */
 async function keepOpeningCountNotLate(page) {
   const access = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
   const me = await fetch(`${API_BASE}/me/`, { headers: { Authorization: `Bearer ${access}` } }).then(
@@ -261,7 +265,7 @@ async function keepOpeningCountNotLate(page) {
   await fetch(`${API_BASE}/businesses/${businessId}/settings/`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ count_deadline_hour: 23, closing_count_hour: 23 }),
+    body: JSON.stringify({ day_starts_hour: 0, count_deadline_hour: 23, closing_count_hour: 23 }),
   });
 }
 
@@ -411,6 +415,14 @@ async function checkPurchaseFlow(page) {
 // below compares against.
 async function checkOwnerOpeningCount(page) {
   await keepOpeningCountNotLate(page);
+
+  // Step 23b: Today card screenshot before anything's been counted — opening due, closing locked.
+  await mkdir(STEP23B_SCREEN_DIR, { recursive: true });
+  await page.setViewport({ width: 390, height: 844 });
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Stock count');
+  await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/today-opening-due-390.png` });
+
   await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Count stock');
   await typeInto(page, 'Rice quantity', '5');
@@ -432,7 +444,15 @@ async function checkOwnerOpeningCount(page) {
   if (!bodyText.includes('Closing count due by')) {
     fail('Home\'s stock count card should also show the closing count\'s own state, not just the opening one');
   }
+
+  // Step 23b: Today card screenshot once opening is done — closing is unlocked (due), not locked.
+  await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/today-closing-due-390.png` });
   console.log('OK — Home\'s stock count card shows both the opening and closing count states.');
+
+  // Restores the 390x3000 viewport the rest of the flow already runs at (set by
+  // captureStep9Screens just before this function runs) — this function's own 390x844 is only for
+  // its own screenshots above.
+  await page.setViewport({ width: 390, height: 3000 });
 }
 
 const FORBIDDEN_WORDS = ['₹', 'expected', 'gap', 'price'];
@@ -471,10 +491,13 @@ async function checkHelperTodayFlow(page, helperMobile, helperPin) {
   await assertNoStandaloneLogoutButton(page);
   console.log('OK — the Helper signs in and sees the Today screen.');
 
-  await (await findVisible(page, '[aria-label="Count stock"]')).click();
+  await clickButton(page, 'Start closing count');
   await waitForPath(page, '/count');
   await waitForText(page, 'Count stock');
   await assertNoForbiddenText(page);
+  // Step 23b: the Count screen itself, already routed straight to the closing form.
+  await page.setViewport({ width: 390, height: 844 });
+  await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/count-screen-390.png` });
 
   // Rice: 50 is more than 3x the Owner's opening value of 5 -> needs_confirmation.
   await typeInto(page, 'Rice quantity', '50');
@@ -493,6 +516,12 @@ async function checkHelperTodayFlow(page, helperMobile, helperPin) {
 
   await clickButton(page, 'Back to Today');
   await waitForPath(page, '/home');
+  // Step 23b: both counts are done — the Today card's terminal state.
+  await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/today-both-done-390.png` });
+  console.log(`OK — saved Step 23b Today card/Count screen screenshots to ${STEP23B_SCREEN_DIR}/.`);
+  // Restores the 390x3000 viewport the rest of the flow runs at — the 390x844 above is only for
+  // this function's own screenshots.
+  await page.setViewport({ width: 390, height: 3000 });
 
   await (await findVisible(page, '[aria-label="Record wastage"]')).click();
   await waitForText(page, 'What was lost?');
@@ -676,7 +705,7 @@ async function captureStep10Screens(page) {
     await waitForText(page, 'Good evening,');
     await page.screenshot({ path: `${STEP10_SCREEN_DIR}/helper-today-${width}.png` });
 
-    await (await findVisible(page, '[aria-label="Count stock"]')).click();
+    await clickButton(page, 'Start closing count');
     await waitForPath(page, '/count');
     await waitForText(page, 'Count stock');
     await page.screenshot({ path: `${STEP10_SCREEN_DIR}/blind-count-${width}.png` });

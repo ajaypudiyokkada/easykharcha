@@ -106,6 +106,9 @@ export default function CountDetailScreen() {
                 : s.closingCount(detail.counted_by_name)}{' '}
               · {formatDateTime(detail.submitted_at, timezone)}
             </Small>
+            <Small style={styles.meta}>
+              {detail.count_type === 'closing' ? s.periodDay : s.periodNight}
+            </Small>
 
             <View style={styles.list}>
               {detail.lines.map((line) => (

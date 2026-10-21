@@ -5,6 +5,7 @@ from .views import (
     CountFormView,
     CountListCreateView,
     CountRemindView,
+    CountsTodayStatusView,
     TodayView,
 )
 
@@ -13,6 +14,11 @@ urlpatterns = [
         "businesses/<int:business_id>/counts/form/",
         CountFormView.as_view(),
         name="count-form",
+    ),
+    path(
+        "businesses/<int:business_id>/counts/today/",
+        CountsTodayStatusView.as_view(),
+        name="count-today-status",
     ),
     path(
         "businesses/<int:business_id>/counts/remind/",

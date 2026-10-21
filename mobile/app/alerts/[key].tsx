@@ -28,7 +28,8 @@ function numberRows(alert: Alert): { label: string; value: string }[] {
   const n = alert.numbers;
   const labels = s.numberLabels;
   switch (alert.type) {
-    case 'count_late':
+    case 'opening_late':
+    case 'closing_late':
       return [
         {
           label: labels.count_type,

@@ -182,6 +182,7 @@ RATE_LIMITS = {
 # target in the commonly-cited 28-35% range, and alert thresholds loose enough not to cry wolf on
 # normal day-to-day variation.
 BUSINESS_SETTINGS_DEFAULTS = {
+    "day_starts_hour": 5,
     "count_deadline_hour": 11,
     "closing_count_hour": 20,
     "target_cost_pct": 30,
@@ -191,6 +192,7 @@ BUSINESS_SETTINGS_DEFAULTS = {
     "expiry_warn_days": 2,
 }
 BUSINESS_SETTINGS_RANGES = {
+    "day_starts_hour": (0, 12),
     "count_deadline_hour": (0, 23),
     "closing_count_hour": (0, 23),
     "target_cost_pct": (1, 100),

@@ -26,7 +26,8 @@ const s = strings.alerts;
 
 const FILTERS: { key: AlertType | 'all' }[] = [
   { key: 'all' },
-  { key: 'count_late' },
+  { key: 'opening_late' },
+  { key: 'closing_late' },
   { key: 'price_rise' },
   { key: 'wastage_high' },
   { key: 'gap_flagged' },
@@ -35,7 +36,8 @@ const FILTERS: { key: AlertType | 'all' }[] = [
 
 function alertIconFor(type: AlertType): IconName {
   switch (type) {
-    case 'count_late':
+    case 'opening_late':
+    case 'closing_late':
       return 'clock';
     case 'price_rise':
       return 'reports';
