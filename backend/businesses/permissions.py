@@ -2,6 +2,12 @@
 never a role name directly — so a new role, or a role gaining/losing a permission, is a one-line change
 in this table, not a hunt through every view.
 
+ALL_PERMISSIONS is the single registry every permission string must come from. The Owner's set is
+computed as ALL_PERMISSIONS, not hand-listed, so a permission that exists for any role — including one
+added later — reaches the Owner for free, and an "own"/"all" pair (wastage.view_own/view_all) lands on
+the Owner together. Manager/Head chef/Helper keep their own hand-picked subsets below; a role listing a
+permission that isn't in ALL_PERMISSIONS fails at import time (see the check right after the table).
+
 Step 9 drafted purchases + stock viewing. Step 10 adds counts and wastage: Head chef and Helper now
 have real jobs (blind stock counts, recording wastage) instead of an empty placeholder Home. See
 docs/STATUS.md for the full table and the reasoning behind each role's set.
@@ -11,33 +17,37 @@ from rest_framework.exceptions import PermissionDenied
 
 from .models import Access, AccessRole, Business
 
-PERMISSIONS: dict[str, frozenset[str]] = {
-    AccessRole.OWNER: frozenset(
-        {
-            "purchases.view",
-            "purchases.create",
-            "purchases.edit",
-            "purchases.delete",
-            "stock.view",
-            "team.manage",
-            "settings.manage",
-            "stockitems.manage",
-            "sellitems.manage",
-            "business.manage",
-            "counts.create",
-            "counts.review",
-            "wastage.create",
-            "wastage.view_all",
-            "wastage.view_value",
-            "wastage.delete",
-            "sales.view",
-            "sales.create",
-            "sales.delete",
-            "alerts.view",
-            "alerts.check",
-            "reports.view",
-        }
-    ),
+ALL_PERMISSIONS: frozenset[str] = frozenset(
+    {
+        "purchases.view",
+        "purchases.create",
+        "purchases.edit",
+        "purchases.delete",
+        "stock.view",
+        "stockitems.manage",
+        "sellitems.manage",
+        "business.manage",
+        "settings.manage",
+        "team.manage",
+        "team.view",
+        "counts.create",
+        "counts.review",
+        "counts.status",
+        "wastage.create",
+        "wastage.view_all",
+        "wastage.view_own",
+        "wastage.view_value",
+        "wastage.delete",
+        "sales.view",
+        "sales.create",
+        "sales.delete",
+        "alerts.view",
+        "alerts.check",
+        "reports.view",
+    }
+)
+
+_LOWER_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     AccessRole.MANAGER: frozenset(
         {
             "purchases.view",
@@ -57,9 +67,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     AccessRole.HEAD_CHEF: frozenset(
         {
             "counts.create",
+            "counts.status",
             "wastage.create",
             "wastage.view_all",
-            "counts.status",
         }
     ),
     AccessRole.HELPER: frozenset(
@@ -69,6 +79,17 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "wastage.view_own",
         }
     ),
+}
+
+for _role, _perms in _LOWER_ROLE_PERMISSIONS.items():
+    _unknown = _perms - ALL_PERMISSIONS
+    if _unknown:
+        raise ValueError(f"{_role} lists permission(s) not in ALL_PERMISSIONS: {sorted(_unknown)}")
+del _role, _perms, _unknown
+
+PERMISSIONS: dict[str, frozenset[str]] = {
+    AccessRole.OWNER: ALL_PERMISSIONS,
+    **_LOWER_ROLE_PERMISSIONS,
 }
 
 

@@ -56,6 +56,7 @@ const STEP20_SCREEN_DIR = 'docs/screens/step20';
 const STEP21B_SCREEN_DIR = 'docs/screens/step21b';
 const STEP21D_SCREEN_DIR = 'docs/screens/step21d';
 const STEP22A_SCREEN_DIR = 'docs/screens/step22a';
+const STEP23A_SCREEN_DIR = 'docs/screens/step23a';
 
 function findChrome() {
   const candidates = [
@@ -537,6 +538,33 @@ async function checkManagerHomeFlow(page, managerMobile, managerPassword) {
 async function checkCountReviewAndWastageFlow(page, ownerMobile, ownerPassword) {
   await login(page, ownerMobile, ownerPassword);
   await waitForPath(page, '/home');
+
+  // 390px screenshot of the More menu for the Owner — Sales, Wastage, Alerts, Team and Settings
+  // should all be there (Count stock/Buy/Stock/Reports are primary bottom-nav items, not in More).
+  // Done first, with nothing else open on the page, so there's no other sheet to race against.
+  await mkdir(STEP23A_SCREEN_DIR, { recursive: true });
+  await (await findVisible(page, '[aria-label="More"]')).click();
+  await waitForText(page, 'Settings');
+  // The sheet fades in (Modal animationType="fade") — same reason captureStep10Screens' Record
+  // wastage screenshot needs a settle delay: screenshotting right on waitForText's heels catches it
+  // mid-transition, semi-transparent over the page underneath.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP23A_SCREEN_DIR}/more-menu-owner-390.png` });
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+  console.log(`OK — saved the Owner's More menu screenshot to ${STEP23A_SCREEN_DIR}/.`);
+
+  // Step 23a: Count stock and Wastage open for the Owner from Home's own quick actions, not just by
+  // URL — the same "Start stock count"/"Record wastage" cards a Manager never sees (asserted in
+  // checkManagerNoCountFlow below).
+  await clickButton(page, 'Start stock count');
+  await waitForPath(page, '/count');
+  await waitForText(page, 'Count stock');
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForPath(page, '/home');
+  await clickButton(page, 'Record wastage');
+  await waitForText(page, 'Record wastage');
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+  console.log('OK — the Owner opens Count stock and Wastage from Home.');
 
   await page.goto(`${APP_URL}/counts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, "Today's counts");

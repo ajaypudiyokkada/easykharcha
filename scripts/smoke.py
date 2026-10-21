@@ -269,6 +269,38 @@ def check_health() -> None:
     )
 
 
+def check_permission_table() -> None:
+    """Step 23a: imports backend/businesses/permissions.py directly (not through the API) and prints
+    the role -> permission table for review. Fails if the Owner is ever missing a permission that
+    exists for any other role — the real regression this guards against is someone going back to a
+    hand-listed Owner set that silently drifts behind ALL_PERMISSIONS."""
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    from businesses.models import AccessRole
+    from businesses.permissions import ALL_PERMISSIONS, PERMISSIONS
+
+    print("\nRole -> permission table:")
+    for role in (AccessRole.OWNER, AccessRole.MANAGER, AccessRole.HEAD_CHEF, AccessRole.HELPER):
+        perms = sorted(PERMISSIONS.get(role, frozenset()))
+        print(f"  {role} ({len(perms)}): {perms}")
+
+    owner_perms = PERMISSIONS[AccessRole.OWNER]
+    missing = ALL_PERMISSIONS - owner_perms
+    if missing:
+        fail(f"permission table: Owner is missing {sorted(missing)} from ALL_PERMISSIONS")
+    if owner_perms != ALL_PERMISSIONS:
+        fail(
+            "permission table: Owner carries permission(s) outside ALL_PERMISSIONS — "
+            f"got {sorted(owner_perms)}"
+        )
+    print("OK — the Owner carries every permission in ALL_PERMISSIONS, and nothing extra.")
+
+
 def signup_and_login(name: str) -> tuple[str, str, str]:
     """Creates a fresh user and logs them in. Returns (mobile, access, refresh)."""
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
@@ -2043,7 +2075,9 @@ def check_purchase_flow() -> None:
     print("OK — a user from another business gets 403/404 on these purchases.")
 
     # /me returns the exact permission set for each role (Step 9 subset only — the full table,
-    # including counts/wastage, is asserted in check_count_and_wastage_flow)
+    # including counts/wastage, is asserted in check_count_and_wastage_flow). Step 23a: the Owner's
+    # set is every permission that exists anywhere (ALL_PERMISSIONS in businesses/permissions.py),
+    # not a hand-picked subset — see check_permission_table for the registry-level version of this.
     status, body, _ = request("GET", "/me/", token=owner_access)
     owner_business = next(b for b in body["businesses"] if b["id"] == business_id)
     expected_owner = {
@@ -2052,15 +2086,18 @@ def check_purchase_flow() -> None:
         "purchases.edit",
         "purchases.delete",
         "stock.view",
-        "team.manage",
-        "settings.manage",
         "stockitems.manage",
         "sellitems.manage",
         "business.manage",
+        "settings.manage",
+        "team.manage",
+        "team.view",
         "counts.create",
         "counts.review",
+        "counts.status",
         "wastage.create",
         "wastage.view_all",
+        "wastage.view_own",
         "wastage.view_value",
         "wastage.delete",
         "sales.view",
@@ -2484,9 +2521,24 @@ def check_count_and_wastage_flow() -> None:
         fail(f"manager wastage delete: expected 403, got {status}")
     print("OK — a Manager sees values but gets 403 on create and delete.")
 
+    # Step 23a: Manager still has no counts.create — reviewing is the only count job it does
+    status, _, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [{"stock_item": milk_id, "state": "counted", "counted_qty": "1"}],
+        },
+        token=manager_access,
+    )
+    if status != 403:
+        fail(f"manager count create: expected 403, got {status}")
+    print("OK — a Manager still cannot count stock or record wastage.")
+
     # today/: both counts already submitted, so both show "done" (is_late is a separate, historical
-    # fact recorded on the StockCount itself, checked above via count review) -> team_progress only
-    # for Head chef
+    # fact recorded on the StockCount itself, checked above via count review) -> team_progress for
+    # Head chef and (Step 23a: counts.status is in ALL_PERMISSIONS, so the Owner carries it too) Owner,
+    # never for Helper or Manager
     status, body, _ = request(
         "GET", f"/businesses/{business_id}/today/", token=owner_access
     )
@@ -2496,8 +2548,8 @@ def check_count_and_wastage_flow() -> None:
         fail(f"today (owner): expected both counts done, got {body}")
     if body.get("wastage_entries_today") != 2:
         fail(f"today (owner): expected 2 wastage entries today, got {body}")
-    if "team_progress" in body:
-        fail(f"today (owner): team_progress should not appear for Owner, got {body}")
+    if body.get("team_progress", {}).get("total") != 2:
+        fail(f"today (owner): expected team_progress for 2 items, got {body}")
 
     status, body, _ = request(
         "GET", f"/businesses/{business_id}/today/", token=headchef_access
@@ -2508,6 +2560,14 @@ def check_count_and_wastage_flow() -> None:
         fail(f"today (head chef): expected team_progress for 2 items, got {body}")
 
     status, body, _ = request(
+        "GET", f"/businesses/{business_id}/today/", token=manager_access
+    )
+    if status != 200:
+        fail(f"today (manager): expected 200, got {status} ({body})")
+    if "team_progress" in body:
+        fail(f"today (manager): team_progress should not appear for Manager, got {body}")
+
+    status, body, _ = request(
         "GET", f"/businesses/{business_id}/today/", token=helper_access
     )
     if status != 200:
@@ -2515,7 +2575,7 @@ def check_count_and_wastage_flow() -> None:
     if "team_progress" in body:
         fail(f"today (helper): team_progress should not appear for Helper, got {body}")
     print(
-        "OK — today/ reflects count state per role, with team progress only for Head chef."
+        "OK — today/ reflects count state per role, with team progress for Owner and Head chef only."
     )
 
     # late-count reminder: Owner only
@@ -4059,6 +4119,7 @@ def check_pincode_geo_flow() -> None:
 
 def main() -> None:
     check_health()
+    check_permission_table()
     check_auth_flow()
     check_business_flow()
     check_sector_change_flow()
