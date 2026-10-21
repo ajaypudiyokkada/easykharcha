@@ -24,6 +24,15 @@ app.easykharcha.com {
 api.easykharcha.com {
 	import security
 
+	# Optional: restrict the Django admin to your own IP(s). Replace the IP below with yours, update
+	# the path if ADMIN_URL_PATH in deploy/.env.production isn't the default "manage-ek/", then
+	# uncomment both lines.
+	# @admin_blocked {
+	# 	path /manage-ek/*
+	# 	not remote_ip 203.0.113.10
+	# }
+	# respond @admin_blocked 403
+
 	handle_path /static/* {
 		root * /srv/static
 		file_server

@@ -22,14 +22,26 @@ Windows and pushed.
    Postgres, runs migrations (the backend's own entrypoint does this on every start), and brings
    everything up behind Caddy, which issues its own certificates automatically on first request to
    each domain — DNS for all four hostnames must already point at this server before this step.
-5. **Create the first account.** This app has no Django admin and no superuser concept — `User` is a
-   plain `AbstractBaseUser` with no `is_staff`/`is_superuser` fields, so `manage.py createsuperuser`
-   does not apply here. Open `https://app.easykharcha.com/signup` and sign up for real, the same way
-   any business owner would.
+5. **Create the first account.** Open `https://app.easykharcha.com/signup` and sign up for real, the
+   same way any business owner would — this is unrelated to platform-staff admin access below.
 6. Test the four URLs: `https://easykharcha.com` (landing), `https://app.easykharcha.com` (signup
    should land you in the app), `https://api.easykharcha.com/api/v1/health/` (should report
    `{"status": "ok", ..., "database": "ok"}`), `https://www.easykharcha.com` (should redirect to
    `https://easykharcha.com`).
+7. **Create the first admin (platform staff) account.** This is separate from a business account
+   above — it's for you, the platform owner, to look up accounts/businesses for support, and has
+   nothing to do with business roles (Owner/Manager/Head chef/Helper). Run:
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file deploy/.env.production run --rm \
+     -e DJANGO_SUPERUSER_MOBILE=9XXXXXXXXX \
+     -e DJANGO_SUPERUSER_NAME="Your name" \
+     -e DJANGO_SUPERUSER_PASSWORD='a-strong-password' \
+     backend python manage.py createsuperuser --noinput
+   ```
+   Then sign in at `https://api.easykharcha.com/<ADMIN_URL_PATH>` (the path is whatever
+   `ADMIN_URL_PATH` is set to in `deploy/.env.production`, default `manage-ek/` — never `/admin/`).
+   Don't leave `DJANGO_SUPERUSER_PASSWORD` sitting in `deploy/.env.production`; it's only read at the
+   moment `createsuperuser` runs, so pass it inline as above instead.
 
 ## Day to day
 
@@ -38,6 +50,14 @@ Windows and pushed.
   last 100 log lines) if it never comes up healthy.
 - **View logs:** `docker compose -f docker-compose.prod.yml logs -f [service]` (`backend`, `web-app`,
   `landing`, `caddy`, `db`).
+- **Reset a lost admin password:**
+  ```bash
+  docker compose -f docker-compose.prod.yml --env-file deploy/.env.production run --rm \
+    backend python manage.py changepassword 9XXXXXXXXX
+  ```
+  (mobile number is the login, same as the app). To make an existing account a platform-staff admin
+  instead of creating a new one, use `python manage.py shell` and set `is_staff = True` /
+  `is_superuser = True` on that `User`, then `.save()`.
 - **Back up the database:** `./deploy/backup.sh` — `pg_dump`s to `/opt/easykharcha/backups`, gzipped,
   timestamped, keeps the last 14. Not installed on a schedule by this repo; add it yourself with:
   ```

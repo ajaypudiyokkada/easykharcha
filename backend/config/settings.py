@@ -21,8 +21,13 @@ DEBUG = env.bool("DEBUG", default=True)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"] if DEBUG else [])
 
 INSTALLED_APPS = [
+    # Platform-staff support tool only (see accounts.User.is_staff) — sessions/messages below exist
+    # only because django.contrib.admin needs them; the API itself stays JWT-only (see REST_FRAMEWORK).
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
@@ -42,11 +47,38 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    # Admin-only login throttle — see config/admin_security.py. DRF views are unaffected by
+    # CsrfViewMiddleware above: APIView.as_view() marks every API view csrf_exempt itself.
+    "config.admin_security.AdminLoginRateLimitMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+# Not /admin/, so it isn't guessable from the outside. Trailing slash enforced so config/urls.py's
+# path() always gets a clean prefix regardless of how the env var is written.
+ADMIN_URL_PATH = env.str("ADMIN_URL_PATH", default="manage-ek/").strip("/") + "/"
 
 # SQLite by default so a clean clone needs nothing extra. Set DATABASE_URL to point at the Postgres
 # in docker-compose.yml when that's actually wanted — see README.
@@ -139,6 +171,9 @@ RATE_LIMITS = {
     # Step 14's smoke suite alone makes 33 login calls across its role-switch scenarios (one shared
     # dev IP) — raised from 30 so the full `npm run smoke` run doesn't trip its own rate limit.
     "login_per_ip": (50, 900),
+    # Platform-staff admin login (config/admin_security.py) — stricter than the app's own login,
+    # since this is a handful of staff, not thousands of business owners.
+    "admin_login_per_ip": (10, 900),
 }
 
 # Step 7: one BusinessSettings row per business, seeded with these at creation. Chosen for a small
