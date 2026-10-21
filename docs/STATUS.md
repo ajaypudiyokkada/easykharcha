@@ -201,13 +201,21 @@ not built yet.
   own quick-add (`SellItemForm`) stays ingredients-free. Settings' dish list shows "Needs
   ingredients"/"Estimate - confirm" badges; Home gained an owner-only "Add ingredients to N dishes"
   nudge (`?filter=needs_ingredients` on Settings' dish list), replacing the old uses_qty nudge.
+- **Step 23a — Owner can do everything.** `ALL_PERMISSIONS` in `backend/businesses/permissions.py`
+  is now the single registry every permission string must come from; the Owner's set is computed
+  as `ALL_PERMISSIONS`, not hand-listed, so it automatically carries `counts.status` and
+  `wastage.view_own` too (it didn't before) — `GET today/`'s team-progress block, previously
+  Head-chef-only, now also shows for the Owner. Manager/Head chef/Helper unchanged.
+  `scripts/smoke.py`'s new `check_permission_table` fails if the Owner ever drifts from
+  `ALL_PERMISSIONS`, and prints the role table.
 
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every
-business-scoped endpoint checks a permission, never a role name directly. **This is still a draft,
-not a final design — it's a decision for the product owner to review**, not something decided
-unilaterally:
+business-scoped endpoint checks a permission, never a role name directly. Step 23a: the Owner's
+column is `ALL_PERMISSIONS` computed, not hand-listed — restrictions only apply to the three roles
+below it, and a permission added for any of them reaches the Owner automatically. Manager/Head
+chef/Helper are still a draft, a decision for the product owner to review, not decided unilaterally:
 
 | Permission | Owner | Manager | Head chef | Helper |
 |---|---|---|---|---|
@@ -217,17 +225,17 @@ unilaterally:
 | `purchases.delete` | yes | no | no | no |
 | `stock.view` | yes | yes | no | no |
 | `team.manage` | yes | no | no | no |
-| `team.view` | yes (implied) | yes | no | no |
+| `team.view` | yes | yes | no | no |
 | `settings.manage` | yes | no | no | no |
 | `stockitems.manage` | yes | no | no | no |
 | `sellitems.manage` | yes | no | no | no |
 | `business.manage` | yes | no | no | no |
 | `counts.create` | yes | no | yes | yes |
 | `counts.review` | yes | yes | no | no |
-| `counts.status` | no | no | yes | no |
+| `counts.status` | yes | no | yes | no |
 | `wastage.create` | yes | no | yes | yes |
 | `wastage.view_all` | yes | yes | yes | no |
-| `wastage.view_own` | no | no | no | yes |
+| `wastage.view_own` | yes | no | no | yes |
 | `wastage.view_value` | yes | yes | no | no |
 | `wastage.delete` | yes | no | no | no |
 | `sales.view` | yes | yes | no | no |
@@ -239,9 +247,10 @@ Notes for the product owner, not decided unilaterally:
   but not `wastage.create`** — matches the design (Manager oversees, doesn't do the daily physical
   jobs). Worth confirming that's actually the intended split and not just what the design happened to
   show.
-- **`counts.status` (team-wide "X of Y items counted today") is Head-chef-only** — Helper's Today
-  screen only ever shows their own task, never team-wide numbers. This is a real, deliberate
-  distinction from `counts.create` (which both roles have), not an oversight.
+- **`counts.status` (team-wide "X of Y items counted today") is Head-chef- and Owner-only, not
+  Manager** — Helper's Today screen only ever shows their own task, never team-wide numbers. This is
+  a real, deliberate distinction from `counts.create` (which Head chef and Helper both have), not an
+  oversight.
 - **The late-count reminder (`POST counts/remind/`) is hardcoded Owner-only on the server** — there's
   no permission string for it, the same way `team.manage`/`settings.manage` writes already were
   before this table existed. Worth deciding if that should become a real permission instead.
