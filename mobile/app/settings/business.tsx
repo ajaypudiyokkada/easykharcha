@@ -6,7 +6,11 @@ import type { Business } from '../../src/api/business';
 import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { BusinessForm, type BusinessDraft } from '../../src/forms/BusinessForm';
+import {
+  BusinessForm,
+  EMPTY_BUSINESS_DRAFT,
+  type BusinessDraft,
+} from '../../src/forms/BusinessForm';
 import { strings } from '../../src/strings';
 import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 import { AppShell, Body, Button, Heading, Icon, NoAccess, Screen, Toast } from '../../src/ui';
@@ -21,12 +25,7 @@ export default function BusinessDetailsSettings() {
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
 
-  const [draft, setDraft] = useState<BusinessDraft>({
-    name: '',
-    businessType: '',
-    city: '',
-    tagline: '',
-  });
+  const [draft, setDraft] = useState<BusinessDraft>(EMPTY_BUSINESS_DRAFT);
   const [loaded, setLoaded] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -42,6 +41,9 @@ export default function BusinessDetailsSettings() {
       name: business.name,
       businessType: business.business_type as BusinessDraft['businessType'],
       city: business.city,
+      pincode: business.pincode,
+      state: business.state,
+      manualLocation: false,
       tagline: business.tagline,
     });
     setLoaded(true);
@@ -89,6 +91,9 @@ export default function BusinessDetailsSettings() {
           name: draft.name.trim(),
           business_type: draft.businessType,
           city: draft.city.trim(),
+          pincode: draft.pincode,
+          state: draft.state,
+          manual_location: draft.manualLocation,
           tagline: draft.tagline.trim(),
         },
       });
@@ -122,6 +127,7 @@ export default function BusinessDetailsSettings() {
         <BusinessForm
           value={draft}
           onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+          authedFetch={authedFetch}
           errors={fieldErrors}
         />
 

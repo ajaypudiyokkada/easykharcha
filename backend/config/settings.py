@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "accounts",
     "businesses",
+    "geo",
     "audit",
     "stock",
     "purchases",

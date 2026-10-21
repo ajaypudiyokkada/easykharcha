@@ -88,6 +88,13 @@ stay tied to its *last* purchase price (64, same rule alerts.gap_flagged already
 60 -> 70 Milk history would have moved to 70 and broken the Rs 160 figure. Then a Helper gets 403, and
 a brand-new business with no purchases/counts/sales at all returns every block present but empty, with
 no 500.
+
+Then the Step 21b pincode flow: 560034 resolves to Karnataka / Bengaluru with Koramangala among its
+areas -> 999999 (well-formed but absent) is a 404 -> a badly-shaped code is a 400, not a 404 -> signed
+out is a 401. Business create accepts a pincode whose district matches the given city (state filled in
+automatically) -> rejects one whose city doesn't match any of the pincode's areas -> rejects an unknown
+pincode outright -> accepts that same unknown pincode once manual_location is set, saving the typed
+city/state as-is -> a later update giving a mismatched state for an existing pincode is rejected too.
 """
 
 import binascii
@@ -3018,6 +3025,112 @@ def check_reports_flow() -> None:
     print("OK — a brand-new business returns every report block present but empty, no errors.")
 
 
+def check_pincode_geo_flow() -> None:
+    _, access, _ = signup_and_login("Pincode Owner")
+
+    # a known pincode
+    status, body, _ = request("GET", "/geo/pincode/560034/", token=access)
+    if status != 200:
+        fail(f"pincode lookup: expected HTTP 200, got {status} ({body})")
+    if body.get("state") != "Karnataka" or "Bengaluru" not in body.get("districts", []):
+        fail(f"pincode lookup: expected Karnataka/Bengaluru, got {body}")
+    if "Koramangala" not in body.get("areas", []):
+        fail(f"pincode lookup: expected Koramangala among areas, got {body.get('areas')}")
+    print("OK — 560034 resolves to Karnataka / Bengaluru, areas include Koramangala.")
+
+    # an unknown pincode
+    status, body, _ = request("GET", "/geo/pincode/999999/", token=access)
+    if status != 404:
+        fail(f"pincode lookup: expected HTTP 404 for an unknown pincode, got {status} ({body})")
+    print("OK — an unknown pincode returns 404.")
+
+    # a badly-shaped pincode (too short, and one starting with 0)
+    for bad in ("12345", "012345"):
+        status, body, _ = request("GET", f"/geo/pincode/{bad}/", token=access)
+        if status != 400:
+            fail(f"pincode lookup: expected HTTP 400 for {bad!r}, got {status} ({body})")
+    print("OK — a badly-shaped pincode is rejected with 400, not treated as unknown.")
+
+    # no token at all
+    status, body, _ = request("GET", "/geo/pincode/560034/")
+    if status != 401:
+        fail(f"pincode lookup: expected HTTP 401 signed out, got {status} ({body})")
+    print("OK — the pincode endpoint requires authentication.")
+
+    # business create: pincode's own district is accepted
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {
+            "name": "Pincode Biz",
+            "business_type": "cloud_kitchen",
+            "city": "Bengaluru",
+            "pincode": "560034",
+        },
+        token=access,
+    )
+    if status != 201 or body.get("state") != "Karnataka":
+        fail(f"business create with pincode: expected HTTP 201 and state Karnataka, got {status} ({body})")
+    business_id = body["id"]
+    print("OK — business create with a matching pincode/city fills in state automatically.")
+
+    # business create: city that doesn't match the pincode is rejected
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {
+            "name": "Mismatch Biz",
+            "business_type": "cloud_kitchen",
+            "city": "Nowhereville",
+            "pincode": "560034",
+        },
+        token=access,
+    )
+    if status != 400:
+        fail(f"business create: expected HTTP 400 for a mismatched city, got {status} ({body})")
+    print("OK — a city that isn't one of the pincode's areas is rejected.")
+
+    # business create: an unknown pincode without manual_location is rejected
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Unknown Pin Biz", "business_type": "cloud_kitchen", "city": "Nowhere", "pincode": "999999"},
+        token=access,
+    )
+    if status != 400:
+        fail(f"business create: expected HTTP 400 for an unknown pincode, got {status} ({body})")
+    print("OK — an unknown pincode without manual_location is rejected.")
+
+    # business create: the same unknown pincode saves once manual_location is set
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {
+            "name": "Manual Pin Biz",
+            "business_type": "cloud_kitchen",
+            "city": "Nowhere",
+            "pincode": "999999",
+            "state": "Delhi",
+            "manual_location": True,
+        },
+        token=access,
+    )
+    if status != 201 or body.get("city") != "Nowhere" or body.get("state") != "Delhi":
+        fail(f"business create: expected manual_location to save as typed, got {status} ({body})")
+    print("OK — manual_location saves an unknown pincode with the typed city/state.")
+
+    # business update: mismatched state/city against an existing pincode is rejected
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/",
+        {"pincode": "560034", "state": "Maharashtra"},
+        token=access,
+    )
+    if status != 400:
+        fail(f"business update: expected HTTP 400 for a mismatched state, got {status} ({body})")
+    print("OK — a business update with a mismatched state/pincode is rejected.")
+
+
 def main() -> None:
     check_health()
     check_auth_flow()
@@ -3034,6 +3147,7 @@ def main() -> None:
     check_alerts_flow()
     check_expiry_alerts_flow()
     check_reports_flow()
+    check_pincode_geo_flow()
     print("\nAll smoke checks passed.")
 
 
