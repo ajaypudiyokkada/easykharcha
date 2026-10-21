@@ -4,6 +4,10 @@
 set -e
 
 python manage.py migrate --noinput
+# Re-run on every start (not just image build) so the shared static_files volume — read by Caddy,
+# not Django, in production — always matches this build's code, e.g. a newly added django.contrib.admin
+# static asset or an icon change, even when the volume already existed from a prior image.
+python manage.py collectstatic --noinput
 
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8000 \

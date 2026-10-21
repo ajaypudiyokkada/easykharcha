@@ -149,6 +149,11 @@ not built yet.
   access (memberships/roles), stock/sell items, alert checks — editable, no secrets shown, user/
   business delete disabled; counts, purchases, sales, wastage and the audit log are read-only
   (create-only/append-only by design). See `deploy/README.md` for creating/resetting the first admin.
+- **Step 21b — Static files refreshed on every deploy.** `entrypoint.sh` now runs `collectstatic
+  --noinput` on every container start (not just image build), so the shared `static_files` volume
+  Caddy serves `/static/*` from always matches the running build. `deploy.sh` checks
+  `https://api.easykharcha.com/static/admin/css/base.css` returns 200 right after the backend's own
+  healthcheck passes.
 
 ## Permission table
 

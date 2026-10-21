@@ -33,6 +33,17 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
+echo "==> Checking admin static assets are served"
+# Proves the whole chain end to end: entrypoint.sh's collectstatic (this build) -> the shared
+# static_files volume -> Caddy's /static/* handle_path in deploy/Caddyfile, the same way a browser
+# loading the admin login page at ADMIN_URL_PATH would.
+status=$(curl -fsS -o /dev/null -w '%{http_code}' https://api.easykharcha.com/static/admin/css/base.css || echo "000")
+if [ "$status" != "200" ]; then
+  echo "FAIL: /static/admin/css/base.css returned $status, expected 200." >&2
+  exit 1
+fi
+echo "Admin static assets OK (200)."
+
 echo "==> Status"
 $COMPOSE ps
 
