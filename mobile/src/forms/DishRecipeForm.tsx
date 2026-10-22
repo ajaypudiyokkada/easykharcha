@@ -132,7 +132,7 @@ const SEARCH_ABOVE_ITEMS = 6;
  * portion, group and a multi-row ingredient list (each row: a stock item, picked from a grouped,
  * searchable list with an inline "add a new stock item" escape hatch, and an amount in g/ml/pieces
  * or the stock item's own unit, converted before it's saved). Owns its own Save button (unlike the
- * thinner SellItemForm/StockItemForm) since the ingredient list has its own, fairly involved,
+ * thinner StockItemForm) since the ingredient list has its own, fairly involved,
  * pick-then-fill-in flow.
  */
 export function DishRecipeForm({

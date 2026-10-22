@@ -56,6 +56,7 @@ const STEP20_SCREEN_DIR = 'docs/screens/step20';
 const STEP21B_SCREEN_DIR = 'docs/screens/step21b';
 const STEP21D_SCREEN_DIR = 'docs/screens/step21d';
 const STEP22A_SCREEN_DIR = 'docs/screens/step22a';
+const STEP22A2_SCREEN_DIR = 'docs/screens/step22a2';
 const STEP23A_SCREEN_DIR = 'docs/screens/step23a';
 const STEP23B_SCREEN_DIR = 'docs/screens/step23b';
 const STEP23D_SCREEN_DIR = 'docs/screens/step23d';
@@ -746,8 +747,9 @@ async function captureStep10Screens(page) {
 
 // Step 12 settings + Step 22a dish recipes: Owner creates "Paneer Tikka" via "Add a dish" (portion,
 // 3 ingredients incl. two added inline), edits it, then sees the plain-language message when trying
-// to deactivate "Fresh Paneer" (stock) while that dish still uses it. Reuses "Mango Lassi" (a
-// no-ingredients dish from the wizard, Step 4) to prove the dish list's "Needs ingredients" badge.
+// to deactivate "Fresh Paneer" (stock) while that dish still uses it. Reuses "Veg biryani" (Step
+// 22a2: the wizard's only remaining no-ingredients path, a ticked starter-pack item) to prove the
+// dish list's "Needs ingredients" badge.
 // The page is already signed in as the Owner from User 1's wizard data when this runs.
 async function checkSettingsFlow(page) {
   await page.goto(`${APP_URL}/settings`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
@@ -756,7 +758,7 @@ async function checkSettingsFlow(page) {
 
   await clickButton(page, 'What you sell');
   await waitForPath(page, '/settings/sell');
-  await waitForText(page, 'Mango Lassi');
+  await waitForText(page, 'Veg biryani');
   await waitForText(page, 'Needs ingredients');
   console.log(
     'OK — Settings -> What you sell lists the wizard-created dishes, badged "Needs ingredients".',
@@ -1545,27 +1547,59 @@ async function main() {
     await page.goto(`${APP_URL}/setup/4`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await waitForPath(page, '/setup/4');
 
-    // Step 22a: the wizard's quick "add your own" dish form is name/price/portion/group only, no
-    // ingredient picker any more — attaching ingredients is the manual dish form's job instead, see
-    // checkSettingsFlow below (Paneer Tikka is created there, with its full recipe).
+    // Step 22a2: the wizard's "Add your own" dish form now opens the same DishRecipeForm sheet as
+    // Settings' "What you sell" — a dish can't be saved here without at least one real ingredient
+    // either. The starter-pack tick below (Veg biryani) is still the no-ingredients path, reused by
+    // checkSettingsFlow to prove the dish list's "Needs ingredients" badge.
     await mkdir(STEP19_SCREEN_DIR, { recursive: true });
     await waitForText(page, 'Add your own');
     await page.screenshot({ path: `${STEP19_SCREEN_DIR}/add-your-own-dish-390.png` });
-    console.log('OK — Step 22a: the wizard\'s quick dish form has no ingredient picker.');
+    console.log('OK — Step 22a2: the wizard step still has its "Add your own" section.');
 
     await clickAndSettle(await findVisible(page, '[aria-label="Veg biryani"]'));
-    // minCount: 2 — the starter item's inline price box only mounts once the tick above is
-    // reflected in a render; without waiting for both fields to exist, this can resolve to the
-    // "add your own" form's price field instead (the only one present in the first instant).
-    await typeInto(page, 'Selling price', '120', { minCount: 2 });
+    // Step 22a2: the "Add your own" section no longer has an always-mounted Selling price field of
+    // its own (it's just a button that opens the dish sheet now) — the starter item's inline price
+    // box is the only "Selling price" field on the page at this point.
+    await typeInto(page, 'Selling price', '120');
     console.log('OK — ticked one starter sell item and set a price.');
+
+    // === Step 22a2: "Add menu item" opens the full dish form (portion + ingredients), same as
+    // Settings — pick 3 ingredients already on hand from Step 3 (Fresh Paneer, Rice, Cooking oil) ===
+    await mkdir(STEP22A2_SCREEN_DIR, { recursive: true });
+    await clickButton(page, 'Add menu item');
+    await waitForText(page, 'Add a dish');
+    await waitForText(page, '+ Add ingredient');
+    // The sheet animates in — a short settle avoids catching it mid-fade, same as other sheet shots.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await page.screenshot({ path: `${STEP22A2_SCREEN_DIR}/onboarding-dish-form-390.png` });
+    console.log('OK — Step 22a2: "Add menu item" on the onboarding screen opens the dish form.');
 
     await typeInto(page, 'Name', 'Mango Lassi', { last: true });
     await typeInto(page, 'Selling price', '30', { last: true });
     await typeInto(page, 'Portion (optional)', '1 glass', { last: true });
-    await clickButton(page, 'Add item');
+
+    await clickButton(page, '+ Add ingredient');
+    await waitForText(page, 'Choose an item');
+    await clickButton(page, 'Fresh Paneer');
+    await typeInto(page, 'Amount', '0.050');
+    console.log('OK — picked Fresh Paneer as the first ingredient.');
+
+    await clickButton(page, '+ Add ingredient');
+    await waitForText(page, 'Choose an item');
+    await clickButton(page, 'Rice');
+    await typeInto(page, 'Amount', '0.100', { last: true, minCount: 2 });
+    console.log('OK — picked Rice as a second ingredient.');
+
+    await clickButton(page, '+ Add ingredient');
+    await waitForText(page, 'Choose an item');
+    await clickButton(page, 'Cooking oil');
+    await typeInto(page, 'Amount', '0.010', { last: true, minCount: 3 });
+    console.log('OK — picked Cooking oil as a third ingredient.');
+
+    await clickButton(page, 'Save dish');
+    await waitForText(page, 'Dish added');
     await waitForText(page, 'Mango Lassi');
-    console.log('OK — added a plain dish (name, price, portion) with no ingredients from the wizard.');
+    console.log('OK — added a dish with 3 ingredients from the onboarding screen.');
 
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/5');

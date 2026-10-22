@@ -197,10 +197,10 @@ not built yet.
   ingredients and only trust `confirmed` recipes. New `DishRecipeForm` (name/portion/group/
   multi-ingredient picker with a grouped+searchable list, inline "add a new item", and a g<->kg/
   ml<->L client-side unit-conversion hint — `mobile/src/forms/unitConversion.ts`, the app's only
-  unit conversion, purely at entry time) drives Settings' "Add {label}"/edit sheet; the wizard's
-  own quick-add (`SellItemForm`) stays ingredients-free. Settings' dish list shows "Needs
-  ingredients"/"Estimate - confirm" badges; Home gained an owner-only "Add ingredients to N dishes"
-  nudge (`?filter=needs_ingredients` on Settings' dish list), replacing the old uses_qty nudge.
+  unit conversion, purely at entry time) drives Settings' "Add {label}"/edit sheet (Step 22a2 also
+  wires onboarding into it). Settings' dish list shows "Needs ingredients"/"Estimate - confirm"
+  badges; Home gained an owner-only "Add ingredients to N dishes" nudge
+  (`?filter=needs_ingredients` on Settings' dish list), replacing the old uses_qty nudge.
 - **Step 23a — Owner can do everything.** `ALL_PERMISSIONS` in `backend/businesses/permissions.py`
   is now the single registry every permission string must come from; the Owner's set is computed
   as `ALL_PERMISSIONS`, not hand-listed, so it automatically carries `counts.status` and
@@ -234,6 +234,14 @@ not built yet.
   didn't fix (pre-existing, confirmed against the untouched original, unrelated to this step): the
   full default `npm run flow` fails reproducibly in this dev environment right after landing's
   hero-link click, immediately followed by wizard's own fresh `/signup` navigation.
+- **Step 22a2 — Every manual dish create/edit goes through DishRecipeForm.** Onboarding's "What you
+  sell" (setup/4) now opens the same `SellItemSheet`/`DishRecipeForm` as Settings instead of the old
+  ingredients-free `SellItemForm` + `sell-items/bulk/` quick-add; `SellItemForm.tsx`/
+  `validateSellItem.ts` deleted (no longer used anywhere). `SellItemSheet` now takes an explicit
+  `business` prop rather than assuming `businesses[0]`, since onboarding's business isn't always
+  that. `sell-items/` (single create) and its PATCH already required >=1 ingredient since Step 22a,
+  so no backend change was needed; `sell-items/bulk/` stays ingredients-free, still used by the
+  starter-pack tick list.
 
 ## Permission table
 
