@@ -234,6 +234,16 @@ not built yet.
   didn't fix (pre-existing, confirmed against the untouched original, unrelated to this step): the
   full default `npm run flow` fails reproducibly in this dev environment right after landing's
   hero-link click, immediately followed by wizard's own fresh `/signup` navigation.
+- **Step C1 — AI backend for menu reading and recipe suggestions.** New `ai` app: `POST
+  businesses/<id>/ai/menu-scans/` (1-6 images or one PDF, processed by the `worker` service so it
+  never blocks a web request — inline when `AI_FAKE`, true by default in dev/tests) and `POST
+  .../ai/recipe-suggestions/` (max 15 dishes/call), both `sellitems.manage`. One swappable provider
+  seam (`ai/provider/`) behind a forced tool call + pydantic schema validation, a fallback model on a
+  schema-invalid result, prompt caching, and a 60s timeout; a shared `AiRecipeCache` (generic
+  ingredients only, never business data) skips the API on a repeat dish name. Per-business daily caps
+  (scans/pages/recipe-dishes) and a whole-deployment monthly cost cap (503 `ai_unavailable` once
+  reached); `AiUsage` tracks every real call's cost, read-only in the admin. New `scripts/ai_try_menu.py`
+  for trying real menus by hand; `docs/PRIVACY_NOTES.md` for the future privacy page.
 - **Step 22a2 — Every manual dish create/edit goes through DishRecipeForm.** Onboarding's "What you
   sell" (setup/4) now opens the same `SellItemSheet`/`DishRecipeForm` as Settings instead of the old
   ingredients-free `SellItemForm` + `sell-items/bulk/` quick-add; `SellItemForm.tsx`/
@@ -343,7 +353,7 @@ both say so in the UI.
   there's no dedicated multi-business management screen.
 - **Sales file upload (Petpooja)** — Step 14 deliberately built manual sales entry only, no upload
   button or upload screen; a later step may add bulk/file-based sales import.
-- **AI/scan recipe estimation** — Step 22a deliberately built the manual dish-recipe path only, no
-  "scan your menu" card or choice screen before "Add what you sell"; `RecipeStatus.UNCONFIRMED` and
-  `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props exist as extension points but nothing
-  creates or drives them yet — see `docs/MAP.md`'s `stock/` entry.
+- **AI/scan recipe estimation — screens.** Step C1 built the backend (menu reading, recipe
+  suggestions — see `ai/` above); no "scan your menu" card or choice screen before "Add what you
+  sell" exists yet. `RecipeStatus.UNCONFIRMED` and `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow
+  props exist as extension points but nothing creates or drives them yet — Step C2.

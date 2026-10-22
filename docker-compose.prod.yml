@@ -35,6 +35,7 @@ services:
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/media
+      - ai_tmp_files:/app/ai_tmp
     healthcheck:
       test:
         [
@@ -47,6 +48,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    logging: *default-logging
+
+  worker:
+    # Same image as backend — just a different entrypoint command, so menu reading (ai/jobs.py) runs
+    # in its own process and never blocks a gunicorn request. One job at a time, lean on purpose for
+    # a 2 GB droplet — see backend/ai/management/commands/run_ai_jobs.py. Shares ai_tmp_files with
+    # backend: the web process saves an uploaded menu's files there, this process reads and deletes
+    # them — two different containers, so without the shared volume the worker couldn't see them.
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: deploy/.env.production
+    command: python manage.py run_ai_jobs
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ai_tmp_files:/app/ai_tmp
     logging: *default-logging
 
   web-app:
@@ -102,5 +121,6 @@ volumes:
   db_data:
   static_files:
   media_files:
+  ai_tmp_files:
   caddy_data:
   caddy_config:

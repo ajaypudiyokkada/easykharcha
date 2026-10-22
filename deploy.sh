@@ -44,6 +44,10 @@ if [ "$status" != "200" ]; then
 fi
 echo "Admin static assets OK (200)."
 
+echo "==> AI worker status"
+$COMPOSE ps worker
+$COMPOSE logs --tail=20 worker
+
 echo "==> Status"
 $COMPOSE ps
 

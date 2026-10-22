@@ -20,7 +20,7 @@ COPY . .
 RUN chmod +x entrypoint.sh \
     && addgroup --system app \
     && adduser --system --ingroup app --no-create-home app \
-    && mkdir -p /app/staticfiles /app/media \
+    && mkdir -p /app/staticfiles /app/media /app/ai_tmp \
     && chown -R app:app /app
 
 USER app

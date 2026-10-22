@@ -1,0 +1,141 @@
+"""Server-side validation for every shape the model can hand back — see provider/base.py's
+run_with_fallback. Nothing from a model response reaches a view or the database unvalidated. Also
+caps sizes and strips control characters, per Step C1's "never trust model output" rule."""
+
+import re
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+MAX_DISHES_PER_SCAN = 150
+MAX_NAME_LENGTH = 80
+MAX_PORTION_LABEL_LENGTH = 40
+MAX_INGREDIENTS_PER_DISH = 12
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _clean_text(value: str, max_length: int) -> str:
+    return _CONTROL_CHARS.sub("", value).strip()[:max_length]
+
+
+def _clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+class ExtractedDish(BaseModel):
+    name: str
+    price: float | None = None
+    confidence: float = 0.5
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("confidence")
+    @classmethod
+    def _clamp_confidence(cls, value: float) -> float:
+        return _clamp_unit(value)
+
+    @field_validator("price")
+    @classmethod
+    def _non_negative_price(cls, value: float | None) -> float | None:
+        return None if value is None or value < 0 else value
+
+
+class ExtractedSection(BaseModel):
+    name: str = "Menu"
+    dishes: list[ExtractedDish] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_section_name(cls, value: str) -> str:
+        cleaned = _clean_text(value, MAX_NAME_LENGTH)
+        return cleaned or "Menu"
+
+
+class MenuExtractionResult(BaseModel):
+    is_menu: bool
+    sections: list[ExtractedSection] = Field(default_factory=list)
+
+    def sanitized(self) -> dict:
+        """Drops unnamed dishes and caps the total at MAX_DISHES_PER_SCAN, dropping whatever section
+        structure is left over once empty — a repair step, not a rejection, since a menu that's
+        mostly fine shouldn't be thrown away for one bad row."""
+        if not self.is_menu:
+            return {"is_menu": False, "sections": []}
+
+        kept_sections = []
+        total = 0
+        for section in self.sections:
+            kept_dishes = []
+            for dish in section.dishes:
+                if not dish.name or total >= MAX_DISHES_PER_SCAN:
+                    continue
+                kept_dishes.append(dish.model_dump())
+                total += 1
+            if kept_dishes:
+                kept_sections.append({"name": section.name, "dishes": kept_dishes})
+            if total >= MAX_DISHES_PER_SCAN:
+                break
+        return {"is_menu": True, "sections": kept_sections}
+
+
+class IngredientSuggestion(BaseModel):
+    name: str
+    amount: float
+    unit: Literal["g", "ml", "pieces"]
+    role: Literal["main", "auxiliary"] = "main"
+    confidence: float = 0.5
+    matched_stock_name: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("matched_stock_name")
+    @classmethod
+    def _clean_matched_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = _clean_text(value, MAX_NAME_LENGTH)
+        return cleaned or None
+
+    @field_validator("confidence")
+    @classmethod
+    def _clamp_confidence(cls, value: float) -> float:
+        return _clamp_unit(value)
+
+    @field_validator("amount")
+    @classmethod
+    def _non_negative_amount(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("amount must not be negative")
+        return value
+
+
+class DishRecipeSuggestion(BaseModel):
+    dish_name: str
+    portion_label: str = ""
+    ingredients: list[IngredientSuggestion] = Field(default_factory=list)
+
+    @field_validator("dish_name")
+    @classmethod
+    def _clean_dish_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("portion_label")
+    @classmethod
+    def _clean_portion_label(cls, value: str) -> str:
+        return _clean_text(value, MAX_PORTION_LABEL_LENGTH)
+
+    @field_validator("ingredients")
+    @classmethod
+    def _cap_ingredients(cls, value: list) -> list:
+        return value[:MAX_INGREDIENTS_PER_DISH]
+
+
+class RecipeSuggestionsResult(BaseModel):
+    dishes: list[DishRecipeSuggestion] = Field(default_factory=list)

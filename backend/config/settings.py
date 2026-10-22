@@ -5,6 +5,7 @@ laptop and a real deployment is read from the environment, not from which file g
 """
 
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import environ
@@ -44,6 +45,7 @@ INSTALLED_APPS = [
     "sales",
     "alerts",
     "reports",
+    "ai",
 ]
 
 MIDDLEWARE = [
@@ -202,6 +204,26 @@ BUSINESS_SETTINGS_RANGES = {
     "gap_alert_pct": (0, 100),
     "expiry_warn_days": (1, 30),
 }
+
+# Step C1: AI menu reading / recipe suggestions (backend/ai/). AI_FAKE short-circuits every call to
+# a deterministic canned result (tests/dev/CI) so nothing here ever reaches the real API unless an
+# operator explicitly sets AI_FAKE=false, which deploy/.env.production.example does.
+ANTHROPIC_API_KEY = env.str("ANTHROPIC_API_KEY", default="")
+AI_MODEL_MENU = env.str("AI_MODEL_MENU", default="claude-haiku-5-5")
+AI_MODEL_RECIPE = env.str("AI_MODEL_RECIPE", default="claude-haiku-5-5")
+# Tried once, only when the first call's result fails schema validation — see ai/provider/base.py.
+AI_MODEL_FALLBACK = env.str("AI_MODEL_FALLBACK", default="claude-sonnet-5-5")
+AI_FAKE = env.bool("AI_FAKE", default=DEBUG)
+# Where an uploaded menu's photos/PDF sit between being saved and being read — never MEDIA_ROOT,
+# since these are deleted right after the job finishes or fails (ai/files.py), not kept like a logo.
+AI_TEMP_ROOT = env.str("AI_TEMP_ROOT", default=str(BASE_DIR / "ai_tmp"))
+AI_DAILY_SCANS_PER_BUSINESS = env.int("AI_DAILY_SCANS_PER_BUSINESS", default=5)
+# Whole-deployment spend cap, not per-business — see ai/limits.py's monthly_cost_cap_exceeded.
+AI_MONTHLY_CAP_USD = Decimal(env.str("AI_MONTHLY_CAP_USD", default="20"))
+# Defaults are the Haiku-tier list price per 1M tokens at the time this was written — check
+# Anthropic's current pricing before trusting these for real budgeting, same note as the example file.
+AI_PRICE_IN_PER_MTOK = Decimal(env.str("AI_PRICE_IN_PER_MTOK", default="1.00"))
+AI_PRICE_OUT_PER_MTOK = Decimal(env.str("AI_PRICE_OUT_PER_MTOK", default="5.00"))
 
 # Dev default matches the Expo web dev server (mobile/package.json's `start` script, :8081) and the
 # production web export served locally for service-worker testing (scripts/serve_web.mjs, :8082).

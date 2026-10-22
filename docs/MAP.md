@@ -41,6 +41,12 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
   models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
+- `ai/` — Step C1: menu reading + recipe suggestions via Anthropic (provider/ — fake.py for AI_FAKE,
+  anthropic_provider.py for real, base.py's run_with_fallback shared by both); models.py (MenuScan,
+  AiUsage, AiRecipeCache), schemas.py (pydantic validation, never trusts model output), limits.py
+  (daily per-business caps + the monthly cost cap), files.py (temp upload storage, deleted after each
+  job), jobs.py (process_menu_scan, run inline when AI_FAKE or by management/commands/run_ai_jobs.py
+  otherwise), matching.py (fuzzy stock-item matching), views.py, urls.py
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
@@ -111,6 +117,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   default the one with the largest rise), sales_vs_cost, biggest_gaps
 - `GET geo/pincode/<code>/` — PincodeDetailView — Step 21b: `{pincode, state, districts, areas}`, 400
   for a badly-shaped code, 404 for one not in the table
+- `POST businesses/<id>/ai/menu-scans/` — MenuScanCreateView — 1-6 images or one PDF, 202 `{id, status}`;
+  `GET .../menu-scans/<scan_id>/` — status + sections/dishes once done
+- `POST businesses/<id>/ai/recipe-suggestions/` — RecipeSuggestionView — `dish_ids` or `dishes:[{name}]`,
+  max 15/call; both `sellitems.manage`, 429/503 on limits, see ai/limits.py
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
@@ -262,7 +272,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `npm run dev` → `scripts/dev.mjs` — starts backend + Expo web together
 - `npm run check` → `check:backend` (ruff via `scripts/check_backend.ps1`) + `check:mobile` (eslint/prettier/tsc)
 - `npm run smoke` → `scripts/smoke.py` — backend-only API walk, one user story per feature; Step 23e's
-  `--area <name>` (counts/stock/sales/alerts/wastage/permissions/onboarding/reports, repeatable) runs
+  `--area <name>` (counts/stock/sales/alerts/wastage/permissions/onboarding/reports/ai, repeatable) runs
   only that area's checks — each `check_*_flow` is fully self-contained, so this is a safe subset
 - `npm run flow` → `scripts/flow.mjs` — full browser walk: signup→wizard→all 4 roles→core actions;
   Step 23e's `--only <scenario>` (`--list` to see names) runs one scenario — a "solo" one stands alone,
