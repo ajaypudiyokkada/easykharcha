@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from businesses.models import Business
 
-from .business_day import business_date_for
+from .business_day import business_date_for, has_any_count
 from .config import CLOSING_GRACE_HOURS
 from .models import CountType, StockCount
 
@@ -26,7 +26,11 @@ def deadline_at_for(business: Business, business_date, count_type: str):
 
 def opening_missed(business: Business, business_date, now: datetime) -> bool:
     """True once it's too late to expect an opening count first: its own deadline has passed, or
-    the closing window has already begun. This is what unlocks a closing count with no opening."""
+    the closing window has already begun. This is what unlocks a closing count with no opening.
+    Step 23d: a business that has never counted anything can't have "missed" its first opening —
+    there is no deadline for it, so a closing can never jump ahead of it."""
+    if not has_any_count(business):
+        return False
     opening_deadline = deadline_at_for(business, business_date, CountType.OPENING)
     closing_deadline = deadline_at_for(business, business_date, CountType.CLOSING)
     return now > opening_deadline or now > closing_deadline
@@ -35,6 +39,7 @@ def opening_missed(business: Business, business_date, now: datetime) -> bool:
 def status_for(business: Business, now: datetime | None = None) -> dict:
     now = now or timezone.now()
     business_date = business_date_for(business, now)
+    is_first_count = not has_any_count(business)
 
     counts_today = {
         c.count_type: c
@@ -56,6 +61,9 @@ def status_for(business: Business, now: datetime | None = None) -> dict:
 
     if opening_done:
         opening_state = "done"
+    elif is_first_count:
+        # Step 23d: a brand-new business's first count is allowed at any time of day, never late.
+        opening_state = "due"
     elif now > opening_deadline:
         opening_state = "late"
     else:
@@ -84,6 +92,7 @@ def status_for(business: Business, now: datetime | None = None) -> dict:
 
     return {
         "business_date": business_date,
+        "is_first_count": is_first_count,
         "opening": {
             "state": opening_state,
             "due_by": opening_deadline,

@@ -15,7 +15,7 @@ from django.db.models import Avg, Count, F, OuterRef, Subquery, Sum
 from django.utils import timezone
 
 from businesses.models import AccessRole, Business
-from counts.business_day import business_date_for
+from counts.business_day import business_date_for, has_any_count
 from counts.gap import lines_with_gap, unit_cost_for
 from counts.models import CountLine, CountLineState, CountType, StockCount
 from purchases.models import PurchaseLine
@@ -52,6 +52,11 @@ def _business_today(business: Business):
 
 
 def _count_late_alerts(business: Business, role: str | None) -> list[dict]:
+    # Step 23d: a business that has never counted anything can't be "late" for its first count —
+    # no opening_late/closing_late alert exists until at least one count has ever been submitted.
+    if not has_any_count(business):
+        return []
+
     # Step 23b: this one alert uses the business-day-aware date (day_starts_hour), not the plain
     # calendar date the other alert types below still use — it's tied to the same one-opening/
     # one-closing-per-business-date rule counts/views.py enforces.

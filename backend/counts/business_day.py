@@ -14,3 +14,12 @@ def business_date_for(business: Business, at: datetime | None = None):
     moment = at or timezone.now()
     shifted = timezone.localtime(moment, tz) - timedelta(hours=business.settings.day_starts_hour)
     return shifted.date()
+
+
+def has_any_count(business: Business) -> bool:
+    """True once the business has ever submitted a stock count — opening or closing, any date.
+    Step 23d: gates the "Starting stock" first-count framing and suppresses opening_late/
+    closing_late alerts until a brand-new business has counted something at least once."""
+    from .models import StockCount
+
+    return StockCount.objects.filter(business=business).exists()
