@@ -1,17 +1,19 @@
 # Deploying EasyKharcha
 
 One DigitalOcean droplet (1 vCPU, 2 GB RAM, Ubuntu 24.04, Docker + compose installed), running the
-whole stack from `docker-compose.prod.yml`: Postgres, the Django backend, the PWA web export, the
-landing page, and Caddy in front of all four on `easykharcha.com` / `app.easykharcha.com` /
-`api.easykharcha.com`. The server builds its own images from a `git pull` — nothing is built on
-Windows and pushed.
+whole stack from `docker-compose.prod.yml`: Postgres, the Django backend, the `worker` service (reads
+uploaded menus — see backend/ai/), the PWA web export, the landing page, and Caddy in front of all
+four on `easykharcha.com` / `app.easykharcha.com` / `api.easykharcha.com`. The server builds its own
+images from a `git pull` — nothing is built on Windows and pushed.
 
 ## First time on a new server
 
 1. Clone the repo and `cd` into it.
 2. `cp deploy/.env.production.example deploy/.env.production`, then fill in every value marked
    "REQUIRED" inside it — at minimum `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD` (keep the password in
-   sync with `DATABASE_URL`'s own copy of it in the same file).
+   sync with `DATABASE_URL`'s own copy of it in the same file). Set `ANTHROPIC_API_KEY` too if menu
+   reading should work for real — leave `AI_FAKE=false` as shipped; without a key, AI endpoints will
+   just fail each call rather than silently going fake.
 3. Generate the secret key:
    ```bash
    docker compose -f docker-compose.prod.yml run --rm backend python -c \
@@ -48,8 +50,8 @@ Windows and pushed.
 - **Deploy a change:** `./deploy.sh` — pulls `main`, rebuilds, restarts, waits for the backend's own
   healthcheck, prints `docker compose ps`, prunes old images. Exits non-zero (and prints the backend's
   last 100 log lines) if it never comes up healthy.
-- **View logs:** `docker compose -f docker-compose.prod.yml logs -f [service]` (`backend`, `web-app`,
-  `landing`, `caddy`, `db`).
+- **View logs:** `docker compose -f docker-compose.prod.yml logs -f [service]` (`backend`, `worker`,
+  `web-app`, `landing`, `caddy`, `db`).
 - **Reset a lost admin password:**
   ```bash
   docker compose -f docker-compose.prod.yml --env-file deploy/.env.production run --rm \

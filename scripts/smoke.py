@@ -198,10 +198,15 @@ def request(
 
 
 def make_png(
-    width: int = 8, height: int = 8, rgb: tuple[int, int, int] = (31, 111, 99)
+    width: int = 8,
+    height: int = 8,
+    rgb: tuple[int, int, int] = (31, 111, 99),
+    marker: bytes | None = None,
 ) -> bytes:
     """A minimal valid solid-colour PNG, built by hand (signature + IHDR + IDAT + IEND) so this
-    script stays stdlib-only — no Pillow dependency just to prove an upload is a real image."""
+    script stays stdlib-only — no Pillow dependency just to prove an upload is a real image. `marker`
+    (the ai/ smoke checks' AI_FAKE trigger bytes) rides along in a harmless tEXt metadata chunk, which
+    a real PNG decoder (Pillow included) just ignores — the file still decodes as a normal image."""
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (
@@ -213,10 +218,39 @@ def make_png(
 
     signature = b"\x89PNG\r\n\x1a\n"
     ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    text = chunk(b"tEXt", b"Comment\x00" + marker) if marker else b""
     row = b"\x00" + bytes(rgb) * width
     idat = chunk(b"IDAT", zlib.compress(row * height))
     iend = chunk(b"IEND", b"")
-    return signature + ihdr + idat + iend
+    return signature + ihdr + text + idat + iend
+
+
+def make_pdf(num_pages: int = 1, marker: bytes | None = None) -> bytes:
+    """A minimal valid PDF with `num_pages` blank pages, built by hand (same stdlib-only approach as
+    make_png) — just enough structure (objects + a correct xref table) for pypdf to read %PDF- and
+    count pages. `marker` is the ai/ smoke checks' AI_FAKE trigger bytes, tucked into an unreferenced
+    comment object so it's still present in the raw file bytes the fake provider inspects."""
+    objects: list[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>"]
+    page_ids = list(range(3, 3 + num_pages))
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {num_pages} >>".encode())
+    objects.extend(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>" for _ in page_ids)
+    if marker:
+        objects.append(b"<< /Type /SmokeMarker >>\n% " + marker)
+
+    parts = [b"%PDF-1.4\n"]
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(sum(len(part) for part in parts))
+        parts.append(f"{index} 0 obj\n".encode() + body + b"\nendobj\n")
+
+    xref_offset = sum(len(part) for part in parts)
+    count = len(objects) + 1
+    xref = [f"xref\n0 {count}\n".encode(), b"0000000000 65535 f \n"]
+    xref.extend(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    trailer = f"trailer\n<< /Size {count} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode()
+
+    return b"".join(parts) + b"".join(xref) + trailer
 
 
 def multipart_body(field_name: str, filename: str, content: bytes, content_type: str):
@@ -230,6 +264,24 @@ def multipart_body(field_name: str, filename: str, content: bytes, content_type:
         + content
         + f"\r\n--{boundary}--\r\n".encode()
     )
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
+def multipart_multi_body(files: list[tuple[str, str, bytes, str]]):
+    """Like multipart_body but for more than one file under the same (or different) field name(s) —
+    the ai/ menu-scan upload's `images` field, which can repeat 1-6 times in one request."""
+    boundary = "EasyKharchaSmokeBoundaryMulti"
+    parts = [
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode()
+        + content
+        + b"\r\n"
+        for field_name, filename, content, content_type in files
+    ]
+    body = b"".join(parts) + f"--{boundary}--\r\n".encode()
     return body, f"multipart/form-data; boundary={boundary}"
 
 
@@ -4634,6 +4686,262 @@ def check_pincode_geo_flow() -> None:
     print("OK — a business update with a mismatched state/pincode is rejected.")
 
 
+def _ai_sql_write(sql: str, params: tuple) -> int:
+    conn = sqlite3.connect(f"file:{os.path.abspath(DB_PATH)}?mode=rw", uri=True)
+    try:
+        cursor = conn.execute(sql, params)
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def _ai_sql_read_one(sql: str, params: tuple):
+    conn = sqlite3.connect(f"file:{os.path.abspath(DB_PATH)}?mode=ro", uri=True)
+    try:
+        return conn.execute(sql, params).fetchone()
+    finally:
+        conn.close()
+
+
+def check_ai_flow() -> None:
+    """AI_FAKE-only (the dev server's default) — never touches the real Anthropic API. Covers the
+    whole menu-scan job lifecycle, both schema-validation outcomes (fallback recovery and persistent
+    failure), the daily scan limit, file validation, the monthly cost cap, cross-business scoping,
+    temp-file cleanup, and recipe-suggestion caching/matching."""
+    owner_mobile, owner_access, _ = signup_and_login("AI Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "AI Test Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ai flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Rice", "unit": "kg", "usual_price": "60.00"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ai flow: stock bulk create expected 201, got {status} ({body})")
+    rice_id = body[0]["id"]
+
+    # A dish that shares a name with one of the fake provider's canned dishes, so the menu scan's
+    # "existing" flag has something real to prove.
+    existing_dish_id, _ = _create_dish(
+        business_id, owner_access, "Fake Dish 2", "120.00", [(rice_id, "0.200")]
+    )
+
+    def scan_with_images(images: list[tuple[str, bytes, str]]):
+        body_bytes, content_type = multipart_multi_body(
+            [("images", name, content, ctype) for name, content, ctype in images]
+        )
+        return request(
+            "POST",
+            f"/businesses/{business_id}/ai/menu-scans/",
+            raw_body=body_bytes,
+            content_type=content_type,
+            token=owner_access,
+        )
+
+    def scan_with_pdf(content: bytes):
+        body_bytes, content_type = multipart_multi_body([("pdf", "menu.pdf", content, "application/pdf")])
+        return request(
+            "POST",
+            f"/businesses/{business_id}/ai/menu-scans/",
+            raw_body=body_bytes,
+            content_type=content_type,
+            token=owner_access,
+        )
+
+    def scan_detail(scan_id: int, token: str = owner_access):
+        return request(
+            "GET", f"/businesses/{business_id}/ai/menu-scans/{scan_id}/", token=token
+        )
+
+    # --- oversize/invalid file rejected (none of these should consume the daily scan limit) ---
+    status, body, _ = scan_with_images([])
+    if status != 422:
+        fail(f"ai flow: no file expected 422, got {status} ({body})")
+    status, body, _ = scan_with_images([(f"img{i}.png", make_png(), "image/png") for i in range(7)])
+    if status != 422:
+        fail(f"ai flow: 7 images expected 422, got {status} ({body})")
+    status, body, _ = scan_with_images([("fake.png", b"not a real image", "image/png")])
+    if status != 422:
+        fail(f"ai flow: bad image bytes expected 422, got {status} ({body})")
+    oversize_png = make_png() + (b"\x00" * (4 * 1024 * 1024 + 10))
+    status, body, _ = scan_with_images([("big.png", oversize_png, "image/png")])
+    if status != 422:
+        fail(f"ai flow: oversize image expected 422, got {status} ({body})")
+    status, body, _ = scan_with_pdf(b"NOT A PDF AT ALL")
+    if status != 422:
+        fail(f"ai flow: bad pdf header expected 422, got {status} ({body})")
+    status, body, _ = scan_with_pdf(make_pdf(num_pages=11))
+    if status != 422:
+        fail(f"ai flow: 11-page pdf expected 422, got {status} ({body})")
+    print("OK — oversize/invalid menu-scan files are rejected (none of them cost a daily scan).")
+
+    # --- happy path: queued -> done, sections/dishes, the existing-dish flag ---
+    status, body, _ = scan_with_images([("menu.png", make_png(), "image/png")])
+    if status != 202 or "id" not in body:
+        fail(f"ai flow: menu scan create expected 202, got {status} ({body})")
+    scan_id = body["id"]
+    status, body, _ = scan_detail(scan_id)
+    if status != 200 or body["status"] != "done" or not body["is_menu"]:
+        fail(f"ai flow: menu scan expected done/is_menu, got {status} ({body})")
+    dishes = {d["name"]: d for section in body["sections"] for d in section["dishes"]}
+    if "Fake Dish 2" not in dishes or not dishes["Fake Dish 2"]["existing"]:
+        fail(f"ai flow: expected 'Fake Dish 2' flagged existing, got {dishes}")
+    if "Fake Dish 1" not in dishes or dishes["Fake Dish 1"]["existing"]:
+        fail(f"ai flow: expected 'Fake Dish 1' flagged not existing, got {dishes}")
+    temp_dir = _ai_sql_read_one("SELECT temp_dir FROM ai_menuscan WHERE id = ?", (scan_id,))[0]
+    temp_path = os.path.join(
+        os.path.dirname(__file__), "..", "backend", "ai_tmp", temp_dir
+    )
+    if os.path.exists(temp_path):
+        fail(f"ai flow: temp dir {temp_path} still exists after the job finished")
+    print("OK — menu scan job lifecycle queued->done, dishes/sections, existing-dish flag.")
+    print("OK — a finished scan's temp files are deleted.")
+
+    # --- non-menu result ---
+    status, body, _ = scan_with_images([("notmenu.png", make_png(marker=b"NOT_A_MENU"), "image/png")])
+    if status != 202:
+        fail(f"ai flow: not-a-menu scan create expected 202, got {status} ({body})")
+    status, body, _ = scan_detail(body["id"])
+    if status != 200 or body["status"] != "done" or body["is_menu"] is not False:
+        fail(f"ai flow: expected is_menu false, got {status} ({body})")
+    print("OK — a non-menu upload comes back is_menu=false.")
+
+    # --- schema validation: fails once, recovers on the fallback model ---
+    status, body, _ = scan_with_images(
+        [("badschema.png", make_png(marker=b"FORCE_BAD_SCHEMA"), "image/png")]
+    )
+    status, body, _ = scan_detail(body["id"])
+    if status != 200 or body["status"] != "done":
+        fail(f"ai flow: expected the fallback model to recover, got {status} ({body})")
+    print("OK — a canned response that fails schema validation recovers on the fallback model.")
+
+    # --- schema validation: fails on both attempts -> the scan is marked failed ---
+    status, body, _ = scan_with_images(
+        [("badschema2.png", make_png(marker=b"FORCE_BAD_SCHEMA_PERSISTENT"), "image/png")]
+    )
+    status, body, _ = scan_detail(body["id"])
+    if status != 200 or body["status"] != "failed" or body["error_code"] != "ai_schema_invalid":
+        fail(f"ai flow: expected a schema-invalid failure, got {status} ({body})")
+    print("OK — a canned response that fails validation on both attempts marks the scan failed.")
+
+    # --- daily scan limit: one more succeeds (5 used so far), the 6th is rejected ---
+    status, body, _ = scan_with_images([("fifth.png", make_png(), "image/png")])
+    if status != 202:
+        fail(f"ai flow: 5th scan today expected 202, got {status} ({body})")
+    status, body, _ = scan_with_images([("sixth.png", make_png(), "image/png")])
+    if status != 429:
+        fail(f"ai flow: 6th scan today expected 429, got {status} ({body})")
+    print("OK — a 6th menu scan in one day is rejected (429).")
+
+    # --- cross-business access: a real scan id under someone else's business -> 404 ---
+    other_mobile, other_access, _ = signup_and_login("AI Intruder")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Intruder Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=other_access,
+    )
+    if status != 201:
+        fail(f"ai flow: intruder business create expected 201, got {status} ({body})")
+    other_business_id = body["id"]
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{other_business_id}/ai/menu-scans/{scan_id}/",
+        token=other_access,
+    )
+    if status != 404:
+        fail(f"ai flow: cross-business scan access expected 404, got {status} ({body})")
+    print("OK — a scan id from another business is a 404, not the scan's own data.")
+
+    # --- recipe suggestions: matching to an existing stock item, dish_ids, caching ---
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "Rice Bowl"}]},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"ai flow: recipe suggestion expected 200, got {status} ({body})")
+    ingredient = body["dishes"][0]["ingredients"][0]
+    if ingredient["matched_stock_item_id"] != rice_id:
+        fail(f"ai flow: expected the Rice stock item matched, got {ingredient}")
+    print("OK — a suggested ingredient matches the owner's existing stock item.")
+
+    before = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (business_id,)
+    )[0]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "Rice Bowl"}]},
+        token=owner_access,
+    )
+    after = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (business_id,)
+    )[0]
+    if status != 200 or after != before:
+        fail(f"ai flow: expected a cache hit to skip the client, got {status}, {before} -> {after}")
+    print("OK — a repeated dish name is a cache hit and skips the client (no new AiUsage row).")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dish_ids": [existing_dish_id]},
+        token=owner_access,
+    )
+    if status != 200 or body["dishes"][0]["dish_name"] != "Fake Dish 2":
+        fail(f"ai flow: recipe suggestion by dish_ids expected the dish's own name, got {status} ({body})")
+    print("OK — recipe-suggestions by dish_ids resolves to the business's own dish names.")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "FORCE_BAD_SCHEMA_PERSISTENT dish"}]},
+        token=owner_access,
+    )
+    if status != 502:
+        fail(f"ai flow: persistently-invalid recipe suggestion expected 502, got {status} ({body})")
+    print("OK — a recipe suggestion that never passes schema validation is rejected (502).")
+
+    # --- monthly cost cap: a huge AiUsage row trips it, then cleanup restores normal service ---
+    cap_row_id = _ai_sql_write(
+        "INSERT INTO ai_aiusage "
+        "(business_id, kind, model, input_tokens, output_tokens, est_cost_usd, created) "
+        "VALUES (?, 'recipe_suggestion', 'smoke-test', 0, 0, '999999', ?)",
+        (business_id, str(datetime.now(dt_timezone.utc))),
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "Cap Test Dish"}]},
+        token=owner_access,
+    )
+    if status != 503:
+        fail(f"ai flow: expected 503 once the monthly cost cap is reached, got {status} ({body})")
+    print("OK — AI endpoints return 503 once the monthly cost cap is reached.")
+
+    _ai_sql_write("DELETE FROM ai_aiusage WHERE id = ?", (cap_row_id,))
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "Cap Test Dish"}]},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"ai flow: expected service to resume once back under the cap, got {status} ({body})")
+    print("OK — AI service resumes once usage is back under the monthly cap.")
+
+
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
@@ -4658,6 +4966,7 @@ ALL_CHECKS = [
     check_expiry_alerts_flow,
     check_reports_flow,
     check_pincode_geo_flow,
+    check_ai_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -4685,6 +4994,7 @@ AREA_CHECKS: dict[str, list] = {
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
     "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
     "reports": [check_reports_flow],
+    "ai": [check_ai_flow],
 }
 
 
