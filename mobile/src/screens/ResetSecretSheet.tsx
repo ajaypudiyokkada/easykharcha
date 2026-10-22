@@ -100,7 +100,9 @@ export function ResetSecretSheet({ visible, member, usesPin, onClose, onSaved }:
           label={s.passwordLabel}
           value={secret}
           onChangeText={setSecret}
-          autoComplete="new-password"
+          // This resets someone else's password, not the signed-in Owner's own — "off" stops
+          // Chrome/the OS from offering to generate/save it to the Owner's own account.
+          autoComplete="off"
           error={error ?? undefined}
         />
       )}
