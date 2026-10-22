@@ -27,8 +27,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   always in the stock item's own unit) and added `portion_label`/`recipe_status`
   (none/unconfirmed/confirmed — gap.py, reports/service.py and sector_change.py only trust
   `confirmed`)), views.py (`SellItemListView.post` is the single dish create with ingredients,
-  always confirmed; `sell-items/bulk/` stays ingredients-free, recipe_status=none, `skip_existing`),
-  serializers.py (`SellItemCreateSerializer`/`IngredientRowSerializer`), exceptions.py, urls.py.
+  always confirmed, 400 if none valid; `SellItemDetailView.patch` same rule when `ingredients` is
+  sent; `sell-items/bulk/` stays ingredients-free, recipe_status=none, `skip_existing` — Step 22a2:
+  every manual UI create/edit now goes through the single, ingredient-required endpoints; bulk is
+  only the starter-pack tick list and a future menu-upload flow), serializers.py
+  (`SellItemCreateSerializer`/`IngredientRowSerializer`), exceptions.py, urls.py.
   Next step plugs in here: a choice screen before "Add what you sell" (scan/upload vs one by one),
   a bulk-create-without-ingredients caller, `RecipeStatus.UNCONFIRMED`, and
   `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props — none built yet.
@@ -116,7 +119,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `signup.tsx` — create account
 - `login.tsx` — mobile + password/PIN
 - `+not-found.tsx` — 404
-- `setup/1.tsx`..`6.tsx` — onboarding wizard: business info, colour, stock, sell items, team, settings
+- `setup/1.tsx`..`6.tsx` — onboarding wizard: business info, colour, stock, sell items, team, settings;
+  Step 22a2: `setup/4.tsx`'s "Add your own" dish opens the same `SellItemSheet`/`DishRecipeForm` as
+  Settings, not a separate ingredients-free form
 - `setup/done.tsx` — wizard summary, "still to do" list
 - `home.tsx` — Home: OwnerHome (Owner/Manager) or TodayHome (Head chef/Helper), role-branched; Step
   23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`
@@ -147,8 +152,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   edit screens reusing BusinessForm/BrandForm; `settings/stock.tsx` — Step 19's inline add
   (instant-save, GroupedList) + edit Sheet (StockItemForm); Step 20 added its "Add from starter
   list" button, opening `StarterStockPickerSheet`; `settings/sell.tsx` — the dish list (badges:
-  "Needs ingredients"/"Estimate - confirm"), a quick no-ingredients add box (SellItemForm) and
-  "Add {label}" opening `SellItemSheet` (DishRecipeForm, add or edit); `?filter=needs_ingredients`
+  "Needs ingredients"/"Estimate - confirm"), "Add {label}" opening `SellItemSheet` (DishRecipeForm,
+  add or edit) — Step 22a2 removed its old ingredients-free quick-add box; `?filter=needs_ingredients`
   and `?edit=<id>` query params drive it from Home's nudge and a count-gap reason link;
   `settings/alerts.tsx` — the 6 alert settings (Step 18 added expiry_warn_days; the hub's "Expiry
   alerts" row links here too, not its own screen)
@@ -222,16 +227,18 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
   a member, change role (asks for a new secret only when crossing the Manager boundary), reset a
   PIN/password
-- `screens/StockItemSheet.tsx` — Settings' stock add/edit sheet; `SellItemSheet.tsx` — Step 22a:
-  Settings' dish add/edit sheet, wrapping `DishRecipeForm` (null `editingItem` = create)
+- `screens/StockItemSheet.tsx` — Settings' stock add/edit sheet; `SellItemSheet.tsx` — Step 22a dish
+  add/edit sheet wrapping `DishRecipeForm` (null `editingItem` = create); Step 22a2: takes an
+  explicit `business` prop (not `businesses[0]`) and is reused by both Settings' `settings/sell.tsx`
+  and onboarding's `setup/4.tsx`
 - `screens/StarterStockPicker.tsx` — Step 20: the grouped/searchable starter-stock picker (setup/3
   and Settings); `StarterStockPickerSheet.tsx` wraps it in a Sheet with its own Continue button for
   the Settings entry point
 - `forms/StockItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared form component each,
-  used by both the setup wizard and Settings; `SellItemForm.tsx` — the quick, no-ingredients dish
-  fields (name/price/portion/group) shared by the wizard and Settings' quick-add box only; Step
-  22a's `DishRecipeForm.tsx` (+ `unitConversion.ts`'s g<->kg/ml<->L entry-time conversion,
-  `validateDish.ts`) is the full dish form with ingredients, used only via `SellItemSheet`
+  used by both the setup wizard and Settings; Step 22a's `DishRecipeForm.tsx` (+ `unitConversion.ts`'s
+  g<->kg/ml<->L entry-time conversion, `validateDish.ts`) is the full dish form with ingredients,
+  used only via `SellItemSheet` — Step 22a2 deleted the old ingredients-free `SellItemForm.tsx`/
+  `validateSellItem.ts`, now unused everywhere
 - `forms/PincodeLocationField.tsx` — Step 21b: Country (fixed) + Pincode lookup -> State (read-only) +
   City (the pincode's district(s), first preselected) + optional searchable Area; "Enter city
   yourself" falls back to free-text City + a State picker (sets `manual_location`) when a pincode

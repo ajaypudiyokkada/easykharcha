@@ -10,8 +10,8 @@ const MAX_INGREDIENT_QTY = 100000;
 
 /**
  * The dish form's own validation (Step 22a) — shared by the manual "Add a dish" create and edit
- * sheets. Mirrors validateSellItemDraft/validateStockItem.ts's split: client-side first for a fast,
- * friendly message; the server re-checks everything regardless.
+ * sheets, and by Step 22a2's onboarding dish form. Mirrors validateStockItem.ts's split:
+ * client-side first for a fast, friendly message; the server re-checks everything regardless.
  */
 export function validateDishDraft(
   draft: DishDraft,

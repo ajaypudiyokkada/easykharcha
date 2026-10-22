@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../api/client';
+import type { Business } from '../api/business';
 import type { SellItem, StockItem } from '../api/stock';
 import { useAuth } from '../auth/AuthContext';
 import {
@@ -21,6 +22,9 @@ const sd = strings.dishForm;
 
 type Props = {
   visible: boolean;
+  /** The business this dish belongs to — the caller's own active/onboarding business, since
+   * that's not always `businesses[0]` (e.g. onboarding a second business). */
+  business: Business | undefined;
   onClose: () => void;
   /** Called once the save succeeds, with a toast message to show. */
   onSaved: (message: string) => void;
@@ -35,13 +39,15 @@ type Props = {
 };
 
 /**
- * Settings' "What you sell" add/edit sheet (Step 22a) — one dish, its portion and its full
- * ingredient list, via DishRecipeForm. Create (editingItem null) posts sell-items/; edit PATCHes
- * sell-items/<id>/ — both always land at recipe_status=confirmed, since the form requires at least
- * one valid ingredient before Save does anything.
+ * The dish add/edit sheet (Step 22a), reused by both Settings' "What you sell" and (Step 22a2) the
+ * onboarding wizard's "What you sell" step — one dish, its portion and its full ingredient list,
+ * via DishRecipeForm. Create (editingItem null) posts sell-items/; edit PATCHes sell-items/<id>/ —
+ * both always land at recipe_status=confirmed, since the form requires at least one valid
+ * ingredient before Save does anything.
  */
 export function SellItemSheet({
   visible,
+  business,
   onClose,
   onSaved,
   stockItems,
@@ -49,8 +55,7 @@ export function SellItemSheet({
   editingItem,
   existingItems,
 }: Props) {
-  const { authedFetch, businesses } = useAuth();
-  const business = businesses[0];
+  const { authedFetch } = useAuth();
 
   const [draft, setDraft] = useState<DishDraft>(EMPTY_DISH_DRAFT);
   const [errors, setErrors] = useState<ReturnType<typeof validateDishDraft>>({});

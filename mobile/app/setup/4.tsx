@@ -1,24 +1,16 @@
 import { Redirect, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError, type RowError } from '../../src/api/client';
-import type { SellItem, StarterPack } from '../../src/api/stock';
+import type { SellItem, StarterPack, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { groupItems } from '../../src/forms/groupItems';
-import { itemDraftStorage } from '../../src/forms/itemDraftStorage';
-import {
-  EMPTY_SELL_ITEM_DRAFT,
-  SellItemForm,
-  type SellItemDraft,
-} from '../../src/forms/SellItemForm';
-import { validateSellItemDraft } from '../../src/forms/validateSellItem';
-import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { sellItemLabel } from '../../src/labels';
+import { SellItemSheet } from '../../src/screens/SellItemSheet';
 import { strings } from '../../src/strings';
 import {
-  Banner,
   BottomActionBar,
   Body,
   Checkbox,
@@ -36,6 +28,7 @@ import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
 const s4 = strings.setup.step4;
+const sd = strings.dishForm;
 
 export default function SetupStepFour() {
   const router = useRouter();
@@ -49,84 +42,34 @@ export default function SetupStepFour() {
   const [starterErrors, setStarterErrors] = useState<Record<string, string>>({});
 
   const [items, setItems] = useState<SellItem[] | null>(null);
-  const [addFieldErrors, setAddFieldErrors] = useState<ReturnType<typeof validateSellItemDraft>>(
-    {},
-  );
-  const [addFormError, setAddFormError] = useState<string | null>(null);
+  const [stockItems, setStockItems] = useState<StockItem[] | null>(null);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [editingItem, setEditingItem] = useState<SellItem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [skipping, setSkipping] = useState(false);
 
-  const draftScope = onboardingBusiness ? `sell.${onboardingBusiness.id}` : null;
+  const loadItems = useCallback(() => {
+    if (!onboardingBusiness) return;
+    authedFetch<SellItem[]>(`/businesses/${onboardingBusiness.id}/sell-items/`)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [onboardingBusiness, authedFetch]);
 
   useEffect(() => {
     if (!onboardingBusiness) return;
     authedFetch<StarterPack>(`/starter-packs/${onboardingBusiness.business_type}/`)
       .then(setStarterPack)
       .catch(() => setStarterPack({ stock_items: [], sell_items: [] }));
-    authedFetch<SellItem[]>(`/businesses/${onboardingBusiness.id}/sell-items/`)
-      .then(setItems)
-      .catch(() => setItems([]));
+    authedFetch<StockItem[]>(`/businesses/${onboardingBusiness.id}/stock-items/`)
+      .then((stock) => setStockItems(stock.filter((item) => !item.shared)))
+      .catch(() => setStockItems([]));
+    loadItems();
     // Fetches once for the business this screen is onboarding.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingBusiness?.id, onboardingBusiness?.business_type]);
-
-  const instant = useInstantAdd<SellItem, SellItemDraft>({
-    items: items ?? [],
-    setItems: (updater) => setItems((current) => updater(current ?? [])),
-    emptyDraft: EMPTY_SELL_ITEM_DRAFT,
-    toOptimistic: (draft) => ({
-      id: 0,
-      name: draft.name.trim(),
-      selling_price: draft.sellingPrice.trim(),
-      portion_label: draft.portionLabel.trim(),
-      recipe_status: 'none',
-      ingredients: [],
-      group: draft.group.trim(),
-      active: true,
-      created_at: new Date().toISOString(),
-    }),
-    save: async (draft) => {
-      const results = await authedFetch<SellItem[]>(
-        `/businesses/${onboardingBusiness!.id}/sell-items/bulk/`,
-        {
-          method: 'POST',
-          body: {
-            items: [
-              {
-                name: draft.name.trim(),
-                selling_price: draft.sellingPrice.trim(),
-                portion_label: draft.portionLabel.trim() || undefined,
-                group: draft.group.trim() || undefined,
-              },
-            ],
-          },
-        },
-      );
-      return results[0];
-    },
-  });
-
-  useEffect(() => {
-    if (!draftScope) return;
-    itemDraftStorage.load<SellItemDraft>(draftScope).then((saved) => {
-      if (saved) instant.setDraftState(saved);
-    });
-    // Only on mount for this business.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftScope]);
-
-  useEffect(() => {
-    if (!draftScope) return;
-    const isEmpty = JSON.stringify(instant.draft) === JSON.stringify(EMPTY_SELL_ITEM_DRAFT);
-    if (isEmpty) {
-      itemDraftStorage.clear(draftScope);
-    } else {
-      itemDraftStorage.save(draftScope, instant.draft);
-    }
-  }, [draftScope, instant.draft]);
 
   if (status === 'bootstrapping') {
     return (
@@ -147,31 +90,7 @@ export default function SetupStepFour() {
 
   const label = sellItemLabel(business.business_type);
   const allItems = items ?? [];
-  const existingGroups = [...new Set(allItems.map((item) => item.group).filter(Boolean))];
   const addedGroups = groupItems(allItems);
-
-  async function handleAdd() {
-    setAddFormError(null);
-    const errors = validateSellItemDraft(instant.draft, allItems);
-    setAddFieldErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    try {
-      await instant.add();
-      setAddFieldErrors({});
-      setToast(s4.addedToast);
-      if (draftScope) await itemDraftStorage.clear(draftScope);
-    } catch (err) {
-      if (err instanceof ApiError && err.rowErrors && err.rowErrors[0]) {
-        setAddFormError(err.rowErrors[0].message);
-      } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
-        setAddFormError(s4.errors.network);
-      } else if (err instanceof ApiError) {
-        setAddFormError(err.message || s4.errors.generic);
-      } else {
-        setAddFormError(s4.errors.generic);
-      }
-    }
-  }
 
   async function handleRemove(item: SellItem) {
     setItems((current) => (current ?? []).filter((i) => i.id !== item.id));
@@ -366,13 +285,21 @@ export default function SetupStepFour() {
             renderItem={(item) => {
               return (
                 <View style={[styles.itemRow, twoColumns ? styles.itemRowHalf : null]}>
-                  <View style={styles.itemRowCopy}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={item.name}
+                    onPress={() => {
+                      setEditingItem(item);
+                      setSheetVisible(true);
+                    }}
+                    style={styles.itemRowCopy}
+                  >
                     <Body style={styles.itemRowName}>{item.name}</Body>
                     <Small style={styles.itemRowMeta}>
                       ₹{item.selling_price}
                       {item.portion_label ? ` · ${item.portion_label}` : ''}
                     </Small>
-                  </View>
+                  </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`${s4.remove} ${item.name}`}
@@ -391,26 +318,32 @@ export default function SetupStepFour() {
       <View style={styles.field}>
         <Body style={styles.sectionLabel}>{s4.addOwn(label)}</Body>
 
-        {addFormError ? <Banner kind="error">{addFormError}</Banner> : null}
-        <SellItemForm
-          value={instant.draft}
-          onChange={instant.setDraft}
-          errors={addFieldErrors}
-          businessType={business.business_type}
-          existingGroups={existingGroups}
-          nameFieldRef={instant.nameFieldRef}
-        />
-
         <Pressable
           accessibilityRole="button"
-          onPress={handleAdd}
-          style={[styles.addButton, instant.saving ? styles.addButtonDisabled : null]}
-          disabled={instant.saving}
+          onPress={() => {
+            setEditingItem(null);
+            setSheetVisible(true);
+          }}
+          style={styles.addButton}
         >
-          <Body style={styles.addButtonText}>{s4.addItem}</Body>
+          <Body style={styles.addButtonText}>{sd.addDish(label)}</Body>
         </Pressable>
       </View>
 
+      <SellItemSheet
+        visible={sheetVisible}
+        business={business}
+        editingItem={editingItem}
+        existingItems={allItems}
+        stockItems={stockItems}
+        onStockItemAdded={(item) => setStockItems((current) => [item, ...(current ?? [])])}
+        onClose={() => setSheetVisible(false)}
+        onSaved={(message) => {
+          setSheetVisible(false);
+          setToast(message);
+          loadItems();
+        }}
+      />
       <Toast message={toast} onHide={() => setToast(null)} />
     </Screen>
   );
@@ -454,9 +387,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colours.primary,
     borderRadius: radii.pill,
-  },
-  addButtonDisabled: {
-    opacity: 0.6,
   },
   addButtonText: {
     color: colours.primary,

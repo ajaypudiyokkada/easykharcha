@@ -3,13 +3,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { SellItem, StockItem } from '../../src/api/stock';
-import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { groupItems } from '../../src/forms/groupItems';
-import { EMPTY_SELL_ITEM_DRAFT, SellItemForm } from '../../src/forms/SellItemForm';
-import { validateSellItemDraft } from '../../src/forms/validateSellItem';
-import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { sellItemLabel } from '../../src/labels';
 import { SellItemSheet } from '../../src/screens/SellItemSheet';
 import { strings } from '../../src/strings';
@@ -17,7 +13,6 @@ import { formatRupees } from '../../src/format';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
   AppShell,
-  Banner,
   Body,
   Button,
   EmptyState,
@@ -50,10 +45,6 @@ export default function SellItemsSettings() {
   const [needsIngredientsOnly, setNeedsIngredientsOnly] = useState(
     params.filter === 'needs_ingredients',
   );
-  const [addFieldErrors, setAddFieldErrors] = useState<ReturnType<typeof validateSellItemDraft>>(
-    {},
-  );
-  const [addFormError, setAddFormError] = useState<string | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<SellItem | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -88,42 +79,6 @@ export default function SellItemsSettings() {
     setOpenedEditFromParam(true);
   }, [params.edit, items, openedEditFromParam]);
 
-  const instant = useInstantAdd<SellItem, typeof EMPTY_SELL_ITEM_DRAFT>({
-    items: items ?? [],
-    setItems: (updater) => setItems((current) => updater(current ?? [])),
-    emptyDraft: EMPTY_SELL_ITEM_DRAFT,
-    toOptimistic: (draft) => ({
-      id: 0,
-      name: draft.name.trim(),
-      selling_price: draft.sellingPrice.trim(),
-      portion_label: draft.portionLabel.trim(),
-      recipe_status: 'none',
-      ingredients: [],
-      group: draft.group.trim(),
-      active: true,
-      created_at: new Date().toISOString(),
-    }),
-    save: async (draft) => {
-      const results = await authedFetch<SellItem[]>(
-        `/businesses/${business!.id}/sell-items/bulk/`,
-        {
-          method: 'POST',
-          body: {
-            items: [
-              {
-                name: draft.name.trim(),
-                selling_price: draft.sellingPrice.trim(),
-                portion_label: draft.portionLabel.trim() || undefined,
-                group: draft.group.trim() || undefined,
-              },
-            ],
-          },
-        },
-      );
-      return results[0];
-    },
-  });
-
   if (status === 'bootstrapping') {
     return (
       <View style={styles.loading}>
@@ -146,29 +101,6 @@ export default function SellItemsSettings() {
 
   const label = sellItemLabel(business?.business_type ?? '');
   const all = items ?? [];
-  const existingGroups = [...new Set(all.map((item) => item.group).filter(Boolean))];
-
-  async function handleAdd() {
-    setAddFormError(null);
-    const errors = validateSellItemDraft(instant.draft, all);
-    setAddFieldErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-    try {
-      await instant.add();
-      setAddFieldErrors({});
-      setToast(ss.addedToast);
-    } catch (err) {
-      if (err instanceof ApiError && err.rowErrors && err.rowErrors[0]) {
-        setAddFormError(err.rowErrors[0].message);
-      } else if (err instanceof ApiError && (err.kind === 'network' || err.kind === 'timeout')) {
-        setAddFormError(ss.errors.network);
-      } else if (err instanceof ApiError) {
-        setAddFormError(err.message || ss.errors.generic);
-      } else {
-        setAddFormError(ss.errors.generic);
-      }
-    }
-  }
 
   const matchingSearch = all.filter((item) =>
     item.name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -192,24 +124,6 @@ export default function SellItemsSettings() {
             setSheetVisible(true);
           }}
         />
-
-        <View style={styles.addSection}>
-          {addFormError ? <Banner kind="error">{addFormError}</Banner> : null}
-          <SellItemForm
-            value={instant.draft}
-            onChange={instant.setDraft}
-            errors={addFieldErrors}
-            businessType={business?.business_type ?? ''}
-            existingGroups={existingGroups}
-            nameFieldRef={instant.nameFieldRef}
-          />
-          <Button
-            label={ss.addItem(label)}
-            variant="primary"
-            onPress={handleAdd}
-            loading={instant.saving}
-          />
-        </View>
 
         <TextField
           label={ss.searchPlaceholder}
@@ -236,8 +150,11 @@ export default function SellItemsSettings() {
         ) : filtered.length === 0 ? (
           <EmptyState
             title={ss.empty}
-            buttonLabel={ss.addItem(label)}
-            onPress={() => instant.nameFieldRef.current?.focus()}
+            buttonLabel={sd.addDish(label)}
+            onPress={() => {
+              setEditingItem(null);
+              setSheetVisible(true);
+            }}
           />
         ) : (
           <>
@@ -283,6 +200,7 @@ export default function SellItemsSettings() {
 
       <SellItemSheet
         visible={sheetVisible}
+        business={business}
         editingItem={editingItem}
         existingItems={all}
         stockItems={stockItems}
@@ -341,13 +259,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colours.background,
-  },
-  addSection: {
-    gap: spacing.sm,
-    borderWidth: 2,
-    borderColor: colours.mint,
-    borderRadius: radii.md,
-    padding: spacing.md,
   },
   section: {
     gap: spacing.sm,
