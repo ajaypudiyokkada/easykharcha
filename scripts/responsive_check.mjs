@@ -51,6 +51,66 @@ const MIN_INPUT_TEXT = 16;
 const MIN_TEXT_BOX = 40;
 const MAX_CHARS_IN_NARROW_BOX = 6;
 
+// ---------- screen tiering (--screen <name>, --list) ----------
+
+/** Every route/sheet name this script checks, grouped by which session it needs — kept here as a
+ * flat manifest (rather than derived from the route/sheet arrays built further down, which only
+ * exist after session setup) so `--list` and the tier-skipping below don't need a session built
+ * first. `main()` asserts this stays in sync with the real arrays the first time it builds them. */
+const SCREEN_MANIFEST = {
+  none: ['landing', 'login', 'signup', 'not-found', 'offline-login'],
+  owner: [
+    'setup-1', 'setup-2', 'setup-3', 'setup-4', 'setup-5', 'setup-6', 'setup-done', 'home-owner',
+    'buy', 'buy-detail', 'stock', 'stock-detail', 'reports', 'reports-30d', 'sales', 'wastage',
+    'alerts', 'alert-detail', 'team', 'team-detail', 'settings', 'settings-business',
+    'settings-brand', 'settings-stock', 'settings-sell', 'settings-alerts', 'count', 'counts',
+    'counts-detail',
+    'sheet-profile', 'sheet-record-purchase', 'sheet-record-purchase-edit', 'sheet-record-wastage',
+    'dialog-delete-purchase', 'dialog-delete-wastage', 'sheet-more-menu', 'sheet-prepare-reminder',
+    'sheet-edit-stock-item', 'sheet-edit-sell-item', 'sheet-add-team-member', 'sheet-reset-pin',
+    'dialog-remove-member', 'sheet-record-sales', 'dialog-delete-sales',
+  ],
+  helper: ['home-helper', 'wastage-helper', 'sheet-profile-helper', 'sheet-record-wastage-helper'],
+  headchef: ['home-headchef'],
+};
+
+// Only these owner screens need seedLateClosingCountAndWastage's seeded closing count/wastage/
+// sale/alert data to render something real — every other owner screen is fine (and much faster to
+// reach) against the plain wizard-only state `--screen` builds for a single-screen run.
+const SEED_DEPENDENT_SCREENS = ['alert-detail', 'sheet-prepare-reminder', 'dialog-delete-wastage', 'dialog-delete-sales'];
+
+function tierFor(screen) {
+  for (const [tier, names] of Object.entries(SCREEN_MANIFEST)) {
+    if (names.includes(screen)) return tier;
+  }
+  return null;
+}
+
+function parseResponsiveArgs() {
+  const args = process.argv.slice(2);
+  const screenIdx = args.indexOf('--screen');
+  return {
+    screen: screenIdx !== -1 ? args[screenIdx + 1] : null,
+    list: args.includes('--list'),
+    selfTest: args.includes('--self-test'),
+  };
+}
+
+function listResponsiveScreens() {
+  console.log('Responsive screens (npm run responsive -- --screen <name>):\n');
+  for (const [tier, names] of Object.entries(SCREEN_MANIFEST)) {
+    console.log(`  ${tier}:`);
+    for (const name of names) console.log(`    ${name}`);
+  }
+  console.log(
+    '\n--screen builds only the session tier that screen needs (none/owner/helper/headchef) — ' +
+      'a\n"none" screen needs no signup at all; an "owner" screen still needs the wizard-built ' +
+      'business\nbut skips the helper/head-chef logins and (except for alert-detail/sheet-' +
+      'prepare-reminder/\ndialog-delete-wastage/dialog-delete-sales) the seeded closing count/' +
+      'wastage/sale/alert data.',
+  );
+}
+
 function findChrome() {
   const candidates = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -555,7 +615,8 @@ async function buildOwnerSession(page) {
   // Step 10: the opening stock count, so /counts and /counts/[id] have a real page to check too.
   await keepOpeningCountNotLate(page);
   await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-  await waitForText(page, 'Count stock');
+  // Step 23d: this business's first-ever count is framed "Starting stock", not "Count stock".
+  await waitForText(page, 'Starting stock');
   await typeInto(page, 'Rice quantity', '5');
   await typeInto(page, 'Fresh Paneer quantity', '5');
   await clickButton(page, 'Save count');
@@ -854,38 +915,72 @@ async function checkSheetAtWidth(page, sheet, width, failures) {
 }
 
 async function main() {
+  const { screen, list } = parseResponsiveArgs();
+  if (list) {
+    listResponsiveScreens();
+    return;
+  }
+  const tier = screen ? tierFor(screen) : null;
+  if (screen && !tier) {
+    fail(`unknown screen "${screen}" — run with --list to see valid names.`);
+  }
+  const needOwner = !screen || tier !== 'none';
+  const needHelper = !screen || tier === 'helper';
+  const needHeadChef = !screen || tier === 'headchef';
+  const needSeed = !screen || SEED_DEPENDENT_SCREENS.includes(screen);
+
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
   const landingServer = await ensureLandingServer(8082);
   const failures = [];
+  const timings = [];
+
+  async function timedCheck(name, fn) {
+    const t0 = Date.now();
+    await fn();
+    timings.push([name, (Date.now() - t0) / 1000]);
+  }
 
   try {
-    const setupPage = await browser.newPage();
-    // Tall so every field is reachable without scrolling — the sticky bottom bar and
-    // react-native-web's internal ScrollView both make driving a short viewport unreliable (see
-    // flow.mjs, which hit the same thing first).
-    await setupPage.setViewport({ width: 390, height: 3000 });
-    console.log('Setting up an Owner session with real wizard data...');
-    const {
-      tokens: ownerTokens,
-      ownerName,
-      helperMobile,
-      helperPin,
-      headChefMobile,
-      headChefPin,
-      purchasePath,
-      stockItemPath,
-      countDetailPath,
-      teamMemberPath,
-    } = await buildOwnerSession(setupPage);
-    await setupPage.close();
-    console.log('Setting up a Helper session...');
-    const helperTokens = await buildHelperSession(browser, helperMobile, helperPin);
-    console.log('Setting up a Head chef session...');
-    const headChefTokens = await buildHeadChefSession(browser, headChefMobile, headChefPin);
-    console.log('Seeding a late closing count, wastage and alert-triggering data...');
-    const { alertKey } = await seedLateClosingCountAndWastage(ownerTokens.access);
-    const alertDetailPath = `/alerts/${encodeURIComponent(alertKey)}`;
+    let ownerTokens, ownerName, helperMobile, helperPin, headChefMobile, headChefPin;
+    let purchasePath = '', stockItemPath = '', countDetailPath = '', teamMemberPath = '';
+    let helperTokens = null, headChefTokens = null;
+    let alertDetailPath = '';
+
+    if (needOwner) {
+      const setupPage = await browser.newPage();
+      // Tall so every field is reachable without scrolling — the sticky bottom bar and
+      // react-native-web's internal ScrollView both make driving a short viewport unreliable (see
+      // flow.mjs, which hit the same thing first).
+      await setupPage.setViewport({ width: 390, height: 3000 });
+      console.log('Setting up an Owner session with real wizard data...');
+      ({
+        tokens: ownerTokens,
+        ownerName,
+        helperMobile,
+        helperPin,
+        headChefMobile,
+        headChefPin,
+        purchasePath,
+        stockItemPath,
+        countDetailPath,
+        teamMemberPath,
+      } = await buildOwnerSession(setupPage));
+      await setupPage.close();
+    }
+    if (needHelper) {
+      console.log('Setting up a Helper session...');
+      helperTokens = await buildHelperSession(browser, helperMobile, helperPin);
+    }
+    if (needHeadChef) {
+      console.log('Setting up a Head chef session...');
+      headChefTokens = await buildHeadChefSession(browser, headChefMobile, headChefPin);
+    }
+    if (needOwner && needSeed) {
+      console.log('Seeding a late closing count, wastage and alert-triggering data...');
+      const { alertKey } = await seedLateClosingCountAndWastage(ownerTokens.access);
+      alertDetailPath = `/alerts/${encodeURIComponent(alertKey)}`;
+    }
     console.log('Sessions ready. Checking every route at every width...\n');
 
     const noAuthRoutes = [
@@ -936,25 +1031,39 @@ async function main() {
     ];
     const headChefRoutes = [{ name: 'home-headchef', url: `${APP_URL}/home` }];
 
-    const noAuthPage = await browser.newPage();
-    // All pages in this browser share the same profile/localStorage per origin — without this, the
-    // Owner's tokens (still there from buildOwnerSession) would silently redirect /login straight to
-    // /home before its content ever rendered, hiding whatever this page actually needs to check.
-    await noAuthPage.evaluateOnNewDocument(() => localStorage.clear());
-    for (const route of noAuthRoutes) {
-      for (const width of WIDTHS) {
-        console.log(`  ${route.name.padEnd(14)} ${width}px`);
-        await checkRouteAtWidth(noAuthPage, route, width, failures);
-      }
+    // Sanity net: catches this manifest ever drifting from the real route/sheet names below.
+    const allNoAuthNames = noAuthRoutes.map((r) => r.name);
+    if (JSON.stringify(allNoAuthNames) !== JSON.stringify(SCREEN_MANIFEST.none)) {
+      fail(`SCREEN_MANIFEST.none is out of sync with noAuthRoutes: ${allNoAuthNames}`);
     }
-    await noAuthPage.close();
+
+    if (!screen || tier === 'none') {
+      const noAuthPage = await browser.newPage();
+      // All pages in this browser share the same profile/localStorage per origin — without this,
+      // the Owner's tokens (still there from buildOwnerSession) would silently redirect /login
+      // straight to /home before its content ever rendered, hiding whatever this page needs to check.
+      await noAuthPage.evaluateOnNewDocument(() => localStorage.clear());
+      for (const route of screen ? noAuthRoutes.filter((r) => r.name === screen) : noAuthRoutes) {
+        for (const width of WIDTHS) {
+          console.log(`  ${route.name.padEnd(14)} ${width}px`);
+          await timedCheck(`${route.name}@${width}`, () =>
+            checkRouteAtWidth(noAuthPage, route, width, failures),
+          );
+        }
+      }
+      await noAuthPage.close();
+    }
 
     const ownerPage = await browser.newPage();
-    await injectTokens(ownerPage, ownerTokens);
-    for (const route of ownerRoutes) {
-      for (const width of WIDTHS) {
-        console.log(`  ${route.name.padEnd(14)} ${width}px`);
-        await checkRouteAtWidth(ownerPage, route, width, failures);
+    if (needOwner) {
+      await injectTokens(ownerPage, ownerTokens);
+      for (const route of screen ? ownerRoutes.filter((r) => r.name === screen) : ownerRoutes) {
+        for (const width of WIDTHS) {
+          console.log(`  ${route.name.padEnd(14)} ${width}px`);
+          await timedCheck(`${route.name}@${width}`, () =>
+            checkRouteAtWidth(ownerPage, route, width, failures),
+          );
+        }
       }
     }
 
@@ -1101,22 +1210,24 @@ async function main() {
         },
       },
     ];
-    for (const sheet of ownerSheets) {
-      for (const width of sheet.widths ?? SHEET_WIDTHS) {
-        console.log(`  ${sheet.name.padEnd(26)} ${width}px`);
-        await checkSheetAtWidth(ownerPage, sheet, width, failures);
+    const allOwnerNames = [...ownerRoutes.map((r) => r.name), ...ownerSheets.map((s) => s.name)];
+    if (JSON.stringify(allOwnerNames) !== JSON.stringify(SCREEN_MANIFEST.owner)) {
+      fail(`SCREEN_MANIFEST.owner is out of sync with ownerRoutes/ownerSheets: ${allOwnerNames}`);
+    }
+
+    if (needOwner) {
+      for (const sheet of screen ? ownerSheets.filter((s) => s.name === screen) : ownerSheets) {
+        for (const width of sheet.widths ?? SHEET_WIDTHS) {
+          console.log(`  ${sheet.name.padEnd(26)} ${width}px`);
+          await timedCheck(`${sheet.name}@${width}`, () =>
+            checkSheetAtWidth(ownerPage, sheet, width, failures),
+          );
+        }
       }
     }
     await ownerPage.close();
 
     const helperPage = await browser.newPage();
-    await injectTokens(helperPage, helperTokens);
-    for (const route of helperRoutes) {
-      for (const width of WIDTHS) {
-        console.log(`  ${route.name.padEnd(14)} ${width}px`);
-        await checkRouteAtWidth(helperPage, route, width, failures);
-      }
-    }
     const helperSheets = [
       {
         name: 'sheet-profile-helper',
@@ -1135,25 +1246,57 @@ async function main() {
         },
       },
     ];
-    for (const sheet of helperSheets) {
-      for (const width of sheet.widths ?? SHEET_WIDTHS) {
-        console.log(`  ${sheet.name.padEnd(26)} ${width}px`);
-        await checkSheetAtWidth(helperPage, sheet, width, failures);
+    const allHelperNames = [...helperRoutes.map((r) => r.name), ...helperSheets.map((s) => s.name)];
+    if (JSON.stringify(allHelperNames) !== JSON.stringify(SCREEN_MANIFEST.helper)) {
+      fail(`SCREEN_MANIFEST.helper is out of sync with helperRoutes/helperSheets: ${allHelperNames}`);
+    }
+    if (needHelper) {
+      await injectTokens(helperPage, helperTokens);
+      for (const route of screen ? helperRoutes.filter((r) => r.name === screen) : helperRoutes) {
+        for (const width of WIDTHS) {
+          console.log(`  ${route.name.padEnd(14)} ${width}px`);
+          await timedCheck(`${route.name}@${width}`, () =>
+            checkRouteAtWidth(helperPage, route, width, failures),
+          );
+        }
+      }
+      for (const sheet of screen ? helperSheets.filter((s) => s.name === screen) : helperSheets) {
+        for (const width of sheet.widths ?? SHEET_WIDTHS) {
+          console.log(`  ${sheet.name.padEnd(26)} ${width}px`);
+          await timedCheck(`${sheet.name}@${width}`, () =>
+            checkSheetAtWidth(helperPage, sheet, width, failures),
+          );
+        }
       }
     }
     await helperPage.close();
 
     const headChefPage = await browser.newPage();
-    await injectTokens(headChefPage, headChefTokens);
-    for (const route of headChefRoutes) {
-      for (const width of WIDTHS) {
-        console.log(`  ${route.name.padEnd(14)} ${width}px`);
-        await checkRouteAtWidth(headChefPage, route, width, failures);
+    const allHeadChefNames = headChefRoutes.map((r) => r.name);
+    if (JSON.stringify(allHeadChefNames) !== JSON.stringify(SCREEN_MANIFEST.headchef)) {
+      fail(`SCREEN_MANIFEST.headchef is out of sync with headChefRoutes: ${allHeadChefNames}`);
+    }
+    if (needHeadChef) {
+      await injectTokens(headChefPage, headChefTokens);
+      for (const route of screen ? headChefRoutes.filter((r) => r.name === screen) : headChefRoutes) {
+        for (const width of WIDTHS) {
+          console.log(`  ${route.name.padEnd(14)} ${width}px`);
+          await timedCheck(`${route.name}@${width}`, () =>
+            checkRouteAtWidth(headChefPage, route, width, failures),
+          );
+        }
       }
     }
     await headChefPage.close();
 
     console.log('');
+    if (timings.length > 1) {
+      console.log('Slowest route/sheet x width checks:');
+      for (const [n, s] of [...timings].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+        console.log(`  ${s.toFixed(1)}s  ${n}`);
+      }
+      console.log('');
+    }
     if (failures.length === 0) {
       console.log('All responsive checks passed — no failures at any width.');
     } else {

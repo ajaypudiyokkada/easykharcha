@@ -225,6 +225,15 @@ not built yet.
   nudge. Fixed a pre-existing bug found while on this: `counts/gap.py`'s gap window matched sales by
   each count's shifted `business_date` instead of its plain local calendar date, which could miss a
   late-night count's same-night sales once day_starts_hour was non-zero.
+- **Step 23e — Test tiering.** `smoke.py --area <name>` (repeatable), `flow.mjs --only <scenario>`,
+  `responsive_check.mjs --screen <name>` (both `--list`-able) — each runs only its own checks plus
+  the minimum shared setup; default (no flag) is unchanged, full behaviour. New `npm run verify`
+  (check + a smoke area), `verify:ui` (+ one flow scenario + one screen), `verify:full` (everything,
+  user-run before deploys — see CLAUDE.md's tiers). Fixed a pre-existing bug: `responsive_check.mjs`'s
+  `buildOwnerSession` still expected "Count stock" (Step 23d renamed it "Starting stock"). Found but
+  didn't fix (pre-existing, confirmed against the untouched original, unrelated to this step): the
+  full default `npm run flow` fails reproducibly in this dev environment right after landing's
+  hero-link click, immediately followed by wizard's own fresh `/signup` navigation.
 
 ## Permission table
 
