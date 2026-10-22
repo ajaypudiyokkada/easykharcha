@@ -1356,7 +1356,89 @@ async function checkSectorChangeFlow(page) {
   await logoutFromAnywhere(page);
 }
 
+// ---------- scenario tiering (--only <name>, --list) ----------
+
+/** Every scenario in the order main() runs them. "chain" scenarios share one Owner business/
+ * session built up step by step (signup, wizard, team, purchase, counts, ...) — picking one with
+ * `--only` runs every earlier chain scenario first, in order, to rebuild the state it needs, then
+ * stops right after it (skipping every later chain scenario and every "solo" one). A "solo"
+ * scenario signs up its own fresh business and never touches the shared chain state, so `--only`
+ * on one of those runs nothing else at all. */
+const FLOW_SCENARIOS = [
+  { name: 'landing', kind: 'solo' },
+  { name: 'wizard', kind: 'chain' },
+  { name: 'purchase', kind: 'chain' },
+  { name: 'opening-count', kind: 'chain' },
+  { name: 'resume-wizard', kind: 'solo' },
+  { name: 'skip-wizard', kind: 'solo' },
+  { name: 'helper-today', kind: 'chain' },
+  { name: 'headchef-today', kind: 'chain' },
+  { name: 'manager-home', kind: 'chain' },
+  { name: 'count-review', kind: 'chain' },
+  { name: 'settings', kind: 'chain' },
+  { name: 'sales', kind: 'chain' },
+  { name: 'alerts-profile', kind: 'chain' },
+  { name: 'team-management', kind: 'chain' },
+  { name: 'reports', kind: 'chain' },
+  { name: 'reports-empty', kind: 'solo' },
+  { name: 'pincode', kind: 'solo' },
+  { name: 'sector-change', kind: 'solo' },
+  { name: 'step10-screens', kind: 'solo' },
+  { name: 'step12-screens', kind: 'chain' },
+  { name: 'step13-screens', kind: 'chain' },
+];
+
+function parseFlowArgs() {
+  const args = process.argv.slice(2);
+  const onlyIdx = args.indexOf('--only');
+  return {
+    only: onlyIdx !== -1 ? args[onlyIdx + 1] : null,
+    list: args.includes('--list'),
+  };
+}
+
+function listFlowScenarios() {
+  console.log('Flow scenarios (npm run flow -- --only <name>):\n');
+  for (const s of FLOW_SCENARIOS) console.log(`  ${s.name.padEnd(18)} (${s.kind})`);
+  console.log(
+    '\nA "chain" scenario shares one Owner business/session with every chain scenario before it ' +
+      'in\nthis list — picking one runs those first, in order, then stops right after it. A ' +
+      '"solo"\nscenario builds its own business and runs completely on its own.',
+  );
+}
+
+/** True if `name`'s scenario must run on the way to `only` (or always, when `only` is unset). */
+function shouldRunFlowScenario(name, only) {
+  if (!only) return true;
+  const self = FLOW_SCENARIOS.find((s) => s.name === name);
+  if (self.kind === 'solo') return name === only;
+  const target = FLOW_SCENARIOS.find((s) => s.name === only);
+  if (!target || target.kind === 'solo') return false;
+  const chainOrder = FLOW_SCENARIOS.filter((s) => s.kind === 'chain').map((s) => s.name);
+  return chainOrder.indexOf(name) <= chainOrder.indexOf(only);
+}
+
+const flowTimings = [];
+
+/** Times one scenario's body and records it for the end-of-run "slowest scenarios" summary —
+ * wraps the body, nothing inside it changes. */
+async function timed(name, fn) {
+  const t0 = Date.now();
+  await fn();
+  flowTimings.push([name, (Date.now() - t0) / 1000]);
+}
+
 async function main() {
+  const { only, list } = parseFlowArgs();
+  if (list) {
+    listFlowScenarios();
+    return;
+  }
+  if (only && !FLOW_SCENARIOS.some((s) => s.name === only)) {
+    fail(`unknown flow scenario "${only}" — run with --list to see valid names.`);
+  }
+  const shouldRun = (name) => shouldRunFlowScenario(name, only);
+
   const browser = await puppeteer.launch({ executablePath: findChrome(), headless: true });
   await mkdir(SCREEN_DIR, { recursive: true });
   // Reuses an already-running landing server (e.g. `npm run dev`) if one answers at that port;
@@ -1368,19 +1450,28 @@ async function main() {
     const page = await browser.newPage();
     page.on('pageerror', (err) => fail(`a JS error occurred in the page: ${err}`));
 
-    await captureStep8cScreens(page);
-
     // Tall enough that every field on every wizard screen fits without scrolling — sidesteps both
     // react-native-web's internally-scrolling ScrollView (native scrollIntoView is a no-op for it)
-    // and the sticky BottomActionBar occluding whatever sits directly above it.
+    // and the sticky BottomActionBar occluding whatever sits directly above it. Set unconditionally
+    // (not just for the "landing" scenario right below) — every later scenario assumes it too.
     await page.setViewport({ width: 390, height: 3000 });
 
-    await checkRootSignedOutToLanding(page);
+    if (shouldRun('landing')) {
+      await timed('landing', async () => {
+        await captureStep8cScreens(page);
+        await checkRootSignedOutToLanding(page);
+      });
+    }
 
+    let name, mobile, password;
+    let helperMobile, helperPin, headChefMobile, headChefPin, managerMobile, managerPassword;
+
+    if (shouldRun('wizard'))
+      await timed('wizard', async () => {
     // === User 1: full flow through all six wizard steps ===
-    const name = 'Flow Test';
-    const mobile = randomMobile();
-    const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+    name = 'Flow Test';
+    mobile = randomMobile();
+    password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
     await signup(page, name, mobile, password);
     await waitForText(page, 'Account created. Log in to set up your business.');
@@ -1549,17 +1640,26 @@ async function main() {
     await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await waitForPath(page, '/home');
     console.log('OK — opening "/" again while signed in and onboarded lands on /home.');
+      });
 
+    if (shouldRun('purchase'))
+      await timed('purchase', async () => {
     // === Step 9: Owner records, views, and deletes a purchase; Stock reflects the new price ===
     await checkPurchaseFlow(page);
+      });
 
+    if (shouldRun('opening-count'))
+      await timed('opening-count', async () => {
     // === Step 10: Owner submits the opening stock count (baseline for the Helper's closing count
     // further down, once the wizard-created Helper/Head chef accounts below exist) ===
     await checkOwnerOpeningCount(page);
 
     await logoutFromAnywhere(page);
     console.log('OK — logging out lands on /login.');
+      });
 
+    if (shouldRun('resume-wizard'))
+      await timed('resume-wizard', async () => {
     // === User 2: stop after step 1, confirm resume at /setup/2 ===
     const name2 = 'Resume Test';
     const mobile2 = randomMobile();
@@ -1579,7 +1679,10 @@ async function main() {
     console.log('OK — leaving mid-wizard after step 1 and logging back in resumes at /setup/2.');
 
     await logoutFromAnywhere(page);
+      });
 
+    if (shouldRun('skip-wizard'))
+      await timed('skip-wizard', async () => {
     // === User 3: fill steps 1-2, skip 3, 4, 5 and 6, confirm the "Still to do" / checklist / resume ===
     const name3 = 'Skip Test';
     const mobile3 = randomMobile();
@@ -1620,41 +1723,93 @@ async function main() {
     console.log('OK — clicking Continue on "What you buy" resumes at /setup/3.');
 
     await logoutFromAnywhere(page);
+      });
 
     // === Step 10: the Helper (from User 1) counts stock, confirms an unusual value, and records
     // wastage; the Head chef (also from User 1) sees the team Today screen; the Owner reviews both
     // counts and the Helper's wastage entry, then deletes it ===
+    if (shouldRun('helper-today'))
+      await timed('helper-today', async () => {
     await checkHelperTodayFlow(page, helperMobile, helperPin);
     await logoutFromAnywhere(page);
+      });
+    if (shouldRun('headchef-today'))
+      await timed('headchef-today', async () => {
     await checkHeadChefTodayFlow(page, headChefMobile, headChefPin);
     await logoutFromAnywhere(page);
+      });
+    if (shouldRun('manager-home'))
+      await timed('manager-home', async () => {
     await checkManagerHomeFlow(page, managerMobile, managerPassword);
     await logoutFromAnywhere(page);
+      });
+    if (shouldRun('count-review'))
+      await timed('count-review', async () => {
     await checkCountReviewAndWastageFlow(page, mobile, password);
+      });
+    if (shouldRun('settings'))
+      await timed('settings', async () => {
     await checkSettingsFlow(page);
+      });
+    if (shouldRun('sales'))
+      await timed('sales', async () => {
     await checkSalesFlow(page);
+      });
+    if (shouldRun('alerts-profile'))
+      await timed('alerts-profile', async () => {
     await checkAlertsAndProfileFlow(page, name);
+      });
+    if (shouldRun('team-management'))
+      await timed('team-management', async () => {
     // checkAlertsAndProfileFlow ends by logging out via the profile sheet — back in as Owner for
     // the team management scenario below.
     await login(page, mobile, password);
     await waitForPath(page, '/home');
     await checkTeamManagementFlow(page, 'Helper One');
     await logoutFromAnywhere(page);
+      });
 
+    if (shouldRun('reports'))
+      await timed('reports', async () => {
     await login(page, mobile, password);
     await waitForPath(page, '/home');
     await checkReportsFlow(page);
     await captureStep16Screens(page);
     await logoutFromAnywhere(page);
+      });
+    if (shouldRun('reports-empty'))
+      await timed('reports-empty', async () => {
     await checkReportsEmptyStateFlow(page);
+      });
+    if (shouldRun('pincode'))
+      await timed('pincode', async () => {
     await checkPincodeLocationFlow(page);
+      });
+    if (shouldRun('sector-change'))
+      await timed('sector-change', async () => {
     await checkSectorChangeFlow(page);
+      });
 
+    if (shouldRun('step10-screens'))
+      await timed('step10-screens', async () => {
     await captureStep10Screens(page);
+      });
+    if (shouldRun('step12-screens'))
+      await timed('step12-screens', async () => {
     await captureStep12Screens(page, mobile, password);
+      });
+    if (shouldRun('step13-screens'))
+      await timed('step13-screens', async () => {
     await captureStep13Screens(page, mobile, password, 'Chef Rahul');
+      });
 
-    console.log('\nAll flow checks passed.');
+    console.log(only ? `\nOK — scenario "${only}" passed.` : '\nAll flow checks passed.');
+    if (flowTimings.length > 1) {
+      console.log('\nSlowest scenarios:');
+      for (const [n, s] of [...flowTimings].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+        console.log(`  ${s.toFixed(1)}s  ${n}`);
+      }
+    }
   } catch (err) {
     const page = (await browser.pages()).at(-1);
     if (page) {

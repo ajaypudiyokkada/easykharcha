@@ -12,13 +12,15 @@ web first. Development is on Windows with PowerShell — every command and scrip
   with a named command — `npm run check`, `python scripts/smoke.py`, a `manage.py` subcommand. Never
   `node -e`, never a PowerShell here-string, never an inline throwaway script.
 - **Light checking only.** No test suites. The only checks are: lint, type check, formatting, Django's
-  own `check` and `makemigrations --check`, the smoke script (backend API) and flow script (browser
-  end-to-end) that prove the frontend and backend work together, the pwa-check script that proves the
-  offline/service-worker behaviour, and the responsive script that checks every screen at seven widths.
-  Keep it fast.
-- **Run only the checks the change needs.** Backend/permission-only change: `npm run check` + smoke.
-  UI change: add the flow once. Run responsive only when layouts change. Never run a suite twice unless
-  something failed. If a step runs past about 45 minutes, stop and report what is done.
+  own `check` and `makemigrations --check`, the smoke script (backend API, `--area` filterable) and
+  flow script (browser end-to-end, `--only` one scenario) that prove the frontend and backend work
+  together, the pwa-check script that proves the offline/service-worker behaviour, and the responsive
+  script (`--screen` one screen) that checks every screen at seven widths. Keep it fast. Tier 1 every
+  step: `npm run check` + `verify` for the changed area (e.g. `npm run verify -- --area counts`).
+  Tier 2 when screens change: `verify:ui` with ONE scenario and ONE screen (e.g. `npm run verify:ui
+  -- --area counts --flow today-card --screen count-stock`). Never run `verify:full`, full flow, or
+  full responsive during a step; the user runs `verify:full` before deploys. Never run a suite twice
+  unless it failed. If a step runs past 45 minutes, stop and report.
 - **Don't add scope.** Build exactly what the current step asks for, nothing it doesn't mention. Flag
   gaps and open questions instead of guessing past them.
 - **Git workflow.** See the "Git workflow" section below — every step goes through GitHub now, never

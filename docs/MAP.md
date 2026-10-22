@@ -254,10 +254,18 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 - `npm run dev` → `scripts/dev.mjs` — starts backend + Expo web together
 - `npm run check` → `check:backend` (ruff via `scripts/check_backend.ps1`) + `check:mobile` (eslint/prettier/tsc)
-- `npm run smoke` → `scripts/smoke.py` — backend-only API walk, one user story per feature
-- `npm run flow` → `scripts/flow.mjs` — full browser walk: signup→wizard→all 4 roles→core actions
-- `npm run responsive` → `scripts/responsive_check.mjs` — every route + sheet/dialog at 7 widths
+- `npm run smoke` → `scripts/smoke.py` — backend-only API walk, one user story per feature; Step 23e's
+  `--area <name>` (counts/stock/sales/alerts/wastage/permissions/onboarding/reports, repeatable) runs
+  only that area's checks — each `check_*_flow` is fully self-contained, so this is a safe subset
+- `npm run flow` → `scripts/flow.mjs` — full browser walk: signup→wizard→all 4 roles→core actions;
+  Step 23e's `--only <scenario>` (`--list` to see names) runs one scenario — a "solo" one stands alone,
+  a "chain" one reruns every earlier chain scenario first (shared Owner session) then stops
+- `npm run responsive` → `scripts/responsive_check.mjs` — every route + sheet/dialog at 7 widths; Step
+  23e's `--screen <name>` (`--list` to see names) builds only the session tier that screen needs
 - `npm run responsive:selftest` — proves the clipping check can actually fail
+- `npm run verify -- --area X` / `verify:ui -- --area X --flow Y --screen Z` / `verify:full` →
+  `scripts/verify.mjs` — Step 23e's tiers: check+smoke-area, +one flow scenario+one responsive screen,
+  or the full check+smoke+flow+responsive (user-run before deploys, not during a step)
 - `npm run icons` → `scripts/generate_icons.mjs` — favicon/PWA icon set from `docs/images/ek_logo_icon.png`
 - `npm run pwa-check` → `scripts/pwa_check.mjs` — manifest/service-worker sanity check
 - `npm run check:sector-copy` → `scripts/check_sector_copy.py` — Step 22: fails if food wording

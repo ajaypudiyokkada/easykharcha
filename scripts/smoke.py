@@ -113,6 +113,7 @@ recipe_status=none, and skip_existing makes repeating the same bulk call a no-op
 on the names it already created.
 """
 
+import argparse
 import binascii
 import json
 import os
@@ -120,6 +121,7 @@ import random
 import sqlite3
 import struct
 import sys
+import time
 import urllib.error
 import urllib.request
 import zlib
@@ -4632,29 +4634,100 @@ def check_pincode_geo_flow() -> None:
     print("OK — a business update with a mismatched state/pincode is rejected.")
 
 
+# Every check, in the suite's original order — the default (no --area) runs exactly this list, same
+# as before --area existed. check_health() is always run first regardless of --area; it's the
+# "is the server even up" sanity ping, not tied to any one area.
+ALL_CHECKS = [
+    check_permission_table,
+    check_auth_flow,
+    check_business_flow,
+    check_sector_change_flow,
+    check_stock_flow,
+    check_item_setup_flow,
+    check_starter_pack_flow,
+    check_sector_units_flow,
+    check_team_flow,
+    check_team_reset_flow,
+    check_purchase_flow,
+    check_count_and_wastage_flow,
+    check_daily_counts_flow,
+    check_first_count_flow,
+    check_settings_flow,
+    check_sales_and_gap_flow,
+    check_alerts_flow,
+    check_expiry_alerts_flow,
+    check_reports_flow,
+    check_pincode_geo_flow,
+]
+
+# One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
+# "counts" — the stock gap is a counts concept, computed over a sales window). --area is additive:
+# `--area counts --area sales` runs the union, each check at most once, in ALL_CHECKS order.
+AREA_CHECKS: dict[str, list] = {
+    "counts": [
+        check_count_and_wastage_flow,
+        check_daily_counts_flow,
+        check_first_count_flow,
+        check_sales_and_gap_flow,
+    ],
+    "stock": [
+        check_stock_flow,
+        check_item_setup_flow,
+        check_starter_pack_flow,
+        check_sector_units_flow,
+        check_purchase_flow,
+        check_settings_flow,
+        check_sector_change_flow,
+    ],
+    "sales": [check_sales_and_gap_flow],
+    "alerts": [check_alerts_flow, check_expiry_alerts_flow],
+    "wastage": [check_count_and_wastage_flow],
+    "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
+    "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
+    "reports": [check_reports_flow],
+}
+
+
+def _checks_for(areas: list[str]) -> list:
+    seen = set()
+    checks = []
+    for area in areas:
+        for check in AREA_CHECKS[area]:
+            if check not in seen:
+                seen.add(check)
+                checks.append(check)
+    return checks
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="EasyKharcha backend API smoke suite")
+    parser.add_argument(
+        "--area",
+        action="append",
+        choices=sorted(AREA_CHECKS),
+        help="Run only this area's checks (repeatable, e.g. --area counts --area sales). "
+        "Default: every check.",
+    )
+    args = parser.parse_args()
+
     check_health()
-    check_permission_table()
-    check_auth_flow()
-    check_business_flow()
-    check_sector_change_flow()
-    check_stock_flow()
-    check_item_setup_flow()
-    check_starter_pack_flow()
-    check_sector_units_flow()
-    check_team_flow()
-    check_team_reset_flow()
-    check_purchase_flow()
-    check_count_and_wastage_flow()
-    check_daily_counts_flow()
-    check_first_count_flow()
-    check_settings_flow()
-    check_sales_and_gap_flow()
-    check_alerts_flow()
-    check_expiry_alerts_flow()
-    check_reports_flow()
-    check_pincode_geo_flow()
-    print("\nAll smoke checks passed.")
+    checks = _checks_for(args.area) if args.area else ALL_CHECKS
+    if args.area:
+        print(f"Area(s) {', '.join(args.area)}: {len(checks)} check(s) to run.\n")
+
+    suite_start = time.monotonic()
+    durations = []
+    for check in checks:
+        check_start = time.monotonic()
+        check()
+        durations.append((check.__name__, time.monotonic() - check_start))
+    total = time.monotonic() - suite_start
+
+    print(f"\nAll smoke checks passed. ({total:.1f}s total)")
+    if len(durations) > 1:
+        print("\nSlowest checks:")
+        for name, duration in sorted(durations, key=lambda d: -d[1])[:5]:
+            print(f"  {duration:6.1f}s  {name}")
 
 
 if __name__ == "__main__":
