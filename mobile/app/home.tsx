@@ -445,6 +445,23 @@ function OwnerHome() {
           </View>
         ) : null}
 
+        {isOwner && today?.is_first_count ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.setupCard}
+            onPress={() => router.push('/count')}
+          >
+            <View style={styles.setupIcon}>
+              <Icon name="info" size={20} colour={colours.card} />
+            </View>
+            <View style={styles.entryMain}>
+              <Body style={styles.attentionTitle}>{s.firstCountTitle}</Body>
+              <Small style={styles.entryMeta}>{s.firstCountBody}</Small>
+            </View>
+            <Icon name="chevronRight" size={20} colour={colours.muted} />
+          </Pressable>
+        ) : null}
+
         {isOwner && needsIngredientsCount > 0 ? (
           <Pressable
             accessibilityRole="button"

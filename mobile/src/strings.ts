@@ -175,6 +175,8 @@ export const strings = {
     allAlerts: 'All alerts',
     needsIngredientsTitle: (n: number) => `Add ingredients to ${n} ${n === 1 ? 'dish' : 'dishes'}`,
     needsIngredientsBody: "So we can compare what's sold with what's used.",
+    firstCountTitle: 'Count your starting stock (about 2 minutes)',
+    firstCountBody: 'Count what you can — the rest can wait.',
   },
   buy: {
     title: 'Purchases',
@@ -293,6 +295,10 @@ export const strings = {
   },
   count: {
     title: 'Count stock',
+    startingStockTitle: 'Starting stock',
+    startingStockIntro:
+      'This is your starting point. Count what you can and skip the rest. You can count the ' +
+      'others any time.',
     progress: (done: number, total: number) => `${done} of ${total} counted`,
     progressHint: 'Count or skip every item before saving.',
     quantityLabel: (name: string) => `${name} quantity`,
@@ -301,6 +307,7 @@ export const strings = {
     skipped: 'Skipped',
     save: 'Save count',
     saveReason: 'Count or skip the remaining items before saving.',
+    saveReasonFirst: 'Count at least one item before saving.',
     guardTitle: 'That looks very different from usual.',
     guardQuestion: (value: string, unit: string) => `Is ${value} ${unit} right?`,
     guardYes: (value: string, unit: string) => `Yes, ${value} ${unit} is right`,

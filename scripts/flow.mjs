@@ -58,6 +58,7 @@ const STEP21D_SCREEN_DIR = 'docs/screens/step21d';
 const STEP22A_SCREEN_DIR = 'docs/screens/step22a';
 const STEP23A_SCREEN_DIR = 'docs/screens/step23a';
 const STEP23B_SCREEN_DIR = 'docs/screens/step23b';
+const STEP23D_SCREEN_DIR = 'docs/screens/step23d';
 
 function findChrome() {
   const candidates = [
@@ -424,13 +425,22 @@ async function checkOwnerOpeningCount(page) {
   await page.screenshot({ path: `${STEP23B_SCREEN_DIR}/today-opening-due-390.png` });
 
   await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-  await waitForText(page, 'Count stock');
+  // Step 23d: this is the business's first count ever, framed as "Starting stock".
+  await waitForText(page, 'Starting stock');
+  await waitForText(page, 'This is your starting point.');
+  await mkdir(STEP23D_SCREEN_DIR, { recursive: true });
+  await page.screenshot({ path: `${STEP23D_SCREEN_DIR}/starting-stock-390.png` });
+  console.log('OK — the first-ever count is framed as "Starting stock", with its own intro card.');
+
+  // All three counted (not left partial) — the closing count below needs a baseline for every
+  // item, including Fresh Paneer, to compute its own gap later in the flow; Save-with-partial-
+  // items is covered by the smoke suite's own dedicated first-count check instead.
   await typeInto(page, 'Rice quantity', '5');
   await typeInto(page, 'Cooking oil quantity', '5');
   await typeInto(page, 'Fresh Paneer quantity', '5');
   await clickButton(page, 'Save count');
   await waitForText(page, 'Count saved. Thank you.');
-  console.log('OK — the Owner submits the opening stock count.');
+  console.log('OK — the Owner submits the first-ever (opening) stock count.');
 
   await clickButton(page, 'Back to Today');
   await waitForPath(page, '/home');
@@ -677,7 +687,8 @@ async function captureStep10Screens(page) {
 
     await keepOpeningCountNotLate(page);
     await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
-    await waitForText(page, 'Count stock');
+    // Step 23d: this business's first-ever count is framed as "Starting stock", not "Count stock".
+    await waitForText(page, 'Starting stock');
     await typeInto(page, 'Rice quantity', '5');
     await clickButton(page, 'Save count');
     await waitForText(page, 'Count saved. Thank you.');

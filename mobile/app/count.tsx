@@ -167,8 +167,9 @@ export default function Count() {
     updateLine(itemId, { countedQty: String(next), skipped: false });
   }
 
+  const isFirstCount = Boolean(today?.is_first_count);
   const doneCount = items.filter((item) => isDone(lines[item.id] ?? emptyLine())).length;
-  const allDone = items.length > 0 && doneCount === items.length;
+  const allDone = items.length > 0 && (isFirstCount ? doneCount >= 1 : doneCount === items.length);
 
   async function submit(extraConfirmIds?: Set<number>) {
     if (!business || !countType) return;
@@ -181,11 +182,14 @@ export default function Count() {
         confirm_ids: Array.from(confirmSet),
         lines: items.map((item) => {
           const line = lines[item.id] ?? emptyLine();
-          const state = line.skipped ? 'skipped' : line.notSure ? 'not_sure' : 'counted';
+          // A first count can be saved with items left untouched — they're sent as skipped
+          // rather than left out, so the server still sees every active item addressed.
+          const skipped = line.skipped || (isFirstCount && !isDone(line));
+          const state = skipped ? 'skipped' : line.notSure ? 'not_sure' : 'counted';
           return {
             stock_item: item.id,
             state,
-            counted_qty: line.skipped ? null : line.countedQty.trim() || null,
+            counted_qty: skipped ? null : line.countedQty.trim() || null,
           };
         }),
       };
@@ -243,7 +247,7 @@ export default function Count() {
   return (
     <AppShell active="home">
       <Screen maxWidth={HOME_CONTENT_WIDTH}>
-        <Heading level={1}>{s.title}</Heading>
+        <Heading level={1}>{isFirstCount ? s.startingStockTitle : s.title}</Heading>
         <Body style={styles.subtitle}>
           {sectorCopyFor(business?.business_type ?? '').countHelp}
         </Body>
@@ -285,6 +289,11 @@ export default function Count() {
             {resumedDraft ? <Small style={styles.resumedNote}>{s.draftResumed}</Small> : null}
             {countType === 'closing' && today?.closing.missing_opening ? (
               <Small style={styles.resumedNote}>{s.missingOpeningNote}</Small>
+            ) : null}
+            {isFirstCount ? (
+              <View style={styles.introCard}>
+                <Body style={styles.introText}>{s.startingStockIntro}</Body>
+              </View>
             ) : null}
             <View style={styles.progressCard}>
               <Small style={styles.progressLabel}>{s.progress(doneCount, items.length)}</Small>
@@ -361,7 +370,11 @@ export default function Count() {
               );
             })}
 
-            {!allDone ? <Small style={styles.errorText}>{s.saveReason}</Small> : null}
+            {!allDone ? (
+              <Small style={styles.errorText}>
+                {isFirstCount ? s.saveReasonFirst : s.saveReason}
+              </Small>
+            ) : null}
             <Button
               label={s.save}
               variant="primary"
@@ -406,6 +419,16 @@ const styles = StyleSheet.create({
   },
   resumedNote: {
     color: colours.muted,
+  },
+  introCard: {
+    borderWidth: 2,
+    borderColor: colours.mint,
+    borderRadius: radii.lg,
+    backgroundColor: colours.mint,
+    padding: spacing.lg,
+  },
+  introText: {
+    color: colours.text,
   },
   progressCard: {
     borderWidth: 2,

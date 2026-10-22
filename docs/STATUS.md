@@ -217,6 +217,14 @@ not built yet.
   `missing_opening: true`. New `GET counts/today/` (`today_status.status_for`, shared with `today/`)
   exposes locked/due/late/done + `next_action`, driving a real two-row Today card on Home and
   routing `/count` straight to whichever count is next.
+- **Step 23d — First-ever count: "Starting stock".** A business's first count ever (`counts/
+  business_day.py`'s `has_any_count`) is always an opening, stored through the same API/rules as
+  Step 23b, but never late and Save enables at 1+ item counted (the rest submit as skipped, same
+  "every item addressed" server rule). `opening_late`/`closing_late` don't fire until a first count
+  exists. `/count` frames it "Starting stock" with an intro card; Home gets a matching Owner-only
+  nudge. Fixed a pre-existing bug found while on this: `counts/gap.py`'s gap window matched sales by
+  each count's shifted `business_date` instead of its plain local calendar date, which could miss a
+  late-night count's same-night sales once day_starts_hour was non-zero.
 
 ## Permission table
 

@@ -86,6 +86,9 @@ export type NextCountAction = 'opening' | 'closing' | 'none';
  * (Home's richer call, which adds wastage/team/alerts fields around the same opening/closing). */
 export type TodayStatus = {
   business_date: string;
+  /** Step 23d: true until the business has ever submitted a count — gates the Count screen's
+   * "Starting stock" framing and Home's first-count nudge. */
+  is_first_count: boolean;
   opening: {
     state: OpeningCountState;
     due_by: string;
@@ -115,5 +118,5 @@ export type TodayStatus = {
  * fields. */
 export type CountsTodayStatus = Pick<
   TodayStatus,
-  'business_date' | 'opening' | 'closing' | 'next_action'
+  'business_date' | 'is_first_count' | 'opening' | 'closing' | 'next_action'
 >;

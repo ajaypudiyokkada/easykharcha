@@ -2725,7 +2725,11 @@ def check_daily_counts_flow() -> None:
     print("OK — counts/today/ reports closing locked and next_action opening.")
 
     # Scenario B: both deadlines already passed (hour 0, always in the past for "today"), no
-    # opening done — the closing is now allowed, and recorded with missing_opening true.
+    # opening done — Step 23d: this business has never counted anything, so its first count can
+    # only ever be an opening; "opening missed" never applies to it, so the closing stays rejected
+    # no matter how late in the day it is. (Before Step 23d, this closing would have been let
+    # through as the business's first count, flagged missing_opening — that shortcut no longer
+    # applies to a first count at all; see counts/business_day.py's has_any_count.)
     status, body, _ = request(
         "PATCH",
         f"/businesses/{business_id}/settings/",
@@ -2738,11 +2742,11 @@ def check_daily_counts_flow() -> None:
     status, body, _ = request(
         "GET", f"/businesses/{business_id}/counts/today/", token=owner_access
     )
-    if status != 200 or body["closing"]["missing_opening"] is not True:
+    if status != 200 or body["closing"]["state"] != "locked" or body["closing"]["missing_opening"]:
         fail(
-            f"daily counts flow: expected closing.missing_opening True once opening is missed, got {status} ({body})"
+            f"daily counts flow: expected closing still locked, missing_opening False, got {status} ({body})"
         )
-    print("OK — counts/today/ flags missing_opening once the opening is missed.")
+    print("OK — counts/today/ keeps closing locked for a first-ever count, deadline or not.")
 
     status, body, _ = request(
         "POST",
@@ -2750,32 +2754,48 @@ def check_daily_counts_flow() -> None:
         {"type": "closing", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
         token=owner_access,
     )
-    if status != 201:
-        fail(f"daily counts flow: missed-opening closing expected 201, got {status} ({body})")
-    if body.get("missing_opening") is not True:
-        fail(f"daily counts flow: expected missing_opening True on the saved count, got {body}")
-    print("OK — a closing with the opening missed succeeds, flagged missing_opening.")
+    if status != 409 or body.get("error", {}).get("code") != "opening_required":
+        fail(
+            f"daily counts flow: closing as a first count expected 409 opening_required, got {status} ({body})"
+        )
+    print("OK — a closing still can't be a business's first-ever count, however late.")
 
-    # a duplicate closing for the same date is still rejected, unchanged.
-    status, body, _ = request(
-        "POST",
-        f"/businesses/{business_id}/counts/",
-        {"type": "closing", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
-        token=owner_access,
-    )
-    if status != 409:
-        fail(f"daily counts flow: duplicate closing expected 409, got {status} ({body})")
-
-    # a late opening after the fact is still allowed — there's no reverse-order restriction.
+    # the first count itself: an opening, saved un-late despite the deadline having passed.
     status, body, _ = request(
         "POST",
         f"/businesses/{business_id}/counts/",
         {"type": "opening", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
         token=owner_access,
     )
-    if status != 201:
-        fail(f"daily counts flow: opening after closing expected 201, got {status} ({body})")
-    print("OK — a duplicate closing is rejected; a late opening after closing still succeeds.")
+    if status != 201 or body["is_late"] is not False:
+        fail(
+            f"daily counts flow: first-ever opening expected 201 and is_late False, got {status} ({body})"
+        )
+
+    # a duplicate opening for the same date is rejected, unchanged.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "opening", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
+        token=owner_access,
+    )
+    if status != 409:
+        fail(f"daily counts flow: duplicate opening expected 409, got {status} ({body})")
+
+    # the closing now goes through normally — opening is done for today, and this is no longer a
+    # first count, so the deadline applies for real.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": tea_id, "state": "skipped"}]},
+        token=owner_access,
+    )
+    if status != 201 or body["missing_opening"] is not False or body["is_late"] is not True:
+        fail(
+            "daily counts flow: second closing expected 201, missing_opening False, is_late True, "
+            f"got {status} ({body})"
+        )
+    print("OK — a duplicate opening is rejected; the closing then saves normally, genuinely late.")
 
     # Scenario C: day_starts_hour shifts the business date — verified against the same formula,
     # since there's no way to control the wall clock from here.
@@ -2801,7 +2821,8 @@ def check_daily_counts_flow() -> None:
         )
     print("OK — day_starts_hour shifts the business date per the same formula.")
 
-    # Scenario D: opening_late and closing_late fire and dismiss independently.
+    # Scenario D: a brand-new business gets no late alerts before its first count; once that first
+    # (opening) count is in, the normal closing_late rule resumes and dismisses like any other alert.
     _, owner2_access, _ = signup_and_login("Daily Counts Alerts Owner")
     status, body, _ = request(
         "POST",
@@ -2813,6 +2834,15 @@ def check_daily_counts_flow() -> None:
         fail(f"daily counts flow: second business create expected 201, got {status} ({body})")
     business2_id = body["id"]
     status, body, _ = request(
+        "POST",
+        f"/businesses/{business2_id}/stock-items/bulk/",
+        {"items": [{"name": "Coffee", "unit": "kg"}]},
+        token=owner2_access,
+    )
+    if status != 201:
+        fail(f"daily counts flow: second stock bulk create expected 201, got {status} ({body})")
+    coffee_id = body[0]["id"]
+    status, body, _ = request(
         "PATCH",
         f"/businesses/{business2_id}/settings/",
         {"count_deadline_hour": 0, "closing_count_hour": 0},
@@ -2820,31 +2850,158 @@ def check_daily_counts_flow() -> None:
     )
     if status != 200:
         fail(f"daily counts flow: second settings patch expected 200, got {status} ({body})")
+
+    # both deadlines are already passed, but this business has never counted anything — Step 23d:
+    # no opening_late/closing_late before a first count, no matter how late in the day it is.
+    status, body, _ = request(
+        "GET", f"/businesses/{business2_id}/counts/today/", token=owner2_access
+    )
+    if status != 200 or body["is_first_count"] is not True or body["opening"]["state"] == "late":
+        fail(f"daily counts flow: expected is_first_count True and opening not late, got {body}")
     status, body, _ = request(
         "GET", f"/businesses/{business2_id}/alerts/", token=owner2_access
     )
-    if status != 200 or set(a["type"] for a in body["results"]) != {"opening_late", "closing_late"}:
+    if status != 200 or set(a["type"] for a in body["results"]) & {"opening_late", "closing_late"}:
         fail(
-            f"daily counts flow: expected opening_late and closing_late, got {status} ({body})"
+            f"daily counts flow: expected no late alerts before a first count, got {status} ({body})"
         )
-    by_type2 = {a["type"]: a for a in body["results"]}
+    print("OK — no opening_late/closing_late before the business's first count, however late.")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business2_id}/counts/",
+        {"type": "opening", "lines": [{"stock_item": coffee_id, "state": "skipped"}]},
+        token=owner2_access,
+    )
+    if status != 201 or body["is_late"] is not False:
+        fail(f"daily counts flow: first count expected 201 and is_late False, got {status} ({body})")
+    print("OK — the first count itself saves as a normal, on-time opening count.")
+
+    # today's opening is now done, so only closing_late — the normal, second-count-onward rule —
+    # can fire; it dismisses the same way any other alert does.
+    status, body, _ = request(
+        "GET", f"/businesses/{business2_id}/alerts/", token=owner2_access
+    )
+    if status != 200 or set(a["type"] for a in body["results"]) != {"closing_late"}:
+        fail(
+            f"daily counts flow: expected only closing_late once the first count is in, got {status} ({body})"
+        )
+    closing_late_key = body["results"][0]["key"]
     status, _, _ = request(
         "POST",
         f"/businesses/{business2_id}/alerts/check/",
-        {"key": by_type2["opening_late"]["key"]},
+        {"key": closing_late_key},
         token=owner2_access,
     )
     if status != 204:
-        fail(f"daily counts flow: check opening_late expected 204, got {status}")
+        fail(f"daily counts flow: check closing_late expected 204, got {status}")
     status, body, _ = request(
         "GET", f"/businesses/{business2_id}/alerts/", token=owner2_access
     )
-    remaining_types = {a["type"] for a in body["results"]}
-    if remaining_types != {"closing_late"}:
-        fail(
-            f"daily counts flow: expected only closing_late left after checking opening_late, got {remaining_types}"
-        )
-    print("OK — opening_late and closing_late fire and dismiss independently.")
+    if any(a["type"] == "closing_late" for a in body["results"]):
+        fail(f"daily counts flow: expected closing_late gone after check, got {body['results']}")
+    print("OK — closing_late fires normally after the first count, and dismisses.")
+
+
+def check_first_count_flow() -> None:
+    # Step 23d: the very first count a business ever submits can save with only some items
+    # counted (the rest skipped), and is never late no matter how far past the deadline it is —
+    # the second count onward goes back to the normal, every-item, on-time-or-late rules.
+    _, owner_access, _ = signup_and_login("First Count Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "First Count Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"first count flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    # both deadlines already passed for "today" — proves the first count ignores them entirely.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/settings/",
+        {"day_starts_hour": 0, "count_deadline_hour": 0, "closing_count_hour": 0},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"first count flow: settings patch expected 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": n, "unit": "kg"} for n in ("A", "B", "C", "D", "E")]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"first count flow: stock bulk create expected 201, got {status} ({body})")
+    ids_by_name = {item["name"]: item["id"] for item in body}
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/today/", token=owner_access
+    )
+    if status != 200 or body["is_first_count"] is not True or body["opening"]["state"] == "late":
+        fail(f"first count flow: expected is_first_count True and opening not late, got {body}")
+    print("OK — counts/today/ reports is_first_count True and opening not late, deadline or not.")
+
+    # 2 of 5 items counted, the rest explicitly skipped — the server's "every item addressed" rule
+    # is unchanged (skip counts as addressed); the Save-button leniency itself is a frontend-only
+    # affordance, not a backend one.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [
+                {"stock_item": ids_by_name["A"], "state": "counted", "counted_qty": "4"},
+                {"stock_item": ids_by_name["B"], "state": "counted", "counted_qty": "2"},
+                {"stock_item": ids_by_name["C"], "state": "skipped"},
+                {"stock_item": ids_by_name["D"], "state": "skipped"},
+                {"stock_item": ids_by_name["E"], "state": "skipped"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"first count flow: first count (2 of 5) expected 201, got {status} ({body})")
+    if body["is_late"] is not False or body["missing_opening"] is not False:
+        fail(f"first count flow: expected is_late False and missing_opening False, got {body}")
+    print("OK — the first count saves with 2 of 5 items counted, and is never late.")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/", token=owner_access
+    )
+    if status != 200:
+        fail(f"first count flow: stock items list expected 200, got {status} ({body})")
+    by_id = {item["id"]: item for item in body}
+    for name in ("A", "B"):
+        if by_id[ids_by_name[name]]["last_counted_qty"] is None:
+            fail(f"first count flow: expected {name} to show a last_counted_qty, got {body}")
+    for name in ("C", "D", "E"):
+        if by_id[ids_by_name[name]]["last_counted_qty"] is not None:
+            fail(
+                f"first count flow: expected {name} to still show 'not counted yet', got "
+                f"{by_id[ids_by_name[name]]}"
+            )
+    print("OK — Stock shows the 2 counted items and 'not counted yet' for the 3 skipped ones.")
+
+    # the second count (today's closing) is no longer exempt — every item must still be addressed,
+    # and it's genuinely late now that it's not the business's first count.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "closing",
+            "lines": [{"stock_item": ids_by_name[n], "state": "skipped"} for n in "ABCDE"],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"first count flow: second count expected 201, got {status} ({body})")
+    if body["is_late"] is not True or body["missing_opening"] is not False:
+        fail(f"first count flow: expected second count is_late True, missing_opening False, got {body}")
+    print("OK — the second count follows the normal daily rules, including being late.")
 
 
 def check_settings_flow() -> None:
@@ -3378,6 +3535,126 @@ def check_sales_and_gap_flow() -> None:
         fail(f"sales flow: deleted sale still in the list: {ids}")
     print("OK — the Owner soft-deletes a sale and the summary updates.")
 
+    # Step 23d: the gap window is matched against sales using each count's plain local calendar
+    # date (business/counts/gap.py's _local_date, from submitted_at), not StockCount's own
+    # business_date field — which day_starts_hour can shift to the previous calendar day for a
+    # count submitted in the early hours. A Sale's own business_date is always the plain calendar
+    # date (sales/views.py's _business_today), so matching on the shifted field would silently drop
+    # a sale recorded under "today" whenever this test happened to run between midnight and
+    # day_starts_hour. day_starts_hour: 5 here (the real default) deliberately leaves that gap in
+    # place; the window is built from submitted_at either way, so this passes regardless of what
+    # time of day the suite runs — the sale's business_date (today's plain calendar date, computed
+    # the same way sales/views.py does) is what must land inside it, not the count's own
+    # (possibly shifted) business_date.
+    _, gw_owner_access, _ = signup_and_login("Gap Window Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Gap Window Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window business create expected 201, got {status} ({body})")
+    gw_business_id = body["id"]
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{gw_business_id}/settings/",
+        {"day_starts_hour": 5},
+        token=gw_owner_access,
+    )
+    if status != 200:
+        fail(f"sales flow: gap window settings patch expected 200, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gw_business_id}/stock-items/bulk/",
+        {"items": [{"name": "Paneer", "unit": "kg"}]},
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window stock bulk create expected 201, got {status} ({body})")
+    paneer_id = body[0]["id"]
+    combo_id, _ = _create_dish(
+        gw_business_id, gw_owner_access, "Paneer Combo", "150.00", [(paneer_id, "1.5")]
+    )
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gw_business_id}/counts/",
+        {"type": "opening", "lines": [{"stock_item": paneer_id, "state": "counted", "counted_qty": "10"}]},
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window opening count expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gw_business_id}/purchases/",
+        {
+            "supplier_name": "Dairy Co",
+            "purchase_date_time": _now_iso(),
+            "lines": [
+                {"stock_item": paneer_id, "quantity": "5", "unit_price": "50", "line_total": "250"}
+            ],
+        },
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window purchase expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gw_business_id}/wastage/",
+        {"stock_item": paneer_id, "quantity": "1", "reason": "spillage"},
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window wastage expected 201, got {status} ({body})")
+
+    # closing count: Paneer 6 kg -> used_since_last_count = 10 + 5 - 1 - 6 = 8
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gw_business_id}/counts/",
+        {"type": "closing", "lines": [{"stock_item": paneer_id, "state": "counted", "counted_qty": "6"}]},
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window closing count expected 201, got {status} ({body})")
+    gw_closing_id = body["id"]
+
+    # the sale is dated "today" the same way sales/views.py's own _business_today works — not via
+    # the closing count's own (possibly day_starts_hour-shifted) business_date.
+    plain_today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{gw_business_id}/sales/",
+        {
+            "business_date": plain_today,
+            "lines": [{"sell_item": combo_id, "quantity": "2"}],
+        },
+        token=gw_owner_access,
+    )
+    if status != 201:
+        fail(f"sales flow: gap window sale create expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{gw_business_id}/counts/{gw_closing_id}/",
+        token=gw_owner_access,
+    )
+    if status != 200:
+        fail(f"sales flow: gap window count detail expected 200, got {status} ({body})")
+    paneer_line = next(line_ for line_ in body["lines"] if line_["stock_item"] == paneer_id)
+    if paneer_line["gap_status"] != "ok":
+        fail(
+            "sales flow: expected the plain-calendar-dated sale to land inside the gap window "
+            f"regardless of day_starts_hour, got {paneer_line}"
+        )
+    if Decimal(paneer_line["expected_used"]) != Decimal("3"):
+        fail(f"sales flow: expected expected_used 3 (2 combos x 1.5 kg), got {paneer_line}")
+    if Decimal(paneer_line["gap_qty"]) != Decimal("5"):
+        fail(f"sales flow: expected gap_qty 5 (used 8 - expected 3), got {paneer_line}")
+    print("OK — the gap window matches sales by plain calendar date, not the shifted business_date.")
+
 
 def check_alerts_flow() -> None:
     # closing_late + price_rise + wastage_high all live on one business — a submitted opening count
@@ -3425,6 +3702,25 @@ def check_alerts_flow() -> None:
         fail(f"alerts flow: stock bulk create expected 201, got {status} ({body})")
     flour_id = next(i["id"] for i in body if i["name"] == "Flour")
     oil_id = next(i["id"] for i in body if i["name"] == "Cooking Oil")
+
+    # Step 23d: closing_late can't fire for a business that has never counted anything — give it an
+    # opening count for today first (count_deadline_hour: 23 is still hours away, so this isn't
+    # itself late), so the closing_late trip below is about today's missing closing, not the
+    # business's first-ever count.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [
+                {"stock_item": flour_id, "state": "skipped"},
+                {"stock_item": oil_id, "state": "skipped"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"alerts flow: opening count expected 201, got {status} ({body})")
 
     # price_rise: two purchases at 60, then one at 70 — default rate_creep_pct is 10, and
     # (70-60)/60 = 16.67% > 10%
@@ -3851,7 +4147,10 @@ def check_expiry_alerts_flow() -> None:
         "POST",
         f"/businesses/{business_id}/counts/",
         {
-            "type": "closing",
+            # Step 23d: this is the business's first-ever count, which can only be an opening —
+            # expiry_soon only cares about the latest *counted* line for each item, never the
+            # count type, so this is otherwise identical to the "closing" count this used to be.
+            "type": "opening",
             "lines": [
                 {"stock_item": tomatoes_id, "state": "counted", "counted_qty": "4"},
                 {"stock_item": paneer_id, "state": "counted", "counted_qty": "14"},
@@ -3861,7 +4160,7 @@ def check_expiry_alerts_flow() -> None:
         token=owner_access,
     )
     if status != 201:
-        fail(f"expiry flow: closing count expected 201, got {status} ({body})")
+        fail(f"expiry flow: opening count expected 201, got {status} ({body})")
 
     status, body, _ = request(
         "GET", f"/businesses/{business_id}/alerts/", token=owner_access
@@ -4348,6 +4647,7 @@ def main() -> None:
     check_purchase_flow()
     check_count_and_wastage_flow()
     check_daily_counts_flow()
+    check_first_count_flow()
     check_settings_flow()
     check_sales_and_gap_flow()
     check_alerts_flow()

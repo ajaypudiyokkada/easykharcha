@@ -12,11 +12,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount —
   Step 23b's `missing_opening`, CountLine), views.py (`CountsTodayStatusView`'s `counts/today/`;
   `CountListCreateView.post` raises `OpeningRequired` for a closing with no opening unless the
-  opening was missed), business_day.py (`business_date_for` — Step 23b's `day_starts_hour` shift,
-  counts/alerts' `opening_late`/`closing_late` only, not sales/wastage/reports/purchases), today_status.py
-  (`status_for`'s locked/due/late/done + `next_action`, shared with `today/`), serializers.py,
-  gap.py (Step 14's stock-gap math, shared with alerts/), config.py (unusual-value guard constants,
-  `CLOSING_GRACE_HOURS`), exceptions.py (`OpeningRequired`), urls.py
+  opening was missed, and never marks a business's first-ever count late — Step 23d), business_day.py
+  (`business_date_for` — Step 23b's `day_starts_hour` shift, counts/alerts' `opening_late`/
+  `closing_late` only, not sales/wastage/reports/purchases; Step 23d's `has_any_count` gates the
+  first-count framing and suppresses missed-opening/late-count logic until it's true), today_status.py
+  (`status_for`'s locked/due/late/done + `next_action` + `is_first_count`, shared with `today/`),
+  serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/ — Step 23d's `_local_date`
+  matches sales by each count's plain local calendar date, not its shifted business_date), config.py
+  (unusual-value guard constants, `CLOSING_GRACE_HOURS`), exceptions.py (`OpeningRequired`), urls.py
 - `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
 - `stock/` — stock items, dishes (SellItem); models.py (StockItem, SellItem — Step 19 added `group`;
   Step 22's `Unit` has 16 pure-label choices, no backend conversion between any of them; Step 22a
@@ -115,13 +118,16 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `+not-found.tsx` — 404
 - `setup/1.tsx`..`6.tsx` — onboarding wizard: business info, colour, stock, sell items, team, settings
 - `setup/done.tsx` — wizard summary, "still to do" list
-- `home.tsx` — Home: OwnerHome (Owner/Manager) or TodayHome (Head chef/Helper), role-branched
+- `home.tsx` — Home: OwnerHome (Owner/Manager) or TodayHome (Head chef/Helper), role-branched; Step
+  23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`
 - `buy/index.tsx` — Purchases list + today/7-day summary
 - `buy/[id].tsx` — Purchase detail, edit, delete
 - `stock/index.tsx` — Stock list
 - `stock/[id].tsx` — Stock item detail + price chart + recent purchases
 - `wastage.tsx` — Wastage list, record, delete
-- `count.tsx` — Blind stock count form (opening or closing)
+- `count.tsx` — Blind stock count form (opening or closing); Step 23d: a business's first-ever count
+  is framed "Starting stock" with an intro card, Save enables at 1+ item counted (untouched items
+  submit as skipped)
 - `counts/index.tsx` — Count review list (Owner/Manager), remind sheet
 - `counts/[id].tsx` — Count detail: gap-flagged items first, then not-sure/confirmed-unusual, then
   the rest; Owner/Manager lines show expected used and the gap (qty + Rs value), red when flagged; a

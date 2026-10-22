@@ -21,7 +21,7 @@ from businesses.permissions import access_or_403, permissions_for, require_permi
 from purchases.models import PurchaseLine
 from wastage.models import WastageEntry
 
-from .business_day import business_date_for
+from .business_day import business_date_for, has_any_count
 from .config import (
     UNUSUAL_VALUE_LOOKBACK_COUNTS,
     UNUSUAL_VALUE_LOOKBACK_DAYS,
@@ -143,6 +143,7 @@ class CountListCreateView(APIView):
 
         now = timezone.now()
         business_date = business_date_for(business, now)
+        is_first_count = not has_any_count(business)
         if StockCount.objects.filter(
             business=business, count_type=count_type, business_date=business_date
         ).exists():
@@ -218,7 +219,8 @@ class CountListCreateView(APIView):
             raise NeedsConfirmation(needs_confirmation_ids)
 
         deadline_at = deadline_at_for(business, business_date, count_type)
-        is_late = now > deadline_at
+        # Step 23d: a business's first-ever count is allowed at any time of day — never late.
+        is_late = now > deadline_at and not is_first_count
         minutes_late = int((now - deadline_at).total_seconds() // 60) if is_late else 0
 
         with transaction.atomic():
@@ -360,6 +362,7 @@ class TodayView(APIView):
             "opening": today_status["opening"],
             "closing": today_status["closing"],
             "next_action": today_status["next_action"],
+            "is_first_count": today_status["is_first_count"],
             "wastage_entries_today": wastage_qs.count(),
         }
 

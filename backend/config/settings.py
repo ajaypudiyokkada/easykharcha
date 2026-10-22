@@ -164,8 +164,9 @@ RATE_LIMITS = {
     # Step 16's reports smoke checks add 2 more signups (their own business, plus a brand-new one for
     # the empty-state check) on top of the ~17 the suite already made on one shared dev IP — raised
     # from 20 so the full `npm run smoke` run doesn't trip its own rate limit, same reasoning as
-    # login_per_ip below.
-    "signup_per_ip": (30, 3600),
+    # login_per_ip below. Step 23d's first-count and gap-window checks add 2 more owners on top of
+    # that — raised again, 30 -> 32.
+    "signup_per_ip": (32, 3600),
     "login_per_mobile": (10, 900),
     # Stricter than a password login's — same reasoning as PIN_LOGIN_LOCKOUT_THRESHOLD above.
     "login_per_mobile_pin": (5, 900),

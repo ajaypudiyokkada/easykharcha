@@ -3,8 +3,10 @@ same computation for the gap_flagged alert type instead of a second implementati
 
 from datetime import timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.db.models import Sum
+from django.utils import timezone
 
 from businesses.models import Business
 from purchases.models import PurchaseLine
@@ -31,21 +33,33 @@ def unit_cost_for(stock_item) -> Decimal | None:
     return stock_item.usual_price
 
 
-def gap_window(prev_count: StockCount, count: StockCount) -> tuple[object, object]:
-    """The business-date range sales are compared over — from the previous count (its own date, or
-    the day after, depending on whether it was an opening or closing count) to this count (its own
-    date, or the day before). Can end up inverted (e.g. a closing count immediately followed by next
-    morning's opening count) — that's a legitimately empty window, not an error; the caller's date
-    range ends up empty too."""
+def _local_date(business: Business, at):
+    """The plain business-timezone calendar date `at` falls on — the same unshifted notion of
+    "date" a Sale's own business_date is recorded under (sales/views.py's `_business_today`),
+    unlike StockCount.business_date, which is shifted by day_starts_hour."""
+    return timezone.localtime(at, ZoneInfo(business.timezone)).date()
+
+
+def gap_window(
+    business: Business, prev_count: StockCount, count: StockCount
+) -> tuple[object, object]:
+    """The date range sales are compared over — from the previous count (its own date, or the day
+    after, depending on whether it was an opening or closing count) to this count (its own date, or
+    the day before). Built from each count's submitted_at, not its (possibly day_starts_hour-
+    shifted) business_date: a Sale's own business_date is always the plain calendar date it was
+    recorded under, so matching against the counts' plain calendar dates is what keeps a late-night
+    count (e.g. a closing at 01:00, business_date the previous day) lined up with same-night sales
+    recorded under the next calendar date — otherwise that night's sales fall outside the window and
+    expected_used comes out short. Can end up inverted (e.g. a closing count immediately followed by
+    next morning's opening count) — that's a legitimately empty window, not an error; the caller's
+    date range ends up empty too."""
+    prev_date = _local_date(business, prev_count.submitted_at)
+    count_date = _local_date(business, count.submitted_at)
     window_start = (
-        prev_count.business_date
-        if prev_count.count_type == CountType.OPENING
-        else prev_count.business_date + timedelta(days=1)
+        prev_date if prev_count.count_type == CountType.OPENING else prev_date + timedelta(days=1)
     )
     window_end = (
-        count.business_date
-        if count.count_type == CountType.CLOSING
-        else count.business_date - timedelta(days=1)
+        count_date if count.count_type == CountType.CLOSING else count_date - timedelta(days=1)
     )
     return window_start, window_end
 
@@ -102,7 +116,7 @@ def gap_for_line(
     sell_items = [row.sell_item for row in ingredient_rows]
     quantity_by_sell_item_id = {row.sell_item_id: row.quantity for row in ingredient_rows}
 
-    window_start, window_end = gap_window(prev_count, count)
+    window_start, window_end = gap_window(business, prev_count, count)
     window_dates = []
     if window_end >= window_start:
         window_dates = [
