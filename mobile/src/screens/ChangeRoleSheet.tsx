@@ -124,7 +124,9 @@ export function ChangeRoleSheet({ visible, member, onClose, onSaved }: Props) {
               label={s.passwordLabel}
               value={secret}
               onChangeText={setSecret}
-              autoComplete="new-password"
+              // This sets someone else's new password, not the signed-in Owner's own — "off" stops
+              // Chrome/the OS from offering to generate/save it to the Owner's own account.
+              autoComplete="off"
               error={secretError ?? undefined}
             />
           ) : (
