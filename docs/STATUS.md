@@ -243,7 +243,11 @@ not built yet.
   ingredients only, never business data) skips the API on a repeat dish name. Per-business daily caps
   (scans/pages/recipe-dishes) and a whole-deployment monthly cost cap (503 `ai_unavailable` once
   reached); `AiUsage` tracks every real call's cost, read-only in the admin. New `scripts/ai_try_menu.py`
-  for trying real menus by hand; `docs/PRIVACY_NOTES.md` for the future privacy page.
+  for trying real menus by hand; `docs/PRIVACY_NOTES.md` for the future privacy page. Found but
+  didn't fix (pre-existing, confirmed against `--area alerts` alone on the untouched `alerts` app,
+  unrelated to this step): `check_alerts_flow` reliably fails today (2026-10-23) with an unexpected
+  `wastage_high` alert where `gap_flagged` was expected — looks like a date-boundary issue in the gap
+  math, not anything this step touched.
 - **Step 22a2 — Every manual dish create/edit goes through DishRecipeForm.** Onboarding's "What you
   sell" (setup/4) now opens the same `SellItemSheet`/`DishRecipeForm` as Settings instead of the old
   ingredients-free `SellItemForm` + `sell-items/bulk/` quick-add; `SellItemForm.tsx`/
