@@ -9,7 +9,6 @@ import { strings } from '../strings';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 import { Banner, PasswordField, Sheet } from '../ui';
 import { Button } from '../ui/Button';
-import { TextField } from '../ui/TextField';
 import { Small } from '../ui/Text';
 
 const s = strings.changeRoleSheet;
@@ -32,7 +31,6 @@ export function ChangeRoleSheet({ visible, member, onClose, onSaved }: Props) {
 
   const [role, setRole] = useState<Role | ''>('');
   const [secret, setSecret] = useState('');
-  const [secretVisible, setSecretVisible] = useState(false);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [secretError, setSecretError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -42,7 +40,6 @@ export function ChangeRoleSheet({ visible, member, onClose, onSaved }: Props) {
     if (!visible || !member) return;
     setRole((member.role as Role) ?? '');
     setSecret('');
-    setSecretVisible(false);
     setRoleError(null);
     setSecretError(null);
     setFormError(null);
@@ -127,27 +124,18 @@ export function ChangeRoleSheet({ visible, member, onClose, onSaved }: Props) {
               // This sets someone else's new password, not the signed-in Owner's own — "off" stops
               // Chrome/the OS from offering to generate/save it to the Owner's own account.
               autoComplete="off"
+              resetSignal={visible}
               error={secretError ?? undefined}
             />
           ) : (
-            <TextField
+            <PasswordField
+              mode="pin"
               label={s.pinLabel}
               value={secret}
               onChangeText={(value) => setSecret(value.replace(/[^0-9]/g, ''))}
-              secureTextEntry={!secretVisible}
-              keyboardType="number-pad"
               maxLength={6}
+              resetSignal={visible}
               error={secretError ?? undefined}
-              right={
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={secretVisible ? 'Hide PIN' : 'Show PIN'}
-                  onPress={() => setSecretVisible((current) => !current)}
-                  style={styles.secretToggle}
-                >
-                  <Small style={styles.secretToggleText}>{secretVisible ? 'Hide' : 'Show'}</Small>
-                </Pressable>
-              }
             />
           )}
         </View>
@@ -197,17 +185,6 @@ const styles = StyleSheet.create({
   },
   secretNote: {
     color: colours.warning,
-    fontFamily: fonts.bodyExtraBold,
-  },
-  secretToggle: {
-    minWidth: spacing.huge + spacing.xl,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  secretToggleText: {
-    color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
   },
 });

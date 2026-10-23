@@ -365,6 +365,15 @@ not built yet.
   3-business cap partway through (`AI Incomplete Biz` create gets 422 `BUSINESS_LIMIT_REACHED`) — the
   smoke test itself creates one business too many for one user.
 
+- **Step F3 — Show/hide on every password and PIN field.** `PasswordField.tsx` gained `mode`
+  (`'password'`/`'pin'`) and `resetSignal` props, replacing three separate inline PIN show/hide
+  copies (`TeamAddSheet`, `ChangeRoleSheet`, `ResetSecretSheet` now all use it); PIN mode drops the
+  strength meter and forces the numeric keypad. The owner login screen's password field had no
+  show/hide at all before this step — now uses the same component (`showStrength={false}`, since an
+  existing password isn't being chosen). `resetSignal` (a sheet's `visible` prop, or a new per-screen
+  submit counter on `login.tsx`/`signup.tsx`) re-hides the value once the sheet closes/reopens or the
+  form is submitted. No backend change; signup has no confirm-password field to extend.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

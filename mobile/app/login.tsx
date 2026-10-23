@@ -12,9 +12,9 @@ import {
   BottomActionBar,
   Heading,
   MobileField,
+  PasswordField,
   Screen,
   Small,
-  TextField,
   Wordmark,
 } from '../src/ui';
 import { AUTH_CARD_WIDTH, MIN_TOUCH_TARGET } from '../src/ui/constants';
@@ -37,6 +37,7 @@ export default function Login() {
   const [passwordError, setPasswordError] = useState<string | undefined>();
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitCount, setSubmitCount] = useState(0);
 
   if (status === 'bootstrapping') {
     return (
@@ -50,6 +51,7 @@ export default function Login() {
   }
 
   async function handleSubmit() {
+    setSubmitCount((current) => current + 1);
     const nextMobileError = mobile ? undefined : s.errors.mobileRequired;
     const nextPasswordError = password ? undefined : s.errors.passwordRequired;
     setMobileError(nextMobileError);
@@ -103,12 +105,13 @@ export default function Login() {
         error={mobileError}
       />
 
-      <TextField
+      <PasswordField
         label={s.passwordLabel}
         value={password}
         onChangeText={setPassword}
-        secureTextEntry
         autoComplete="current-password"
+        showStrength={false}
+        resetSignal={submitCount}
         error={passwordError}
       />
 

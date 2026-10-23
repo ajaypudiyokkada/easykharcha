@@ -58,6 +58,7 @@ export default function Signup() {
   const [formError, setFormError] = useState<string | null>(null);
   const [showLoginLink, setShowLoginLink] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitCount, setSubmitCount] = useState(0);
 
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
@@ -70,6 +71,7 @@ export default function Signup() {
   }
 
   async function handleSubmit() {
+    setSubmitCount((current) => current + 1);
     const errors = validate();
     setFieldErrors(errors);
     setFormError(null);
@@ -170,6 +172,7 @@ export default function Signup() {
         value={password}
         onChangeText={setPassword}
         autoComplete="new-password"
+        resetSignal={submitCount}
         hint={fieldErrors.password ? undefined : s.passwordHint}
         error={fieldErrors.password}
       />
