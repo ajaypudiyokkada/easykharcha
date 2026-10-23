@@ -4704,6 +4704,51 @@ def _ai_sql_read_one(sql: str, params: tuple):
         conn.close()
 
 
+def check_ai_provider_signature() -> None:
+    """No network, no API key: builds the exact kwargs backend/ai/provider/anthropic_provider.py's
+    _get_raw sends to the installed anthropic SDK's Messages.create, then checks every kwarg name
+    against inspect.signature(...) of that real method. Fails on any kwarg the installed SDK doesn't
+    accept — the regression this guards against is an SDK upgrade silently dropping or renaming a
+    parameter (as it did with `temperature` in anthropic 2.x) that only shows up once a real call is
+    made against the live API."""
+    import inspect
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    import anthropic
+
+    from ai import prompts
+
+    kwargs = dict(
+        model="claude-x",
+        max_tokens=100,
+        system=[{"type": "text", "text": "x", "cache_control": {"type": "ephemeral"}}],
+        tools=[prompts.menu_tool()],
+        tool_choice={"type": "tool", "name": prompts.MENU_TOOL_NAME},
+        messages=[{"role": "user", "content": "x"}],
+    )
+
+    sig = inspect.signature(anthropic.resources.messages.Messages.create)
+    accepts_any_kwarg = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+    unknown = [] if accepts_any_kwarg else [k for k in kwargs if k not in sig.parameters]
+    if unknown:
+        fail(
+            f"ai provider signature: anthropic {anthropic.__version__}'s Messages.create does not "
+            f"accept {unknown} — update backend/ai/provider/anthropic_provider.py"
+        )
+    print(
+        f"OK — anthropic {anthropic.__version__}'s Messages.create accepts every kwarg the real "
+        "provider sends."
+    )
+
+
 def check_ai_flow() -> None:
     """AI_FAKE-only (the dev server's default) — never touches the real Anthropic API. Covers the
     whole menu-scan job lifecycle, both schema-validation outcomes (fallback recovery and persistent
@@ -5108,6 +5153,7 @@ ALL_CHECKS = [
     check_expiry_alerts_flow,
     check_reports_flow,
     check_pincode_geo_flow,
+    check_ai_provider_signature,
     check_ai_flow,
 ]
 
@@ -5136,7 +5182,7 @@ AREA_CHECKS: dict[str, list] = {
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
     "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
     "reports": [check_reports_flow],
-    "ai": [check_ai_flow],
+    "ai": [check_ai_provider_signature, check_ai_flow],
 }
 
 

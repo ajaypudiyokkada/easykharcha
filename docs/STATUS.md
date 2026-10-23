@@ -267,6 +267,12 @@ not built yet.
   `_chunk_pdf`) and merged/deduped (`schemas.merge_menu_results`); the dish cap is 400, and a
   max_tokens stop or a cap hit sets `MenuScan.result.incomplete` instead of returning a silent
   partial list — never exposed in the 10-page/10MB upload limits, which are unchanged.
+- **Step C1c — Real-API call fix.** `anthropic_provider.py`'s `temperature=0` kwarg crashed every
+  real call (`anthropic` 2.x's `Messages.create` dropped it; `tools`/`tool_choice`/`system`/
+  `cache_control`/document+image blocks are all unaffected) — removed, no behaviour change since
+  the tool-call schema already forces consistency. New `check_ai_provider_signature` (no network/
+  key) in `verify --area ai` checks every real-provider kwarg against the installed SDK's
+  `Messages.create` signature, so an SDK upgrade like this one fails fast next time.
 
 ## Permission table
 
