@@ -15,6 +15,7 @@ export type TokenPair = {
 
 export type SignupPayload = {
   name: string;
+  business_name: string;
   mobile: string;
   password: string;
   email?: string;

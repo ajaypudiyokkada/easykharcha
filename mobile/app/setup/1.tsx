@@ -1,6 +1,6 @@
 import { Redirect, useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { Business } from '../../src/api/business';
 import { ApiError, type ItemsSummary } from '../../src/api/client';
@@ -17,8 +17,8 @@ import {
   type ItemsAction,
 } from '../../src/screens/ChangeBusinessTypeSheet';
 import { strings } from '../../src/strings';
-import { BottomActionBar, Body, Icon, Screen, StepHeader } from '../../src/ui';
-import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
+import { BottomActionBar, Body, Icon, Screen, Small, StepHeader } from '../../src/ui';
+import { MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
@@ -34,6 +34,11 @@ export default function SetupStepOne() {
   const router = useRouter();
   const { status, businesses, authedFetch, refreshMe } = useAuth();
   const existing = getOnboardingBusiness(businesses);
+  // Step F2: sign-up already asks for the business name, so a business created there always has
+  // one — this step only re-asks it for the fallback case (an older account, invite, or a business
+  // that somehow has no name yet).
+  const hasName = Boolean(existing?.name?.trim());
+  const [editingName, setEditingName] = useState(false);
 
   const [draft, setDraft] = useState<BusinessDraft>({
     ...EMPTY_BUSINESS_DRAFT,
@@ -44,6 +49,26 @@ export default function SetupStepOne() {
     state: existing?.state ?? '',
     tagline: existing?.tagline ?? '',
   });
+
+  // `existing` can arrive a render after mount — right after sign-up, this screen is reached by a
+  // client-side redirect that can land before AuthContext's post-login businesses fetch has
+  // committed, so the useState initializer above sometimes captures nothing. Re-hydrate once the
+  // real business shows up, rather than leaving the draft stuck on whatever was there at mount.
+  const hydratedBusinessId = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (!existing || hydratedBusinessId.current === existing.id) return;
+    hydratedBusinessId.current = existing.id;
+    setDraft((current) => ({
+      ...current,
+      name: existing.name,
+      businessType:
+        (existing.business_type as BusinessDraft['businessType']) || current.businessType,
+      city: existing.city || current.city,
+      pincode: existing.pincode || current.pincode,
+      state: existing.state || current.state,
+      tagline: existing.tagline || current.tagline,
+    }));
+  }, [existing]);
 
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -194,6 +219,19 @@ export default function SetupStepOne() {
 
       <Body style={styles.title}>{s1.title}</Body>
 
+      {hasName && !editingName ? (
+        <View style={styles.nameRow}>
+          <Body style={styles.nameRowText}>{draft.name}</Body>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.changeTap}
+            onPress={() => setEditingName(true)}
+          >
+            <Small style={styles.changeLink}>{s1.changeName}</Small>
+          </Pressable>
+        </View>
+      ) : null}
+
       {formError ? (
         <View style={styles.formError}>
           <Icon name="error" size={type.md} colour={colours.danger} />
@@ -206,6 +244,7 @@ export default function SetupStepOne() {
         onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
         authedFetch={authedFetch}
         errors={fieldErrors}
+        showName={!hasName || editingName}
       />
 
       {itemsSummary ? (
@@ -234,6 +273,25 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: fonts.headingBold,
     fontSize: type.xl,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  nameRowText: {
+    fontFamily: fonts.bodyExtraBold,
+    flexShrink: 1,
+  },
+  changeTap: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+  },
+  changeLink: {
+    color: colours.primary,
+    fontFamily: fonts.bodyExtraBold,
+    textDecorationLine: 'underline',
   },
   formError: {
     flexDirection: 'row',

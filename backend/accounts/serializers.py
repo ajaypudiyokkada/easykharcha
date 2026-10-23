@@ -20,6 +20,9 @@ def validate_password_rules(password: str, mobile: str, name: str) -> None:
 
 class SignupSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
+    # Step F2: collected once, here, and used as the new Business's name — the onboarding wizard
+    # never asks for it again (see accounts/views.py's SignupView and businesses/creation.py).
+    business_name = serializers.CharField(max_length=120)
     mobile = serializers.CharField(max_length=10, validators=[mobile_validator])
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     email = serializers.EmailField(required=False, allow_blank=True, default="")

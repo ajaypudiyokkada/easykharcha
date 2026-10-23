@@ -4,9 +4,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 ## Backend apps (backend/)
 
-- `accounts/` — signup, login, refresh, logout, /me; models.py (User), serializers.py, otp.py (OTP, unused by UI yet), ratelimit.py (IP/mobile rate limits), validators.py (PIN/password rules), views.py, urls.py
+- `accounts/` — signup, login, refresh, logout, /me; models.py (User), serializers.py (`SignupSerializer`'s `business_name` — Step F2), otp.py (OTP, unused by UI yet), ratelimit.py (IP/mobile rate limits), validators.py (PIN/password rules), views.py (`SignupView` creates the User and, Step F2, their one Business — name only — in one transaction via `businesses.creation.create_business`), urls.py
 - `audit/` — one audit-log row per write; models.py (AuditLog), log.py (log_action helper), no endpoints
-- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Access, AccessRole), views.py (`BusinessUpdateView` — Step 23: a `business_type` change with existing items and no `items_action` raises `ItemsDecisionNeeded`), sector_change.py (Step 23's `remove_items_for_sector_change`, keeping items with history or still used by a sell item), team.py, business_settings.py, permissions.py (the role→permission table — Step 23a: `ALL_PERMISSIONS` registry, Owner computed as all of it), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update; `BusinessUpdateSerializer`'s `items_action`), urls.py
+- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Step F2 made `business_type`/`city` `blank=True` (filled in by the wizard, not at signup); Access, AccessRole), creation.py (Step F2's `create_business` — Owner access, onboarding rows, default settings; shared by `SignupView` and `BusinessCreateView`), views.py (`BusinessUpdateView` — Step 23: a `business_type` change with existing items and no `items_action` raises `ItemsDecisionNeeded`), sector_change.py (Step 23's `remove_items_for_sector_change`, keeping items with history or still used by a sell item), team.py, business_settings.py, permissions.py (the role→permission table — Step 23a: `ALL_PERMISSIONS` registry, Owner computed as all of it), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update; `BusinessUpdateSerializer`'s `items_action`), urls.py
 - `geo/` — Step 21b: India pincode lookup; models.py (Pincode — pincode/area/district/state/office_type, indexed on pincode), states.py (`INDIA_STATES`), management/commands/load_pincodes.py (idempotent CSV load, `--if-empty` for entrypoint.sh), views.py, exceptions.py (PincodeNotFound), urls.py
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount —
@@ -150,10 +150,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 - `_layout.tsx` — root layout: font loading, AuthProvider, offline banner
 - `index.tsx` — redirects signed-out → landing, signed-in → /home or /setup/<n>
-- `signup.tsx` — create account
+- `signup.tsx` — create account; Step F2 added the `business_name` field (asked once, here)
 - `login.tsx` — mobile + password/PIN
 - `+not-found.tsx` — 404
 - `setup/1.tsx`..`6.tsx` — onboarding wizard: business info, colour, stock, sell items, team, settings;
+  Step F2: `setup/1.tsx` shows the signup-created business's name as a line with a Change link
+  (inline edit) instead of an input — `BusinessForm`'s name field only renders for the fallback case
+  (no business, or one with no name yet); a `useLayoutEffect` re-hydrates the draft from `existing`
+  once it arrives, fixing a pre-existing mount-time race right after a fresh signup→login redirect;
   Step 22a2: `setup/4.tsx`'s "Add your own" dish opens the same `SellItemSheet`/`DishRecipeForm` as
   Settings, not a separate ingredients-free form; Step C2a: `setup/4.tsx` opens on a scan-vs-manual
   choice card (sectorCopy's `menuScanEnabled`, nothing added yet, no `?mode=manual`) before the
@@ -295,8 +299,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `screens/StarterStockPicker.tsx` — Step 20: the grouped/searchable starter-stock picker (setup/3
   and Settings); `StarterStockPickerSheet.tsx` wraps it in a Sheet with its own Continue button for
   the Settings entry point
-- `forms/StockItemForm.tsx`, `BusinessForm.tsx`, `BrandForm.tsx` — one shared form component each,
-  used by both the setup wizard and Settings; Step 22a's `DishRecipeForm.tsx` (+ `unitConversion.ts`'s
+- `forms/StockItemForm.tsx`, `BusinessForm.tsx` (Step F2's `showName` prop — false on setup/1 once a
+  business already has a name, always true on Settings' Business details), `BrandForm.tsx` — one
+  shared form component each, used by both the setup wizard and Settings; Step 22a's `DishRecipeForm.tsx` (+ `unitConversion.ts`'s
   g<->kg/ml<->L entry-time conversion, `validateDish.ts`) is the full dish form with ingredients,
   used only via `SellItemSheet` — Step 22a2 deleted the old ingredients-free `SellItemForm.tsx`/
   `validateSellItem.ts`, now unused everywhere

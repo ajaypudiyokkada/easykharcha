@@ -31,6 +31,7 @@ function paramString(value: string | string[] | undefined): string {
 
 type FieldErrors = {
   name?: string;
+  businessName?: string;
   mobile?: string;
   password?: string;
   consent?: string;
@@ -45,6 +46,7 @@ export default function Signup() {
   }>();
 
   const [name, setName] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -60,6 +62,7 @@ export default function Signup() {
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
     if (!name.trim()) errors.name = s.errors.nameRequired;
+    if (!businessName.trim()) errors.businessName = s.errors.businessNameRequired;
     if (!MOBILE_PATTERN.test(mobile)) errors.mobile = s.errors.mobileInvalid;
     if (password.length < 8) errors.password = s.errors.passwordTooShort;
     if (!consent) errors.consent = s.errors.consentRequired;
@@ -77,6 +80,7 @@ export default function Signup() {
     try {
       await signup({
         name: name.trim(),
+        business_name: businessName.trim(),
         mobile,
         password,
         email: email.trim(),
@@ -133,6 +137,15 @@ export default function Signup() {
         placeholder={s.namePlaceholder}
         autoComplete="name"
         error={fieldErrors.name}
+      />
+
+      <TextField
+        label={s.businessNameLabel}
+        value={businessName}
+        onChangeText={setBusinessName}
+        placeholder={s.businessNamePlaceholder}
+        autoComplete="organization"
+        error={fieldErrors.businessName}
       />
 
       <View style={styles.field}>

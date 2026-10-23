@@ -32,21 +32,27 @@ type Props = {
   onChange: (patch: Partial<BusinessDraft>) => void;
   authedFetch: <T>(path: string, options?: RequestOptions) => Promise<T>;
   errors?: { name?: string; businessType?: string; city?: string };
+  /** Step F2: the name is asked once, at sign-up — onboarding's first step hides this field (and
+   * shows the name as a line with a Change link instead) once a business already has one. Settings'
+   * "Business details" screen always passes true. Defaults to true. */
+  showName?: boolean;
 };
 
 /** The business fields shared by setup/1 and Settings' "Business details" screen — name, type,
  * city, tagline. No Save/Next button here — the caller owns that. */
-export function BusinessForm({ value, onChange, authedFetch, errors }: Props) {
+export function BusinessForm({ value, onChange, authedFetch, errors, showName = true }: Props) {
   return (
     <View style={styles.field}>
-      <TextField
-        label={s1.nameLabel}
-        value={value.name}
-        onChangeText={(name) => onChange({ name })}
-        placeholder={s1.namePlaceholder}
-        autoComplete="organization"
-        error={errors?.name}
-      />
+      {showName ? (
+        <TextField
+          label={s1.nameLabel}
+          value={value.name}
+          onChangeText={(name) => onChange({ name })}
+          placeholder={s1.namePlaceholder}
+          autoComplete="organization"
+          error={errors?.name}
+        />
+      ) : null}
 
       <View style={styles.field}>
         <Body style={styles.label}>{s1.typeLabel}</Body>
