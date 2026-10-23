@@ -273,6 +273,19 @@ not built yet.
   the tool-call schema already forces consistency. New `check_ai_provider_signature` (no network/
   key) in `verify --area ai` checks every real-provider kwarg against the installed SDK's
   `Messages.create` signature, so an SDK upgrade like this one fails fast next time.
+- **Step C1d — one real pipeline, chunk-overflow recovery, prompt fixes.** New `ai/extraction.py`'s
+  `run_menu_extraction` (chunk, call, merge, incomplete) is now used by both `ai/jobs.py` and
+  `scripts/ai_try_menu.py` (previously bypassed chunking entirely, so a 10-page PDF overflowed in one
+  call and returned 0 dishes); a chunk that stops at max_tokens is retried one page at a time before
+  giving up, only marking `incomplete` if a single page still overflows. Confidence prompt now anchors
+  0.95/0.8/below 0.75 instead of drifting to one value; variants must be names (schemas.py rejects
+  price-like strings as a backstop) and empty dish fields are omitted to shrink output. Script now
+  writes UTF-8 and prints chunk/cost breakdown. Proved against real menus: a 1-image menu (44 dishes,
+  1 call, ~$0.009) and `_private/menus/fomomenu.pdf` (8 pages, 3 chunks, 193 dishes, no truncation,
+  ~$0.052, correctly resolved "Chicken Lollipop / Drums of Heaven" to `note: "two names"` with no
+  variants). Found but didn't fix (pre-existing, out of this step's scope): `ai_try_menu.py`'s recipe-
+  suggestion call fails against the real API — `AI_MODEL_FALLBACK`'s configured model rejects a forced
+  `tool_choice`, unrelated to menu extraction.
 
 ## Permission table
 

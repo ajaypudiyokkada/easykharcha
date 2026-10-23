@@ -41,16 +41,18 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
   models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
-- `ai/` — Step C1/C1b/C1c: menu reading + recipe suggestions via Anthropic (provider/ — fake.py for
+- `ai/` — Step C1/C1b/C1c/C1d: menu reading + recipe suggestions via Anthropic (provider/ — fake.py for
   AI_FAKE with realistic token counts, anthropic_provider.py for real (no `temperature` kwarg —
   anthropic 2.x's Messages.create dropped it), base.py's run_with_fallback shared by both, now also
   carrying a `truncated`/max_tokens flag); models.py
   (MenuScan, AiUsage, AiRecipeCache — keyed by prompt_version too), schemas.py (pydantic validation —
-  dish `kind`/`note`/`variants`, recipe `ingredients`<=7/`minor_ingredients`, 400-dish cap,
-  merge_menu_results for PDF chunks), limits.py (daily per-business caps + the monthly cost cap, all
-  Decimal), files.py (temp upload storage, deleted after each job), jobs.py (process_menu_scan reads
-  a PDF ~3 pages/call and merges/dedupes them, sets result.incomplete on a max_tokens stop or a
-  dish-cap hit; run inline when AI_FAKE or by management/commands/run_ai_jobs.py otherwise),
+  dish `kind`/`note`/`variants` (price-like variants rejected), recipe `ingredients`<=7/
+  `minor_ingredients`, 400-dish cap, merge_menu_results for PDF chunks), limits.py (daily per-business
+  caps + the monthly cost cap, all Decimal), files.py (temp upload storage, deleted after each job),
+  extraction.py (Step C1d: `run_menu_extraction` — the one chunk/call/merge/incomplete pipeline,
+  shared by jobs.py and scripts/ai_try_menu.py; retries an overflowing chunk one page at a time before
+  giving up), jobs.py (process_menu_scan calls extraction.run_menu_extraction then records usage/
+  saves the scan; run inline when AI_FAKE or by management/commands/run_ai_jobs.py otherwise),
   matching.py (fuzzy stock-item matching + unit_family for the recipe prompt), prompts.py
   (RECIPE_PROMPT_VERSION), views.py, urls.py
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default

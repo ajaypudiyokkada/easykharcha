@@ -225,16 +225,32 @@ def make_png(
     return signature + ihdr + text + idat + iend
 
 
-def make_pdf(num_pages: int = 1, marker: bytes | None = None) -> bytes:
+def make_pdf(
+    num_pages: int = 1,
+    marker: bytes | None = None,
+    page_markers: dict[int, bytes] | None = None,
+) -> bytes:
     """A minimal valid PDF with `num_pages` blank pages, built by hand (same stdlib-only approach as
     make_png) — just enough structure (objects + a correct xref table) for pypdf to read %PDF- and
     count pages. `marker` is the ai/ smoke checks' AI_FAKE trigger bytes, tucked into an unreferenced
-    comment object so it's still present in the raw file bytes the fake provider inspects."""
+    comment object: present in the raw bytes of an unchunked/unsplit upload, but dropped by any pypdf
+    rewrite (ai/extraction.py's page-chunking and page-split both go through pypdf), which is exactly
+    what proves a chunk-level overflow retry actually re-sends smaller data rather than the same
+    bytes. `page_markers` (1-indexed page number -> marker) instead attaches the marker as a custom
+    Name entry directly on one page's own dict, which — unlike the free-floating `marker` object —
+    pypdf DOES carry across both chunking and page-splitting, and only onto that one page's output,
+    letting a smoke check target exactly one page of a multi-page PDF."""
+    page_markers = page_markers or {}
     objects: list[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>"]
     page_ids = list(range(3, 3 + num_pages))
     kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
     objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {num_pages} >>".encode())
-    objects.extend(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>" for _ in page_ids)
+    for page_number, _page_id in enumerate(page_ids, start=1):
+        page_marker = page_markers.get(page_number)
+        extra = f" /SmokeMarker /{page_marker.decode()}" if page_marker else ""
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72]{extra} >>".encode()
+        )
     if marker:
         objects.append(b"<< /Type /SmokeMarker >>\n% " + marker)
 
@@ -5040,6 +5056,111 @@ def check_ai_flow() -> None:
             f"got {usage_after - usage_before}"
         )
     print("OK — a multi-page PDF is read in page chunks and merged/deduped, one AiUsage row per chunk.")
+
+    # The owner is already at the 3-business cap (business_id, chunk_business_id, and
+    # incomplete_business_id further below) — every remaining ai/ check reuses one of those three
+    # rather than creating a 4th.
+
+    # --- a chunk that overflows max_tokens is retried one page at a time and recovers: the 3-page
+    # PDF here is small enough to go as a single whole-document call (no top-level chunking at 3/
+    # chunk), and FORCE_MAX_TOKENS rides along as an unreferenced object present only in that raw,
+    # unrewritten upload — pypdf drops it the moment extraction.py splits the doc into individual
+    # pages for the retry, so each retry call comes back clean. ---
+    retry_usage_before = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (chunk_business_id,)
+    )[0]
+    retry_pdf_body, retry_pdf_content_type = multipart_multi_body(
+        [("pdf", "menu.pdf", make_pdf(num_pages=3, marker=b"FORCE_MAX_TOKENS"), "application/pdf")]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{chunk_business_id}/ai/menu-scans/",
+        raw_body=retry_pdf_body,
+        content_type=retry_pdf_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: retry-test pdf scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{chunk_business_id}/ai/menu-scans/{body['id']}/", token=owner_access
+    )
+    retry_dish_names = {d["name"] for section in body.get("sections", []) for d in section["dishes"]}
+    if status != 200 or body["status"] != "done" or body.get("incomplete") or len(retry_dish_names) != 4:
+        fail(
+            "ai flow: expected a recovered page-by-page retry (done, not incomplete, 4 dishes), "
+            f"got {status} ({body})"
+        )
+    retry_usage_after = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (chunk_business_id,)
+    )[0]
+    if retry_usage_after - retry_usage_before != 4:
+        fail(
+            "ai flow: expected 4 AiUsage rows (1 overflowing chunk call + 3 page retries), "
+            f"got {retry_usage_after - retry_usage_before}"
+        )
+    print("OK — a chunk that overflows max_tokens is retried one page at a time and recovers.")
+
+    # --- when a single page still overflows on its own, that page's scan stays incomplete but the
+    # other chunk's dishes are kept, never dropped to zero. ---
+    partial_pdf_body, partial_pdf_content_type = multipart_multi_body(
+        [
+            (
+                "pdf",
+                "menu.pdf",
+                make_pdf(num_pages=4, page_markers={4: b"FORCE_MAX_TOKENS"}),
+                "application/pdf",
+            )
+        ]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{chunk_business_id}/ai/menu-scans/",
+        raw_body=partial_pdf_body,
+        content_type=partial_pdf_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: partial-overflow pdf scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{chunk_business_id}/ai/menu-scans/{body['id']}/", token=owner_access
+    )
+    partial_dish_names = {d["name"] for section in body.get("sections", []) for d in section["dishes"]}
+    if status != 200 or body["status"] != "done" or not body.get("incomplete") or not partial_dish_names:
+        fail(
+            "ai flow: expected the clean chunk's dishes kept and incomplete=true when the other "
+            f"chunk's single page overflows, got {status} ({body})"
+        )
+    print(
+        "OK — a single page that still overflows keeps the other chunk's dishes and flags incomplete."
+    )
+
+    # --- variants must be option/alternate names, never prices; schemas.py strips anything price-like ---
+    price_variants_body, price_variants_content_type = multipart_multi_body(
+        [("images", "variants.png", make_png(marker=b"FORCE_PRICE_VARIANTS"), "image/png")]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{chunk_business_id}/ai/menu-scans/",
+        raw_body=price_variants_body,
+        content_type=price_variants_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: price-variants scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{chunk_business_id}/ai/menu-scans/{body['id']}/", token=owner_access
+    )
+    if status != 200 or body["status"] != "done":
+        fail(f"ai flow: price-variants scan expected done, got {status} ({body})")
+    price_variant_dish = next(
+        d for section in body["sections"] for d in section["dishes"] if "Lollipop" in d["name"]
+    )
+    if price_variant_dish["variants"]:
+        fail(
+            "ai flow: expected price-like variants (['300', 'Rs 320']) stripped to none, "
+            f"got {price_variant_dish['variants']}"
+        )
+    print("OK — variants that are plain prices are rejected, never passed through as option names.")
 
     # --- a model that stops at max_tokens is flagged incomplete, not silently returned as whole ---
     status, body, _ = request(

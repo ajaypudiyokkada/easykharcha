@@ -13,6 +13,8 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
   max_tokens) — proves the incomplete-scan path (ai/jobs.py).
 - A menu scan file containing "FORCE_MANY_DISHES" returns a large canned menu (200 dishes), used by
   the smoke suite to prove a long menu isn't silently cut short.
+- A menu scan file containing "FORCE_PRICE_VARIANTS" returns a dish whose variants are plain prices
+  — proves schemas.py's variant validator strips them rather than passing them through.
 """
 
 from django.conf import settings
@@ -33,6 +35,7 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
     force_bad_persistent = any(b"FORCE_BAD_SCHEMA_PERSISTENT" in blob for blob in blobs)
     force_max_tokens = any(b"FORCE_MAX_TOKENS" in blob for blob in blobs)
     force_many_dishes = any(b"FORCE_MANY_DISHES" in blob for blob in blobs)
+    force_price_variants = any(b"FORCE_PRICE_VARIANTS" in blob for blob in blobs)
     is_menu = not any(b"NOT_A_MENU" in blob for blob in blobs)
 
     def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
@@ -47,6 +50,22 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
         if not is_menu:
             return (
                 {"is_menu": False, "sections": []},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
+        if force_price_variants:
+            dishes = [
+                {
+                    "name": "Chicken Lollipop / Drums of Heaven",
+                    "price": 300,
+                    "confidence": 0.9,
+                    "variants": ["300", "Rs 320"],
+                }
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
                 model,
                 _MENU_INPUT_TOKENS,
                 _MENU_OUTPUT_TOKENS,

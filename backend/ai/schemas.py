@@ -19,6 +19,9 @@ MAX_NOTE_LENGTH = 20
 _ALLOWED_NOTES = {"has options", "two names"}
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# A variant must be an option/alternate NAME, never a price — this is a backstop for prompt drift
+# (e.g. "Chicken Lollipop / Drums of Heaven" miscast as variants ["300", "320"]).
+_PRICE_LIKE_VARIANT = re.compile(r"^[₹$]?\s*(rs\.?|inr)?\s*\d[\d,.]*\s*$", re.IGNORECASE)
 
 
 def _clean_text(value: str, max_length: int) -> str:
@@ -62,7 +65,9 @@ class ExtractedDish(BaseModel):
     @classmethod
     def _clean_variants(cls, value: list[str]) -> list[str]:
         cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
-        return [v for v in cleaned if v][:MAX_VARIANTS_PER_DISH]
+        return [v for v in cleaned if v and not _PRICE_LIKE_VARIANT.match(v)][
+            :MAX_VARIANTS_PER_DISH
+        ]
 
 
 class ExtractedSection(BaseModel):

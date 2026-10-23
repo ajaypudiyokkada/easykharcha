@@ -17,6 +17,10 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+# Redirected output (e.g. `> out.txt`) otherwise falls back to the console's codepage on Windows,
+# mangling the em dash and any Hindi/Kannada text in a menu's dish names.
+sys.stdout.reconfigure(encoding="utf-8")
+
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -27,6 +31,7 @@ django.setup()
 
 from django.conf import settings  # noqa: E402
 
+from ai.extraction import run_menu_extraction  # noqa: E402
 from ai.provider import anthropic_provider  # noqa: E402
 from businesses.models import BusinessType  # noqa: E402
 
@@ -71,24 +76,32 @@ def main() -> None:
 
     print(f"Reading {args.menu_file} as {args.business_type}...")
     files = [{"media_type": media_type, "data": args.menu_file.read_bytes()}]
-    menu_result = anthropic_provider.extract_menu(files, args.business_type)
-
-    print(f"\nModel: {menu_result.model} (fallback used: {menu_result.used_fallback})")
-    print(
-        f"Tokens: {menu_result.input_tokens} in / {menu_result.output_tokens} out "
-        f"(~{_cost(menu_result.input_tokens, menu_result.output_tokens)})"
+    outcome = run_menu_extraction(
+        files, args.business_type, extract_fn=anthropic_provider.extract_menu
     )
 
-    if menu_result.truncated:
-        print("\nWARNING: the model stopped at max_tokens — this result is incomplete.")
+    print(f"\n{len(outcome.calls)} model call(s):")
+    for call in outcome.calls:
+        flag = " [TRUNCATED]" if call.truncated else ""
+        print(
+            f"  {call.label}: {call.input_tokens} in / {call.output_tokens} out "
+            f"(~{_cost(call.input_tokens, call.output_tokens)}) [{call.model}]{flag}"
+        )
+    print(
+        f"Total: {outcome.total_input_tokens} in / {outcome.total_output_tokens} out "
+        f"(~{_cost(outcome.total_input_tokens, outcome.total_output_tokens)})"
+    )
 
-    if not menu_result.data["is_menu"]:
+    if outcome.incomplete:
+        print("\nWARNING: at least one page overflowed max_tokens even on retry — this result is incomplete.")
+
+    if not outcome.merged["is_menu"]:
         print("\nis_menu: false — the model doesn't think this is a menu.")
         return
 
     dish_names = []
     total_dishes = 0
-    for section in menu_result.data["sections"]:
+    for section in outcome.merged["sections"]:
         print(f"\n{section['name']} ({len(section['dishes'])} dishes)")
         for dish in section["dishes"]:
             price = f"Rs {dish['price']}" if dish["price"] is not None else "(no price)"
