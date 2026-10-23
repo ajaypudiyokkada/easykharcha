@@ -16,6 +16,11 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_BACKOFF_MS = 6000;
 const BACKOFF_AFTER_MS = 30_000;
 const TAKING_A_WHILE_AFTER_MS = 20_000;
+// Step C2c: past this, a still-queued/reading scan shows the "taking longer than usual" escape
+// hatch (Try again / Add one by one) instead of leaving the owner stuck on a spinner forever —
+// polling keeps going underneath it in case the job finishes right after. Overridable so
+// verify:ui can shrink it against a scan that's deliberately made to never finish.
+const STUCK_AFTER_MS = Number(process.env.EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS) || 180_000;
 
 export default function MenuScanAnalyzing() {
   const router = useRouter();
@@ -93,6 +98,29 @@ export default function MenuScanAnalyzing() {
     return (
       <Screen>
         <Banner kind="error">{sa.errors.scanFailed}</Banner>
+        <View style={styles.actions}>
+          <Button
+            label={sa.errors.tryAgain}
+            onPress={() =>
+              router.replace(`/menu-scan?businessId=${business.id}&returnTo=${returnTo}`)
+            }
+          />
+          <Button
+            label={sa.errors.addOneByOne}
+            variant="secondary"
+            onPress={() => router.replace(manualPath)}
+          />
+        </View>
+      </Screen>
+    );
+  }
+
+  // Still queued/reading well past normal — offer the same escape hatch as a real failure, but
+  // polling (above) keeps running underneath in case the job finishes right after this renders.
+  if (elapsedMs >= STUCK_AFTER_MS) {
+    return (
+      <Screen>
+        <Banner kind="warning">{sa.takingLonger}</Banner>
         <View style={styles.actions}>
           <Button
             label={sa.errors.tryAgain}

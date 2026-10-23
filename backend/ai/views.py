@@ -27,6 +27,17 @@ MAX_PDF_BYTES = 10 * 1024 * 1024
 MAX_PDF_PAGES = 10
 MAX_IMAGES_PER_SCAN = 6
 _IMAGE_FORMAT_TO_MEDIA_TYPE = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+# AI_FAKE-only, like provider/fake.py's other FORCE_ markers — but handled here, not in fake.py,
+# since it skips the inline process_menu_scan call entirely rather than changing what it returns.
+# Leaves the scan QUEUED forever, for exercising the Analyzing screen's "taking longer than usual"
+# UI (Step C2c). Only reliable via a PDF upload (docs/images/menu_scan_force_never_finish.pdf, made
+# like scripts/smoke.py's make_pdf) — an image upload is always resized/re-encoded client-side
+# (mobile/src/forms/menuFileValidation.ts) before it reaches here, which strips any marker bytes.
+_FORCE_NEVER_FINISH = b"FORCE_NEVER_FINISH"
+
+
+def _contains_marker(files_meta: list[dict], marker: bytes) -> bool:
+    return any(marker in meta["data"] for meta in files_meta)
 
 
 def _validate_image(upload) -> dict:
@@ -103,7 +114,7 @@ class MenuScanCreateView(APIView):
         )
         ai_files.save_temp_files(scan.temp_dir, files_meta)
 
-        if settings.AI_FAKE:
+        if settings.AI_FAKE and not _contains_marker(files_meta, _FORCE_NEVER_FINISH):
             process_menu_scan(scan.id)
             scan.refresh_from_db()
 

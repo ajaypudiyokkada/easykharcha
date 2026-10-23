@@ -23,3 +23,14 @@ class ReadOnlyInlineMixin:
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class SuperuserOnlyAdminMixin:
+    """Hides this model from the admin entirely (list + module index) for staff who aren't a
+    superuser — for data more sensitive than the general platform-staff lookups, e.g. AI cost/usage."""
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser

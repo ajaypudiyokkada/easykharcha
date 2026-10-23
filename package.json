@@ -7,6 +7,7 @@
     "check:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_backend.ps1",
     "check:mobile": "npm --prefix mobile run check",
     "check:sector-copy": "python scripts/check_sector_copy.py",
+    "check:entrypoint": "sh scripts/check_entrypoint.sh",
     "smoke": "python scripts/smoke.py",
     "flow": "node scripts/flow.mjs",
     "responsive": "node scripts/responsive_check.mjs",

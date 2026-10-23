@@ -63,6 +63,15 @@ const STEP23B_SCREEN_DIR = 'docs/screens/step23b';
 const STEP23D_SCREEN_DIR = 'docs/screens/step23d';
 const STEP25C2A_SCREEN_DIR = 'docs/screens/step25c2a';
 const STEP25C2A_FIXTURE_IMAGE = resolvePath('docs/images/ek_logo_icon.png');
+// Step C2c: a 1-page PDF carrying the AI_FAKE-only FORCE_NEVER_FINISH marker (ai/views.py) — the
+// scan it starts stays queued forever, used below to prove the Analyzing screen's stuck-scan UI.
+// Must be a PDF, not a photo: a photo upload is always resized/re-encoded client-side before it
+// reaches the backend, which would strip the marker bytes. Start the web dev server with
+// EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS set small (e.g. 3000) to make the wait below fast.
+const STEP25C2C_STUCK_FIXTURE_PDF = resolvePath('docs/images/menu_scan_force_never_finish.pdf');
+// Covers the real 200-second default (STUCK_AFTER_MS=180_000 plus a buffer) when the dev server
+// wasn't started with a shortened EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS.
+const STEP25C2C_STUCK_WAIT_MS = 200_000;
 
 function findChrome() {
   const candidates = [
@@ -1460,6 +1469,33 @@ async function checkMenuScanFlow(page) {
   await clickButton(page, 'Continue');
   await waitForPath(page, '/setup/5');
   console.log('OK — Continue resumes the onboarding wizard at step 5.');
+
+  // === Step C2c: a scan that never finishes shows the "taking longer than usual" escape hatch ===
+  // (started from the same business via the Settings entry point). The web dev server can be
+  // started with EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS set small to make this fast; against the real
+  // 3-minute default (analyzing.tsx's STUCK_AFTER_MS) this just waits it out instead.
+  await page.goto(`${APP_URL}/menu-scan?returnTo=settings`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Scan your menu');
+  const [stuckFileChooser] = await Promise.all([
+    page.waitForFileChooser(),
+    clickButton(page, 'Choose a PDF'),
+  ]);
+  await stuckFileChooser.accept([STEP25C2C_STUCK_FIXTURE_PDF]);
+  await waitForText(page, 'menu_scan_force_never_finish.pdf');
+  await clickButton(page, 'Read my menu');
+  await waitForPath(page, '/menu-scan/analyzing');
+  await retryUntil(
+    async () => (await page.evaluate(() => document.body.innerText)).includes('This is taking longer than usual.'),
+    STEP25C2C_STUCK_WAIT_MS,
+  );
+  await waitForText(page, 'Try again');
+  await waitForText(page, 'Add one by one');
+  await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/analyzing-stuck-390.png` });
+  console.log('OK — Step C2c: a scan stuck past the timeout shows Try again / Add one by one.');
+
+  await clickButton(page, 'Add one by one');
+  await waitForPath(page, '/settings/sell');
+  console.log('OK — "Add one by one" from the stuck screen returns to Settings.');
 
   await logoutFromAnywhere(page);
 }

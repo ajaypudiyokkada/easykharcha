@@ -875,6 +875,8 @@ export const strings = {
     analyzing: {
       title: (noun: string) => `AI is analyzing your ${noun}...`,
       takingAWhile: 'Taking a minute for a large file.',
+      // Step C2c: shown once a scan is still queued/reading past STUCK_AFTER_MS.
+      takingLonger: 'This is taking longer than usual.',
       errors: {
         aiUnavailable: (sellNounPlural: string) =>
           `Menu reading is not available right now. You can add ${sellNounPlural} one by one.`,
