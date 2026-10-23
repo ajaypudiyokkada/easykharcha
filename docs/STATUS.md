@@ -313,6 +313,22 @@ not built yet.
   all saving through the existing `sell-items/bulk/` endpoint (section name -> `group`). Recipes/
   ingredients and best-sellers are not in this step — see Not built yet.
 
+- **Step F1 — Admin can delete test users and businesses.** `UserAdmin.has_delete_permission` is now
+  superuser-only (never the caller's own account, never the last active superuser — enforced again in
+  `delete_queryset` for the bulk "Delete selected" action, since Django only checks permission once
+  for that). Deleting a user who owns a business still correctly fails on `Business.created_by`'s
+  existing `PROTECT` (no raw DB error — Django's admin shows it); `get_deleted_objects` now also warns
+  and points at the new `Business` admin action first. New `BusinessAdmin.delete_business_and_data`
+  (superuser-only, a two-step confirm page with per-business counts) deletes a business and
+  everything under it in PROTECT-safe order (Sale, WastageEntry, StockCount, Purchase, SellItem, then
+  StockItem, then the Business itself — Access/OnboardingProgress/BusinessSettings/AlertCheck/
+  MenuScan/AiUsage all cascade), one transaction, one `admin.business_delete` audit-log line (business
+  name, owner email, counts) per business; `Business`/ledger models stay undeletable from their own
+  admin pages otherwise. No model `on_delete` behaviour changed. New `verify --area admin` /
+  `check_admin_delete_flow` (django.test.Client against the dev DB, no live-server HTTP needed) proves
+  all of the above, including the last-superuser case via a rolled-back transaction so no real
+  account is ever touched.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every
