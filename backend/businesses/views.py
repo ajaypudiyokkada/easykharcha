@@ -18,15 +18,13 @@ from rest_framework.views import APIView
 from audit.log import jsonable, log_action
 
 from .access import owner_access_or_403
-from .business_settings import defaults_for_new_business
+from .creation import create_business
 from .exceptions import BusinessLimitReached, InvalidLogoFile, ItemsDecisionNeeded
 from .models import (
     ONBOARDING_STEPS,
     SKIPPABLE_ONBOARDING_STEPS,
     Access,
-    AccessRole,
     Business,
-    BusinessSettings,
     OnboardingProgress,
     OnboardingStepStatus,
 )
@@ -59,15 +57,7 @@ class BusinessCreateView(APIView):
 
         serializer = BusinessCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        business = Business.objects.create(created_by=request.user, **serializer.validated_data)
-        Access.objects.create(user=request.user, business=business, role=AccessRole.OWNER)
-        OnboardingProgress.objects.bulk_create(
-            [OnboardingProgress(business=business, step=step) for step in ONBOARDING_STEPS]
-        )
-        BusinessSettings.objects.create(business=business, **defaults_for_new_business())
-        log_action(
-            user=request.user, action="business.create", business=business, name=business.name
-        )
+        business = create_business(user=request.user, **serializer.validated_data)
         return Response(BusinessSerializer(business, context={"request": request}).data, status=201)
 
 

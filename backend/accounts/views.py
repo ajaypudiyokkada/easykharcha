@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -10,6 +11,7 @@ from accounts.exceptions import DuplicateMobile, InvalidCredentials, RateLimited
 from accounts.models import User
 from accounts.ratelimit import get_client_ip, hit
 from accounts.serializers import LoginSerializer, LogoutSerializer, SignupSerializer, UserSerializer
+from businesses.creation import create_business
 from businesses.models import Business
 from businesses.serializers import BusinessSerializer
 
@@ -51,17 +53,21 @@ class SignupView(APIView):
         if User.objects.filter(mobile=data["mobile"]).exists():
             raise DuplicateMobile()
 
-        user = User.objects.create_user(
-            mobile=data["mobile"],
-            name=data["name"],
-            password=data["password"],
-            email=data.get("email", ""),
-            consent_at=timezone.now(),
-            consent_version=settings.CONSENT_VERSION,
-            utm_source=data.get("utm_source", ""),
-            utm_medium=data.get("utm_medium", ""),
-            utm_campaign=data.get("utm_campaign", ""),
-        )
+        with transaction.atomic():
+            user = User.objects.create_user(
+                mobile=data["mobile"],
+                name=data["name"],
+                password=data["password"],
+                email=data.get("email", ""),
+                consent_at=timezone.now(),
+                consent_version=settings.CONSENT_VERSION,
+                utm_source=data.get("utm_source", ""),
+                utm_medium=data.get("utm_medium", ""),
+                utm_campaign=data.get("utm_campaign", ""),
+            )
+            # Step F2: the business is created right here, with only its name — the onboarding
+            # wizard's first step fills in type/location later and never asks for the name again.
+            create_business(user=user, name=data["business_name"])
         return Response(UserSerializer(user).data, status=201)
 
 

@@ -186,9 +186,12 @@ async function readValue(page, label) {
   return element.evaluate((el) => el.value);
 }
 
-async function signup(page, name, mobile, password) {
+// Step F2: business name is asked once, here, at sign-up — the wizard's first step never asks
+// again (it shows the name as a line with a Change link instead; see fillStepOne).
+async function signup(page, name, mobile, password, businessName) {
   await page.goto(`${APP_URL}/signup`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await typeInto(page, 'Your name', name);
+  await typeInto(page, 'Business name', businessName);
   await typeInto(page, 'Mobile number', mobile);
   await typeInto(page, 'Password', password);
   await clickAndSettle(await findVisible(page, '[role="checkbox"]'));
@@ -210,8 +213,9 @@ async function fillPincodeLocation(page, pincode) {
   await waitForText(page, 'State');
 }
 
-async function fillStepOne(page, businessName, pincode, typeLabel) {
-  await typeInto(page, 'Business name', businessName);
+// Step F2: the business name is already shown (and editable via its own Change link) from the
+// signup value — this step only fills in what signup doesn't ask for.
+async function fillStepOne(page, pincode, typeLabel) {
   await fillPincodeLocation(page, pincode);
   await clickAndSettle(await findVisibleByText(page, 'radio', typeLabel));
   await clickButton(page, 'Next');
@@ -226,9 +230,15 @@ async function waitForPreviewColour(page, businessName, expectedHex) {
           .match(/#(..)(..)(..)/)
           .slice(1)
           .map((h) => parseInt(h, 16));
-        const el = Array.from(document.querySelectorAll('*')).find(
-          (e) => e.textContent?.trim() === name && e.children.length === 0,
-        );
+        // expo-router's web Stack keeps previous screens mounted (hidden, zero-size) rather than
+        // unmounting them — Step F2's setup/1 now also shows the business name as plain text, so
+        // an unfiltered match could land on that stale, zero-size copy instead of step 2's real,
+        // visible preview. Same visibility filter findVisibleByText uses elsewhere in this file.
+        const el = Array.from(document.querySelectorAll('*')).find((e) => {
+          if (e.textContent?.trim() !== name || e.children.length !== 0) return false;
+          const r = e.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
         if (!el || !el.parentElement) return false;
         const bg = getComputedStyle(el.parentElement).backgroundColor;
         const match = bg.match(/rgb\((\d+), (\d+), (\d+)\)/);
@@ -657,10 +667,10 @@ async function captureStep10Screens(page) {
     const name = 'Shots Ten';
     const mobile = randomMobile();
     const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
-    await signup(page, name, mobile, password);
+    await signup(page, name, mobile, password, "Shots Ten's Kitchen");
     await login(page, mobile, password);
     await waitForPath(page, '/setup/1');
-    await fillStepOne(page, "Shots Ten's Kitchen", '411001', 'Cloud kitchen');
+    await fillStepOne(page, '411001', 'Cloud kitchen');
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/2');
     await clickButton(page, 'Next');
@@ -1198,10 +1208,10 @@ async function checkReportsEmptyStateFlow(page) {
   const mobile = randomMobile();
   const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-  await signup(page, name, mobile, password);
+  await signup(page, name, mobile, password, 'Empty Reports Biz');
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
-  await fillStepOne(page, 'Empty Reports Biz', '411001', 'Cloud kitchen');
+  await fillStepOne(page, '411001', 'Cloud kitchen');
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/3');
 
@@ -1235,14 +1245,13 @@ async function checkPincodeLocationFlow(page) {
   const mobile = randomMobile();
   const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-  await signup(page, name, mobile, password);
+  await signup(page, name, mobile, password, 'Koramangala Kitchen');
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
 
   await page.setViewport({ width: 390, height: 3000 });
   await page.screenshot({ path: `${STEP21B_SCREEN_DIR}/pincode-empty-390.png` });
 
-  await typeInto(page, 'Business name', 'Koramangala Kitchen');
   await fillPincodeLocation(page, '560034');
   await waitForText(page, 'Karnataka');
   await page.screenshot({ path: `${STEP21B_SCREEN_DIR}/pincode-found-390.png` });
@@ -1295,11 +1304,11 @@ async function checkSectorChangeFlow(page) {
   const mobile = randomMobile();
   const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-  await signup(page, name, mobile, password);
+  await signup(page, name, mobile, password, 'Spice Route Diner');
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
 
-  await fillStepOne(page, 'Spice Route Diner', '411001', 'Restaurant or cafe');
+  await fillStepOne(page, '411001', 'Restaurant or cafe');
   console.log('OK — onboarded as restaurant_cafe.');
 
   await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
@@ -1371,11 +1380,11 @@ async function checkMenuScanFlow(page) {
   const mobile = randomMobile();
   const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-  await signup(page, name, mobile, password);
+  await signup(page, name, mobile, password, 'Spice Route Diner');
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
 
-  await fillStepOne(page, 'Spice Route Diner', '411001', 'Restaurant or cafe');
+  await fillStepOne(page, '411001', 'Restaurant or cafe');
   await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/3');
@@ -1573,7 +1582,7 @@ async function main() {
     mobile = randomMobile();
     password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-    await signup(page, name, mobile, password);
+    await signup(page, name, mobile, password, "Anita's Kitchen");
     await waitForText(page, 'Account created. Log in to set up your business.');
     console.log('OK — signup submitted, redirected to /login with the success banner.');
 
@@ -1585,9 +1594,14 @@ async function main() {
 
     await login(page, mobile, password);
     await waitForPath(page, '/setup/1');
-    console.log('OK — logged in with no business yet, landed on /setup/1.');
+    console.log('OK — logged in with the business signup already created, landed on /setup/1.');
 
-    await fillStepOne(page, "Anita's Kitchen", '411001', 'Cloud kitchen');
+    // Step F2: the name is shown as a line (not an input) with a Change link — never re-asked.
+    await waitForText(page, "Anita's Kitchen");
+    await waitForText(page, 'Change');
+    console.log('OK — step 1 shows the signup business name, not an input asking for it again.');
+
+    await fillStepOne(page, '411001', 'Cloud kitchen');
     console.log('OK — step 1 saved, moved to /setup/2.');
 
     await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
@@ -1804,10 +1818,10 @@ async function main() {
     const mobile2 = randomMobile();
     const password2 = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-    await signup(page, name2, mobile2, password2);
+    await signup(page, name2, mobile2, password2, "Resume Test's Bakery");
     await login(page, mobile2, password2);
     await waitForPath(page, '/setup/1');
-    await fillStepOne(page, "Resume Test's Bakery", '400001', 'Bakery or sweets');
+    await fillStepOne(page, '400001', 'Bakery or sweets');
 
     // /setup/2 itself has no logout button (only the wizard controls) — go to /home, which does,
     // to log out. Resuming depends only on the business's saved onboarding_step, not on which
@@ -1827,10 +1841,10 @@ async function main() {
     const mobile3 = randomMobile();
     const password3 = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
 
-    await signup(page, name3, mobile3, password3);
+    await signup(page, name3, mobile3, password3, "Skip Test's Shop");
     await login(page, mobile3, password3);
     await waitForPath(page, '/setup/1');
-    await fillStepOne(page, "Skip Test's Shop", '600001', 'Other');
+    await fillStepOne(page, '600001', 'Other');
     await clickButton(page, 'Next');
     await waitForPath(page, '/setup/3');
 

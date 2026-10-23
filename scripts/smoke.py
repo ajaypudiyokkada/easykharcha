@@ -381,13 +381,20 @@ def check_permission_table() -> None:
 
 
 def signup_and_login(name: str) -> tuple[str, str, str]:
-    """Creates a fresh user and logs them in. Returns (mobile, access, refresh)."""
+    """Creates a fresh user (and, Step F2, their one auto-created business) and logs them in.
+    Returns (mobile, access, refresh)."""
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
     password = f"Kharcha{random.randint(1000, 9999)}!"
     status, body, _ = request(
         "POST",
         "/auth/signup/",
-        {"name": name, "mobile": mobile, "password": password, "consent": True},
+        {
+            "name": name,
+            "business_name": f"{name}'s Business",
+            "mobile": mobile,
+            "password": password,
+            "consent": True,
+        },
     )
     if status != 201:
         fail(f"signup ({name}): expected HTTP 201, got {status} ({body})")
@@ -1380,6 +1387,7 @@ def check_team_flow() -> None:
         "/auth/signup/",
         {
             "name": "Pre Existing",
+            "business_name": "Pre Existing's Business",
             "mobile": pre_mobile,
             "password": pre_password,
             "consent": True,
@@ -1742,13 +1750,20 @@ def check_team_reset_flow() -> None:
 def check_auth_flow() -> None:
     mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
     name = "Smoke Test"
+    business_name = "Smoke Test Biz"
     password = f"Kharcha{random.randint(1000, 9999)}!"
 
     # signup
     status, body, headers = request(
         "POST",
         "/auth/signup/",
-        {"name": name, "mobile": mobile, "password": password, "consent": True},
+        {
+            "name": name,
+            "business_name": business_name,
+            "mobile": mobile,
+            "password": password,
+            "consent": True,
+        },
     )
     if status != 201:
         fail(f"signup: expected HTTP 201, got {status} ({body})")
@@ -1758,11 +1773,33 @@ def check_auth_flow() -> None:
         fail("signup: missing or wrong CORS header")
     print(f"OK — signup created {mobile}.")
 
+    # Step F2: business_name is required — signup is the only place it's ever asked for.
+    missing_name_mobile = random.choice("6789") + "".join(random.choices("0123456789", k=9))
+    status, body, _ = request(
+        "POST",
+        "/auth/signup/",
+        {
+            "name": "No Biz Name",
+            "mobile": missing_name_mobile,
+            "password": password,
+            "consent": True,
+        },
+    )
+    if status != 400 or "business_name" not in body.get("error", {}).get("message", ""):
+        fail(f"signup without business_name: expected 400, got {status} ({body})")
+    print("OK — signup without a business name is rejected.")
+
     # duplicate signup
     status, body, _ = request(
         "POST",
         "/auth/signup/",
-        {"name": name, "mobile": mobile, "password": password, "consent": True},
+        {
+            "name": name,
+            "business_name": business_name,
+            "mobile": mobile,
+            "password": password,
+            "consent": True,
+        },
     )
     if status != 409 or body.get("error", {}).get("code") != "DUPLICATE_MOBILE":
         fail(f"duplicate signup: expected 409 DUPLICATE_MOBILE, got {status} ({body})")
@@ -1792,6 +1829,7 @@ def check_auth_flow() -> None:
         "/auth/signup/",
         {
             "name": "Not a bot",
+            "business_name": "Not a Bot's Business",
             "mobile": honeypot_mobile,
             "password": password,
             "consent": True,
@@ -1827,13 +1865,18 @@ def check_auth_flow() -> None:
     access, refresh = body["access"], body["refresh"]
     print("OK — login returned access and refresh tokens.")
 
-    # /me
+    # /me — Step F2: signup already created the one business, named from business_name
     status, body, _ = request("GET", "/me/", token=access)
     if status != 200:
         fail(f"/me: expected HTTP 200, got {status} ({body})")
-    if body.get("user", {}).get("mobile") != mobile or body.get("businesses") != []:
+    me_businesses = body.get("businesses", [])
+    if (
+        body.get("user", {}).get("mobile") != mobile
+        or len(me_businesses) != 1
+        or me_businesses[0].get("name") != business_name
+    ):
         fail(f"/me: unexpected response body {body}")
-    print("OK — /me returned the signed-in user with an empty businesses list.")
+    print("OK — /me returned the signed-in user with the one business created at signup.")
 
     # refresh
     status, body, _ = request("POST", "/auth/refresh/", {"refresh": refresh})

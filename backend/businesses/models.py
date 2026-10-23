@@ -21,8 +21,12 @@ class BusinessType(models.TextChoices):
 
 class Business(models.Model):
     name = models.CharField(max_length=120)
-    business_type = models.CharField(max_length=32, choices=BusinessType.choices)
-    city = models.CharField(max_length=120)
+    # Blank until the onboarding wizard's first step fills them in — Step F2 creates the Business
+    # itself at signup, with only its name known yet.
+    business_type = models.CharField(
+        max_length=32, choices=BusinessType.choices, blank=True, default=""
+    )
+    city = models.CharField(max_length=120, blank=True, default="")
     pincode = models.CharField(max_length=6, blank=True)
     state = models.CharField(max_length=64, blank=True)
     country = models.CharField(max_length=2, default="IN")

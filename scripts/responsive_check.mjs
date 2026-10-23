@@ -471,9 +471,11 @@ async function measurePage(page) {
 
 // ---------- auth setup (reused across many width/route combinations) ----------
 
-async function signup(page, name, mobile, password) {
+// Step F2: business name is asked once, here, at sign-up — never again on /setup/1.
+async function signup(page, name, mobile, password, businessName) {
   await page.goto(`${APP_URL}/signup`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await typeInto(page, 'Your name', name);
+  await typeInto(page, 'Business name', businessName);
   await typeInto(page, 'Mobile number', mobile);
   await typeInto(page, 'Password', password);
   await clickAndSettle(await findVisible(page, '[role="checkbox"]'));
@@ -513,12 +515,11 @@ async function buildOwnerSession(page) {
   const mobile = randomMobile();
   const password = `Resp${Math.floor(1000 + Math.random() * 9000)}!`;
 
-  await signup(page, name, mobile, password);
+  await signup(page, name, mobile, password, "Lincy's Kitchen");
   await waitForText(page, 'Account created. Log in to set up your business.');
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
 
-  await typeInto(page, 'Business name', "Lincy's Kitchen");
   // 560034 (Bengaluru/Koramangala) — the pincode lookup fills in State and City.
   await typeInto(page, 'Pincode', '560034');
   await waitForText(page, 'Karnataka');

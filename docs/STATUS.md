@@ -329,6 +329,17 @@ not built yet.
   all of the above, including the last-superuser case via a rolled-back transaction so no real
   account is ever touched.
 
+- **Step F2 — The business name is asked once, at sign-up.** `SignupSerializer` gained
+  `business_name`; `SignupView` now creates the Business in the same transaction as the User, with
+  only its name (`business_type`/`city` now `blank=True`, filled in by the wizard) — new
+  `businesses/creation.py`'s `create_business` is shared with `BusinessCreateView`. Onboarding step 1
+  shows the name as a line with a Change link (inline edit); `BusinessForm`'s name field only renders
+  for the true fallback case (older account, invite, or a business that somehow has no name yet).
+  Always a PATCH on the existing business, never a second create. Fixed a pre-existing race while on
+  this: `setup/1.tsx`'s draft state hydrated from `existing` only once at mount, which could capture
+  nothing if a post-login redirect landed before AuthContext's businesses fetch had committed —
+  invisible before (every field was blank right after signup); now re-hydrates via `useLayoutEffect`.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every
