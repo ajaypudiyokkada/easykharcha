@@ -31,7 +31,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   sent; `sell-items/bulk/` stays ingredients-free, recipe_status=none, `skip_existing` — Step 22a2:
   every manual UI create/edit now goes through the single, ingredient-required endpoints; bulk is
   only the starter-pack tick list and a future menu-upload flow), serializers.py
-  (`SellItemCreateSerializer`/`IngredientRowSerializer`), exceptions.py, urls.py.
+  (`SellItemCreateSerializer`/`IngredientRowSerializer`), exceptions.py (Step F4: `TooManyRows`'s
+  message now names the actual configured cap), urls.py.
   Step C2a built the choice screen and a bulk-create-without-ingredients caller (`mobile/app/
   menu-scan/`, below). Still unbuilt: `RecipeStatus.UNCONFIRMED` and `DishRecipeForm`'s `stepLabel`/
   `onSkip` card-flow props, for Step C2b's guided ingredients pass.
