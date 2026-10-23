@@ -159,6 +159,9 @@ LOGIN_LOCKOUT_MINUTES = 15
 MAX_BUSINESSES_PER_USER = env.int("MAX_BUSINESSES_PER_USER", default=3)
 MAX_LOGO_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_TEAM_MEMBERS_PER_BUSINESS = env.int("MAX_TEAM_MEMBERS_PER_BUSINESS", default=10)
+# stock-items/bulk/ and sell-items/bulk/'s per-request row cap (stock/views.py's _rows_from_request)
+# — a large scanned menu can carry more dishes than the old hardcoded 100 in one "Add N dishes" tap.
+MAX_BULK_ROWS = env.int("MAX_BULK_ROWS", default=500)
 
 # (attempts, window in seconds). Dev-only LocMemCache backs this — see accounts/ratelimit.py.
 RATE_LIMITS = {

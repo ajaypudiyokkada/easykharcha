@@ -374,6 +374,14 @@ not built yet.
   submit counter on `login.tsx`/`signup.tsx`) re-hides the value once the sheet closes/reopens or the
   form is submitted. No backend change; signup has no confirm-password field to extend.
 
+- **Step F4 — Configurable bulk-row cap.** `stock-items/bulk/`/`sell-items/bulk/`'s per-request row
+  cap was a hardcoded 100 (`stock/views.py`'s old `MAX_BULK_ROWS`); a scanned menu with more dishes
+  than that failed "Add N dishes" with a generic error, since the review screen didn't recognise
+  `TOO_MANY_ROWS`. Now `settings.MAX_BULK_ROWS` (env `MAX_BULK_ROWS`, default 500), and
+  `TooManyRows`'s message names the actual configured cap instead of a hardcoded "100". No frontend
+  change — the review screen still has no batching or a specific message for this error, just a
+  much higher ceiling before it's hit.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

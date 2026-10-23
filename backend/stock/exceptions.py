@@ -16,8 +16,10 @@ class BulkValidationError(APIException):
 
 class TooManyRows(APIException):
     status_code = 422
-    default_detail = "You can add up to 100 rows at a time."
     default_code = "TOO_MANY_ROWS"
+
+    def __init__(self, max_rows: int):
+        super().__init__(detail=f"You can add up to {max_rows} rows at a time.")
 
 
 class StockItemUnitLocked(APIException):

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
@@ -28,7 +29,6 @@ from .serializers import (
     StockItemUpdateSerializer,
 )
 
-MAX_BULK_ROWS = 100
 PRICE_HISTORY_POINTS = 12
 RECENT_PURCHASES = 5
 
@@ -93,8 +93,8 @@ def _rows_from_request(request) -> list:
     rows = request.data.get("items")
     if not isinstance(rows, list) or not rows:
         raise ValidationError({"items": "Add at least one item."})
-    if len(rows) > MAX_BULK_ROWS:
-        raise TooManyRows()
+    if len(rows) > settings.MAX_BULK_ROWS:
+        raise TooManyRows(settings.MAX_BULK_ROWS)
     return rows
 
 
