@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { colours, fonts, radii, spacing } from '../theme/tokens';
@@ -7,6 +7,7 @@ import { Small } from './Text';
 import { TextField, type TextFieldProps } from './TextField';
 
 export type PasswordStrength = 'weak' | 'okay' | 'strong';
+export type SecretMode = 'password' | 'pin';
 
 const STRENGTH_WORD: Record<PasswordStrength, string> = {
   weak: 'Weak',
@@ -21,14 +22,36 @@ export function computeStrength(value: string): PasswordStrength {
   return 'weak';
 }
 
-type Props = Omit<TextFieldProps, 'right' | 'left' | 'secureTextEntry'>;
+type Props = Omit<TextFieldProps, 'right' | 'left' | 'secureTextEntry'> & {
+  /** 'pin' drops the strength meter and forces the numeric keypad — team-member PIN fields. */
+  mode?: SecretMode;
+  /** false for an *existing* secret (login) — a strength meter only makes sense when choosing one. */
+  showStrength?: boolean;
+  /** Hides a shown password/PIN again — pass the sheet's `visible` prop or a submit counter so the
+   * value re-hides when the screen/sheet is left or the form is submitted. */
+  resetSignal?: unknown;
+};
 
-/** §4 in the kit: a `TextField` with a Show/Hide toggle and a three-bar strength meter + word —
- * strength is never colour alone, the word is always shown too. */
-export function PasswordField({ value, ...rest }: Props) {
+/** §4 in the kit: a `TextField` with a Show/Hide toggle and (password mode only) a three-bar
+ * strength meter + word — strength is never colour alone, the word is always shown too. The one
+ * shared field for every password and PIN entry/reset/change form in the app. */
+export function PasswordField({
+  value,
+  mode = 'password',
+  showStrength = true,
+  resetSignal,
+  keyboardType,
+  ...rest
+}: Props) {
   const [visible, setVisible] = useState(false);
+  const isPin = mode === 'pin';
   const strength = computeStrength(value);
-  const showMeter = value.length > 0;
+  const showMeter = !isPin && showStrength && value.length > 0;
+  const noun = isPin ? 'PIN' : 'password';
+
+  useEffect(() => {
+    setVisible(false);
+  }, [resetSignal]);
 
   return (
     <View style={styles.wrapper}>
@@ -36,10 +59,11 @@ export function PasswordField({ value, ...rest }: Props) {
         {...rest}
         value={value}
         secureTextEntry={!visible}
+        keyboardType={isPin ? 'number-pad' : keyboardType}
         right={
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={visible ? 'Hide password' : 'Show password'}
+            accessibilityLabel={visible ? `Hide ${noun}` : `Show ${noun}`}
             onPress={() => setVisible((current) => !current)}
             style={styles.toggle}
           >

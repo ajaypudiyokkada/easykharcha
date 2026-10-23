@@ -34,7 +34,6 @@ export function TeamAddSheet({ visible, onClose, onSaved }: Props) {
   const [mobile, setMobile] = useState('');
   const [role, setRole] = useState<Role | ''>('');
   const [secret, setSecret] = useState('');
-  const [secretVisible, setSecretVisible] = useState(false);
   const [errors, setErrors] = useState<
     Partial<Record<'name' | 'mobile' | 'role' | 'secret', string>>
   >({});
@@ -47,7 +46,6 @@ export function TeamAddSheet({ visible, onClose, onSaved }: Props) {
     setMobile('');
     setRole('');
     setSecret('');
-    setSecretVisible(false);
     setErrors({});
     setFormError(null);
   }, [visible]);
@@ -138,28 +136,19 @@ export function TeamAddSheet({ visible, onClose, onSaved }: Props) {
             // This sets someone else's temporary password, not the signed-in Owner's own — "off"
             // stops Chrome/the OS from offering to generate/save it to the Owner's own account.
             autoComplete="off"
+            resetSignal={visible}
             error={errors.secret}
           />
         ) : (
-          <TextField
+          <PasswordField
+            mode="pin"
             label={s.pinLabel}
             value={secret}
             onChangeText={(value) => setSecret(value.replace(/[^0-9]/g, ''))}
-            secureTextEntry={!secretVisible}
-            keyboardType="number-pad"
             maxLength={6}
+            resetSignal={visible}
             hint={errors.secret ? undefined : s.pinHint}
             error={errors.secret}
-            right={
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={secretVisible ? 'Hide PIN' : 'Show PIN'}
-                onPress={() => setSecretVisible((current) => !current)}
-                style={styles.secretToggle}
-              >
-                <Small style={styles.secretToggleText}>{secretVisible ? 'Hide' : 'Show'}</Small>
-              </Pressable>
-            }
           />
         )}
 
@@ -205,17 +194,6 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: colours.danger,
-    fontFamily: fonts.bodyExtraBold,
-  },
-  secretToggle: {
-    minWidth: spacing.huge + spacing.xl,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  secretToggleText: {
-    color: colours.primary,
     fontFamily: fonts.bodyExtraBold,
   },
   reminder: {

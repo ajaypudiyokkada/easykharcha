@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../api/client';
 import type { TeamMember } from '../api/team';
 import { useAuth } from '../auth/AuthContext';
 import { strings } from '../strings';
-import { colours, fonts, spacing } from '../theme/tokens';
+import { colours, spacing } from '../theme/tokens';
 import { Banner, PasswordField, Sheet } from '../ui';
 import { Button } from '../ui/Button';
-import { TextField } from '../ui/TextField';
 import { Small } from '../ui/Text';
 
 const s = strings.resetSecretSheet;
@@ -29,7 +28,6 @@ export function ResetSecretSheet({ visible, member, usesPin, onClose, onSaved }:
   const business = businesses[0];
 
   const [secret, setSecret] = useState('');
-  const [secretVisible, setSecretVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -37,7 +35,6 @@ export function ResetSecretSheet({ visible, member, usesPin, onClose, onSaved }:
   useEffect(() => {
     if (!visible) return;
     setSecret('');
-    setSecretVisible(false);
     setError(null);
     setFormError(null);
   }, [visible]);
@@ -75,25 +72,15 @@ export function ResetSecretSheet({ visible, member, usesPin, onClose, onSaved }:
       {formError ? <Banner kind="error">{formError}</Banner> : null}
 
       {usesPin ? (
-        <TextField
+        <PasswordField
+          mode="pin"
           label={s.pinLabel}
           value={secret}
           onChangeText={(value) => setSecret(value.replace(/[^0-9]/g, ''))}
-          secureTextEntry={!secretVisible}
-          keyboardType="number-pad"
           maxLength={6}
+          resetSignal={visible}
           hint={error ? undefined : s.pinHint}
           error={error ?? undefined}
-          right={
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={secretVisible ? 'Hide PIN' : 'Show PIN'}
-              onPress={() => setSecretVisible((current) => !current)}
-              style={styles.secretToggle}
-            >
-              <Small style={styles.secretToggleText}>{secretVisible ? 'Hide' : 'Show'}</Small>
-            </Pressable>
-          }
         />
       ) : (
         <PasswordField
@@ -103,6 +90,7 @@ export function ResetSecretSheet({ visible, member, usesPin, onClose, onSaved }:
           // This resets someone else's password, not the signed-in Owner's own — "off" stops
           // Chrome/the OS from offering to generate/save it to the Owner's own account.
           autoComplete="off"
+          resetSignal={visible}
           error={error ?? undefined}
         />
       )}
@@ -127,17 +115,6 @@ export function ResetSecretSheet({ visible, member, usesPin, onClose, onSaved }:
 }
 
 const styles = StyleSheet.create({
-  secretToggle: {
-    minWidth: spacing.huge + spacing.xl,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  secretToggleText: {
-    color: colours.primary,
-    fontFamily: fonts.bodyExtraBold,
-  },
   note: {
     color: colours.muted,
     marginTop: spacing.sm,

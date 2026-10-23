@@ -247,7 +247,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `MobileField.tsx` — TextField with a fixed "+91" prefix
 - `NoAccess.tsx` — "you don't have access" block
 - `OfflineRetry.tsx` — offline banner + retry
-- `PasswordField.tsx` — TextField + Show/Hide toggle + strength meter
+- `PasswordField.tsx` — Step F3: TextField + Show/Hide toggle; `mode` ('password', with a strength
+  meter, or 'pin', numeric keypad/no meter) and `resetSignal` (re-hides on submit or sheet
+  open/close) — the one shared field for every password/PIN field in the app (login, signup, team
+  add/change-role/reset-secret), replacing three separate inline PIN-toggle copies
 - `PriceChart.tsx` — Step 9's hand-rolled single-series price chart (Stock item detail)
 - `charts/BarChart.tsx`, `charts/LineChart.tsx` — Step 16: react-native-svg + d3-scale/d3-shape/
   d3-array; stacked/grouped bars or 1-3 lines (+ an optional dashed reference series), nearest-point
