@@ -12,6 +12,9 @@ from django.utils.html import escape, format_html
 from django.utils.translation import gettext as _
 from django.views.decorators.debug import sensitive_post_parameters
 
+from audit.log import log_action
+from businesses.models import Business
+
 from .models import User
 
 sensitive_post_parameters_m = method_decorator(sensitive_post_parameters())
@@ -42,7 +45,65 @@ class UserAdmin(admin.ModelAdmin):
     change_user_password_template = None  # default: admin/auth/user/change_password.html
 
     def has_delete_permission(self, request, obj=None):
-        return False
+        # Step F1: delete is superuser-only, and never for the admin's own account or the last
+        # active superuser — the list-view bulk action is guarded again in delete_queryset below,
+        # since Django's built-in "Delete selected" only calls this once, with obj=None.
+        if not request.user.is_superuser:
+            return False
+        if obj is not None:
+            if obj.pk == request.user.pk:
+                return False
+            if obj.is_superuser and not self._other_active_superuser_exists(obj):
+                return False
+        return True
+
+    @staticmethod
+    def _other_active_superuser_exists(obj) -> bool:
+        return User.objects.filter(is_superuser=True, is_active=True).exclude(pk=obj.pk).exists()
+
+    def get_deleted_objects(self, objs, request):
+        deletable_objects, model_count, perms_needed, protected = super().get_deleted_objects(
+            objs, request
+        )
+        owned = Business.objects.filter(created_by__in=objs)
+        if owned.exists():
+            names = ", ".join(business.name for business in owned)
+            messages.warning(
+                request,
+                f"Owns a business ({names}). Use the Business admin's 'Delete business and all its "
+                "data' action first (or to delete both) — this user can't be deleted while it "
+                "exists, since Business.created_by is protected.",
+            )
+        return deletable_objects, model_count, perms_needed, protected
+
+    def delete_model(self, request, obj):
+        log_action(
+            user=request.user,
+            action="admin.user_delete",
+            metadata={"deleted_user_email": obj.email, "deleted_user_id": obj.pk},
+        )
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        blocked_ids = set(queryset.filter(pk=request.user.pk).values_list("pk", flat=True))
+        total_active_superusers = User.objects.filter(is_superuser=True, is_active=True).count()
+        selected_superusers = queryset.filter(is_superuser=True, is_active=True).count()
+        if selected_superusers and selected_superusers >= total_active_superusers:
+            blocked_ids |= set(queryset.filter(is_superuser=True).values_list("pk", flat=True))
+        if blocked_ids:
+            messages.warning(
+                request,
+                "Skipped your own account and/or the last active superuser — these can never be "
+                "deleted from here.",
+            )
+        allowed = queryset.exclude(pk__in=blocked_ids)
+        for user in allowed:
+            log_action(
+                user=request.user,
+                action="admin.user_delete",
+                metadata={"deleted_user_email": user.email, "deleted_user_id": user.pk},
+            )
+        allowed.delete()
 
     @admin.display(description="Password")
     def password_change_link(self, obj):

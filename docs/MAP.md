@@ -69,7 +69,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
-  admin_mixins.py` (the read-only mixins)
+  admin_mixins.py` (the read-only mixins). Step F1: `accounts.UserAdmin` delete is superuser-only
+  (never self, never the last active superuser); `businesses.BusinessAdmin.delete_business_and_data`
+  (superuser-only action, confirm page at `businesses/templates/admin/businesses/
+  confirm_delete_business.html`) deletes a business and all its data in PROTECT-safe order, one
+  transaction, one audit-log line — `Business`/ledger models otherwise stay undeletable directly.
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
 

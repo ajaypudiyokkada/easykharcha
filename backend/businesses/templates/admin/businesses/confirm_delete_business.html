@@ -1,0 +1,25 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p style="color:#b91c1c;font-weight:bold;">This cannot be undone. Everything listed below will be
+  permanently deleted, not archived.</p>
+
+{% for business, counts in businesses_data %}
+  <h3>{{ business.name }} (owner: {{ business.created_by.email }})</h3>
+  <ul>
+    {% for label, count in counts.items %}
+      <li>{{ label }}: {{ count }}</li>
+    {% endfor %}
+  </ul>
+{% endfor %}
+
+<form method="post">
+  {% csrf_token %}
+  {% for business in queryset %}
+    <input type="hidden" name="{{ action_checkbox_name }}" value="{{ business.pk }}">
+  {% endfor %}
+  <input type="hidden" name="action" value="delete_business_and_data">
+  <input type="submit" name="apply" value="Yes, permanently delete everything" style="background:#b91c1c;color:#fff;padding:10px 16px;border:none;cursor:pointer;">
+  <a href="." style="margin-left:12px;">Cancel</a>
+</form>
+{% endblock %}

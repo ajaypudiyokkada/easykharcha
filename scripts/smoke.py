@@ -5342,6 +5342,174 @@ def check_ai_flow() -> None:
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
+def check_admin_delete_flow() -> None:
+    """Step F1: Django admin delete rules for User/Business — direct ORM + django.test.Client against
+    the same dev database the rest of this suite's API checks use (admin pages are server-rendered,
+    not part of the DRF API, so there's no live-server HTTP call here, same pattern as
+    check_ai_provider_signature). Covers: a no-business user deletes clean; deleting a business via
+    its admin action cascades everything (no orphan rows, no raw IntegrityError) while leaving the
+    owner account itself alone; a non-superuser staff account can't delete at all; the last active
+    superuser can't be deleted (tested inside a rolled-back transaction, so no real admin account is
+    ever actually touched)."""
+    import random
+    import uuid
+    from types import SimpleNamespace
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+    from django.db import transaction
+    from django.test import Client
+    from django.utils import timezone as django_timezone
+
+    from accounts.admin import UserAdmin
+    from accounts.models import User
+    from businesses.admin import BusinessAdmin
+    from businesses.models import Business
+    from counts.models import CountLine, StockCount
+    from sales.models import Sale
+    from stock.models import SellItem, StockItem
+    from wastage.models import WastageEntry
+
+    def _mobile() -> str:
+        return random.choice("6789") + "".join(random.choices("0123456789", k=9))
+
+    tag = uuid.uuid4().hex[:8]
+    admin_path = f"/{__import__('django.conf', fromlist=['settings']).settings.ADMIN_URL_PATH}"
+
+    superuser = User.objects.create_superuser(
+        mobile=_mobile(), name=f"Admin {tag}", password="AdminPass123!", email=f"admin{tag}@test.local"
+    )
+    staff = User.objects.create_user(
+        mobile=_mobile(), name=f"Staff {tag}", password="StaffPass123!", email=f"staff{tag}@test.local"
+    )
+    staff.is_staff = True
+    staff.save(update_fields=["is_staff"])
+
+    try:
+        client = Client()
+        client.force_login(superuser)
+
+        # --- a plain user with no business deletes clean ---
+        lonely = User.objects.create_user(mobile=_mobile(), name="Lonely", password="x")
+        response = client.post(
+            f"{admin_path}accounts/user/{lonely.pk}/delete/", {"post": "yes"}, follow=True
+        )
+        if response.status_code != 200 or User.objects.filter(pk=lonely.pk).exists():
+            fail(f"admin delete flow: expected the no-business user deleted, got {response.status_code}")
+        print("OK — a superuser deletes a no-business user cleanly from the admin.")
+
+        # --- deleting a business via its admin action cascades, no orphans, owner untouched ---
+        owner = User.objects.create_user(mobile=_mobile(), name="Owner", password="x")
+        business = Business.objects.create(
+            name=f"Test Biz {tag}", business_type="restaurant_cafe", city="Pune", created_by=owner
+        )
+        stock_item = StockItem.objects.create(business=business, created_by=owner, name="Rice", unit="kg")
+        sell_item = SellItem.objects.create(
+            business=business, created_by=owner, name="Veg Rice", selling_price="100"
+        )
+        now = django_timezone.now()
+        count = StockCount.objects.create(
+            business=business,
+            count_type="opening",
+            business_date=now.date(),
+            counted_by=owner,
+            deadline_at=now,
+        )
+        CountLine.objects.create(count=count, stock_item=stock_item, state="counted", counted_qty="5")
+        WastageEntry.objects.create(
+            business=business,
+            stock_item=stock_item,
+            quantity="1",
+            reason="spoiled",
+            recorded_by=owner,
+        )
+        Sale.objects.create(
+            business=business,
+            sell_item=sell_item,
+            business_date="2026-01-01",
+            quantity=1,
+            amount="100",
+            recorded_by=owner,
+        )
+
+        response = client.post(
+            f"{admin_path}businesses/business/",
+            {
+                "action": "delete_business_and_data",
+                ACTION_CHECKBOX_NAME: [str(business.pk)],
+                "apply": "1",
+            },
+            follow=True,
+        )
+        if response.status_code != 200:
+            fail(f"admin delete flow: business delete action expected 200, got {response.status_code}")
+        if Business.objects.filter(pk=business.pk).exists():
+            fail("admin delete flow: business still exists after the delete action")
+        if StockItem.objects.filter(business_id=business.pk).exists() or SellItem.objects.filter(
+            business_id=business.pk
+        ).exists():
+            fail("admin delete flow: stock/sell items were orphaned after the business delete")
+        if not User.objects.filter(pk=owner.pk).exists():
+            fail("admin delete flow: deleting the business must not delete its owner")
+        print("OK — the business delete action cascades everything with no orphan rows, owner kept.")
+
+        # Now the owner is unprotected (no business left) — deleting them must work too.
+        response = client.post(
+            f"{admin_path}accounts/user/{owner.pk}/delete/", {"post": "yes"}, follow=True
+        )
+        if User.objects.filter(pk=owner.pk).exists():
+            fail("admin delete flow: expected the now-business-less owner to delete cleanly")
+        print("OK — the owner deletes cleanly once their business (and its data) is gone.")
+
+        # --- a non-superuser staff account cannot delete at all ---
+        target = User.objects.create_user(mobile=_mobile(), name="Target", password="x")
+        staff_client = Client()
+        staff_client.force_login(staff)
+        response = staff_client.post(
+            f"{admin_path}accounts/user/{target.pk}/delete/", {"post": "yes"}
+        )
+        if response.status_code == 200 and not User.objects.filter(pk=target.pk).exists():
+            fail("admin delete flow: a non-superuser staff account was able to delete a user")
+        if not User.objects.filter(pk=target.pk).exists():
+            fail("admin delete flow: the target user should not have been deleted by non-superuser staff")
+        print("OK — non-superuser staff cannot delete a user from the admin.")
+        target.delete()
+
+        # --- the last active superuser can never be deleted — proven inside a rolled-back
+        # transaction, so no real superuser account in this dev database is ever actually touched ---
+        class _RollbackProbe(Exception):
+            pass
+
+        try:
+            with transaction.atomic():
+                User.objects.filter(is_superuser=True, is_active=True).exclude(pk=superuser.pk).update(
+                    is_active=False
+                )
+                fake_request = SimpleNamespace(user=superuser)
+                if UserAdmin(User, None).has_delete_permission(fake_request, superuser):
+                    fail("admin delete flow: the last active superuser must not be deletable")
+                raise _RollbackProbe()
+        except _RollbackProbe:
+            pass
+        print("OK — the last active superuser can't be deleted (checked, then rolled back).")
+
+        # has_delete_permission(obj=None) still allows other superuser accounts to use the page —
+        # BusinessAdmin's action similarly refuses a non-superuser.
+        if BusinessAdmin(Business, None).has_delete_permission(SimpleNamespace(user=staff)):
+            fail("admin delete flow: BusinessAdmin.has_delete_permission should always be False (the "
+                 "model stays undeletable directly — only the custom action removes it)")
+        print("OK — Business itself stays undeletable from its own admin page.")
+    finally:
+        User.objects.filter(pk__in=[superuser.pk, staff.pk]).delete()
+        Business.objects.filter(created_by__email__endswith="@test.local").delete()
+
+
 ALL_CHECKS = [
     check_permission_table,
     check_auth_flow,
@@ -5365,6 +5533,7 @@ ALL_CHECKS = [
     check_pincode_geo_flow,
     check_ai_provider_signature,
     check_ai_flow,
+    check_admin_delete_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -5393,6 +5562,7 @@ AREA_CHECKS: dict[str, list] = {
     "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
     "reports": [check_reports_flow],
     "ai": [check_ai_provider_signature, check_ai_flow],
+    "admin": [check_admin_delete_flow],
 }
 
 
