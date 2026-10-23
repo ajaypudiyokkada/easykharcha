@@ -41,10 +41,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
   models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
-- `ai/` — Step C1/C1b/C1c/C1d: menu reading + recipe suggestions via Anthropic (provider/ — fake.py for
-  AI_FAKE with realistic token counts, anthropic_provider.py for real (no `temperature` kwarg —
-  anthropic 2.x's Messages.create dropped it), base.py's run_with_fallback shared by both, now also
-  carrying a `truncated`/max_tokens flag); models.py
+- `ai/` — Step C1/C1b/C1c/C1d/C1e: menu reading + recipe suggestions via Anthropic (provider/ — fake.py
+  for AI_FAKE with realistic token counts, anthropic_provider.py for real (no `temperature` kwarg —
+  anthropic 2.x's Messages.create dropped it; `tool_choice_for_model`'s `_MODELS_REQUIRING_AUTO_TOOL_CHOICE`
+  set — Step C1e: claude-sonnet-5-5 rejects a forced tool_choice since it defaults to adaptive
+  thinking, so it gets `{"type": "auto"}` + a system line forcing the tool instead, retried once if no
+  tool_use block comes back), base.py's run_with_fallback shared by both, now also carrying a
+  `truncated`/max_tokens flag and logging (no raw content) when the primary model's output fails
+  validation); models.py
   (MenuScan, AiUsage, AiRecipeCache — keyed by prompt_version too), schemas.py (pydantic validation —
   dish `kind`/`note`/`variants` (price-like variants rejected), recipe `ingredients`<=7/
   `minor_ingredients`, 400-dish cap, merge_menu_results for PDF chunks), limits.py (daily per-business

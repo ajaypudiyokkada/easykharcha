@@ -2,11 +2,14 @@
 provider only has to supply get_raw (how to get one attempt's raw tool input) and parse (how to
 validate and sanitise it) — the retry-once-on-the-fallback-model logic lives here exactly once."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from .errors import AiSchemaError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,8 +38,15 @@ def run_with_fallback(
             output_tokens=output_tokens,
             truncated=truncated,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # Never log raw — it's the model's raw menu/recipe output. Falling back to fallback_model.
+        logger.warning(
+            "AI primary model %s output failed validation (%s), falling back to %s: %s",
+            primary_model,
+            type(exc).__name__,
+            fallback_model,
+            exc,
+        )
 
     raw, model, input_tokens, output_tokens, truncated = get_raw(1, fallback_model)
     try:
