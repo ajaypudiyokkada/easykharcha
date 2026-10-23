@@ -256,6 +256,17 @@ not built yet.
   that. `sell-items/` (single create) and its PATCH already required >=1 ingredient since Step 22a,
   so no backend change was needed; `sell-items/bulk/` stays ingredients-free, still used by the
   starter-pack tick list.
+- **Step C1b — AI cost-maths fix, prompt tuning, no silent truncation.** Fixed a real crash
+  (`ai_try_menu.py` mixed `float` into `settings.AI_PRICE_*`'s `Decimal`, which `ai/limits.py` was
+  already doing correctly) and gave the fake provider realistic token counts (2,500 in/1,200 out) so
+  `AiUsage.est_cost_usd`/the monthly cap behave like the real API. `ExtractedDish` gained
+  `kind` (dish/addon), `note` ("has options"/"two names"), `variants`; `DishRecipeSuggestion` split
+  into `ingredients` (max 7) and `minor_ingredients` (salt/pepper/water/<2g spice); confidence/prompt
+  wording tuned; `temperature=0`, `RECIPE_PROMPT_VERSION` bumped (now part of `AiRecipeCache`'s
+  key) to invalidate stale cache rows. A PDF menu is now read ~3 pages per call (`ai/jobs.py`'s
+  `_chunk_pdf`) and merged/deduped (`schemas.merge_menu_results`); the dish cap is 400, and a
+  max_tokens stop or a cap hit sets `MenuScan.result.incomplete` instead of returning a silent
+  partial list — never exposed in the 10-page/10MB upload limits, which are unchanged.
 
 ## Permission table
 

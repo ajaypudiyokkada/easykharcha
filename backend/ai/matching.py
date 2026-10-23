@@ -9,24 +9,42 @@ _WHITESPACE = re.compile(r"\s+")
 
 FUZZY_CUTOFF = 0.82
 
+# Every stock Unit (stock/models.py) grouped into the three per-portion units a recipe ingredient
+# can use (schemas.IngredientSuggestion) — recipe_messages tells the model which family a matched
+# stock item belongs to, since the backend never converts between units itself.
+_UNIT_FAMILY_BY_UNIT = {
+    "kg": "g",
+    "g": "g",
+    "tonne": "g",
+    "L": "ml",
+    "ml": "ml",
+    "bottle": "ml",
+}
+
 
 def normalise(name: str) -> str:
     return _WHITESPACE.sub(" ", name.strip().lower())
+
+
+def unit_family(unit: str) -> str:
+    return _UNIT_FAMILY_BY_UNIT.get(unit, "pieces")
 
 
 def existing_dish_names(business) -> set[str]:
     return {normalise(name) for name in business.sell_items.values_list("name", flat=True)}
 
 
-def stock_items_by_normalised_name(business) -> dict[str, tuple[int, str]]:
+def stock_items_by_normalised_name(business) -> dict[str, tuple[int, str, str]]:
     return {
-        normalise(name): (item_id, name)
-        for item_id, name in business.stock_items.filter(active=True).values_list("id", "name")
+        normalise(name): (item_id, name, unit)
+        for item_id, name, unit in business.stock_items.filter(active=True).values_list(
+            "id", "name", "unit"
+        )
     }
 
 
-def match_stock_item(stock_by_norm: dict[str, tuple[int, str]], name_hint: str | None):
-    """Returns (stock_item_id, stock_item_name) for the best match, or None."""
+def match_stock_item(stock_by_norm: dict[str, tuple[int, str, str]], name_hint: str | None):
+    """Returns (stock_item_id, stock_item_name, unit) for the best match, or None."""
     if not name_hint:
         return None
     norm = normalise(name_hint)

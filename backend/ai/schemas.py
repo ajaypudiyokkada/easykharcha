@@ -7,10 +7,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-MAX_DISHES_PER_SCAN = 150
+from .matching import normalise
+
+MAX_DISHES_PER_SCAN = 400
 MAX_NAME_LENGTH = 80
 MAX_PORTION_LABEL_LENGTH = 40
-MAX_INGREDIENTS_PER_DISH = 12
+MAX_INGREDIENTS_PER_DISH = 7
+MAX_MINOR_INGREDIENTS_PER_DISH = 8
+MAX_VARIANTS_PER_DISH = 6
+MAX_NOTE_LENGTH = 20
+_ALLOWED_NOTES = {"has options", "two names"}
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
@@ -27,6 +33,9 @@ class ExtractedDish(BaseModel):
     name: str
     price: float | None = None
     confidence: float = 0.5
+    kind: Literal["dish", "addon"] = "dish"
+    note: str = ""
+    variants: list[str] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -42,6 +51,18 @@ class ExtractedDish(BaseModel):
     @classmethod
     def _non_negative_price(cls, value: float | None) -> float | None:
         return None if value is None or value < 0 else value
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, value: str) -> str:
+        cleaned = _clean_text(value, MAX_NOTE_LENGTH)
+        return cleaned if cleaned in _ALLOWED_NOTES else ""
+
+    @field_validator("variants")
+    @classmethod
+    def _clean_variants(cls, value: list[str]) -> list[str]:
+        cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
+        return [v for v in cleaned if v][:MAX_VARIANTS_PER_DISH]
 
 
 class ExtractedSection(BaseModel):
@@ -82,6 +103,47 @@ class MenuExtractionResult(BaseModel):
         return {"is_menu": True, "sections": kept_sections}
 
 
+def merge_menu_results(chunk_results: list[dict]) -> tuple[dict, bool]:
+    """Combines one sanitized() dict per PDF page-chunk (or just one, for an image scan) into a
+    single result, de-duplicating dishes by normalised name across chunks (the same dish can appear
+    on more than one page) and re-applying MAX_DISHES_PER_SCAN across the combined total. Returns
+    (merged_result, hit_cap) — hit_cap is True when dishes were dropped for the cap, which ai/jobs.py
+    turns into the scan's incomplete flag so a long menu is never silently cut short."""
+    sections_by_name: dict[str, dict] = {}
+    order: list[str] = []
+    seen_names: set[str] = set()
+    total = 0
+    hit_cap = False
+    is_menu = False
+
+    for result in chunk_results:
+        if not result.get("is_menu"):
+            continue
+        is_menu = True
+        for section in result.get("sections", []):
+            name = section["name"]
+            if name not in sections_by_name:
+                sections_by_name[name] = {"name": name, "dishes": []}
+                order.append(name)
+            for dish in section["dishes"]:
+                key = normalise(dish["name"])
+                if key in seen_names:
+                    continue
+                if total >= MAX_DISHES_PER_SCAN:
+                    hit_cap = True
+                    break
+                seen_names.add(key)
+                sections_by_name[name]["dishes"].append(dish)
+                total += 1
+            if total >= MAX_DISHES_PER_SCAN:
+                break
+        if total >= MAX_DISHES_PER_SCAN:
+            break
+
+    kept_sections = [sections_by_name[name] for name in order if sections_by_name[name]["dishes"]]
+    return {"is_menu": is_menu, "sections": kept_sections}, hit_cap
+
+
 class IngredientSuggestion(BaseModel):
     name: str
     amount: float
@@ -120,6 +182,7 @@ class DishRecipeSuggestion(BaseModel):
     dish_name: str
     portion_label: str = ""
     ingredients: list[IngredientSuggestion] = Field(default_factory=list)
+    minor_ingredients: list[IngredientSuggestion] = Field(default_factory=list)
 
     @field_validator("dish_name")
     @classmethod
@@ -135,6 +198,11 @@ class DishRecipeSuggestion(BaseModel):
     @classmethod
     def _cap_ingredients(cls, value: list) -> list:
         return value[:MAX_INGREDIENTS_PER_DISH]
+
+    @field_validator("minor_ingredients")
+    @classmethod
+    def _cap_minor_ingredients(cls, value: list) -> list:
+        return value[:MAX_MINOR_INGREDIENTS_PER_DISH]
 
 
 class RecipeSuggestionsResult(BaseModel):

@@ -30,11 +30,12 @@ def _tool_input(response, tool_name: str) -> dict:
 
 def _get_raw(
     *, model: str, system: str, messages: list[dict], tool: dict, max_tokens: int
-) -> tuple[dict, str, int, int]:
+) -> tuple[dict, str, int, int, bool]:
     try:
         response = _client().messages.create(
             model=model,
             max_tokens=max_tokens,
+            temperature=0,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=[tool],
             tool_choice={"type": "tool", "name": tool["name"]},
@@ -44,7 +45,8 @@ def _get_raw(
         raise AiProviderCallError(str(exc)) from exc
 
     raw = _tool_input(response, tool["name"])
-    return raw, model, response.usage.input_tokens, response.usage.output_tokens
+    truncated = response.stop_reason == "max_tokens"
+    return raw, model, response.usage.input_tokens, response.usage.output_tokens, truncated
 
 
 def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
@@ -66,9 +68,9 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
 
 
 def suggest_recipes(
-    dish_names: list[str], business_type: str, stock_item_names: list[str]
+    dish_names: list[str], business_type: str, stock_items: list[tuple[str, str]]
 ) -> AiCallResult:
-    messages = prompts.recipe_messages(dish_names, business_type, stock_item_names)
+    messages = prompts.recipe_messages(dish_names, business_type, stock_items)
     tool = prompts.recipe_tool()
 
     return run_with_fallback(

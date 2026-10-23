@@ -14,6 +14,7 @@ ever committed (see .gitignore), so that's a safe place to keep real photos for 
 import argparse
 import os
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
@@ -40,8 +41,8 @@ _MEDIA_TYPE_BY_SUFFIX = {
 
 def _cost(input_tokens: int, output_tokens: int) -> str:
     cost = (
-        input_tokens / 1_000_000 * settings.AI_PRICE_IN_PER_MTOK
-        + output_tokens / 1_000_000 * settings.AI_PRICE_OUT_PER_MTOK
+        Decimal(input_tokens) / Decimal(1_000_000) * settings.AI_PRICE_IN_PER_MTOK
+        + Decimal(output_tokens) / Decimal(1_000_000) * settings.AI_PRICE_OUT_PER_MTOK
     )
     return f"${cost:.4f}"
 
@@ -78,17 +79,33 @@ def main() -> None:
         f"(~{_cost(menu_result.input_tokens, menu_result.output_tokens)})"
     )
 
+    if menu_result.truncated:
+        print("\nWARNING: the model stopped at max_tokens — this result is incomplete.")
+
     if not menu_result.data["is_menu"]:
         print("\nis_menu: false — the model doesn't think this is a menu.")
         return
 
     dish_names = []
+    total_dishes = 0
     for section in menu_result.data["sections"]:
-        print(f"\n{section['name']}")
+        print(f"\n{section['name']} ({len(section['dishes'])} dishes)")
         for dish in section["dishes"]:
             price = f"Rs {dish['price']}" if dish["price"] is not None else "(no price)"
-            print(f"  - {dish['name']} — {price} (confidence {dish['confidence']:.2f})")
+            extras = []
+            if dish.get("kind") == "addon":
+                extras.append("addon")
+            if dish.get("note"):
+                extras.append(dish["note"])
+            if dish.get("variants"):
+                extras.append(f"variants: {', '.join(dish['variants'])}")
+            extra_text = f" [{'; '.join(extras)}]" if extras else ""
+            print(
+                f"  - {dish['name']} — {price} (confidence {dish['confidence']:.2f}){extra_text}"
+            )
             dish_names.append(dish["name"])
+            total_dishes += 1
+    print(f"\nTotal dishes: {total_dishes}")
 
     if not dish_names:
         return
@@ -105,6 +122,11 @@ def main() -> None:
         for ingredient in dish["ingredients"]:
             print(
                 f"  - {ingredient['name']}: {ingredient['amount']} {ingredient['unit']} "
+                f"({ingredient['role']}, confidence {ingredient['confidence']:.2f})"
+            )
+        for ingredient in dish.get("minor_ingredients", []):
+            print(
+                f"  - (minor) {ingredient['name']}: {ingredient['amount']} {ingredient['unit']} "
                 f"({ingredient['role']}, confidence {ingredient['confidence']:.2f})"
             )
 
