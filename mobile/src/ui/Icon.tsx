@@ -3,10 +3,13 @@ import {
   AlertTriangle,
   ArrowLeft,
   BarChart3,
+  Camera,
   Check,
   ChevronDown,
   ChevronRight,
   Clock,
+  FileText,
+  Image as ImageIcon,
   Info,
   Lock,
   Minus,
@@ -18,6 +21,7 @@ import {
   Search,
   Settings as SettingsIcon,
   ShoppingCart,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -59,6 +63,10 @@ const REGISTRY = {
   clock: Clock,
   lock: Lock,
   minus: Minus,
+  camera: Camera,
+  image: ImageIcon,
+  document: FileText,
+  scan: Sparkles,
 } as const;
 
 export type IconName = keyof typeof REGISTRY;

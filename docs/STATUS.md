@@ -301,6 +301,17 @@ not built yet.
   Haiku slip above and recovering on `claude-sonnet-5-5` (~$0.008); `menu1.jpeg` run a second time
   with `AI_MODEL_MENU`/`AI_MODEL_RECIPE` forced to `claude-sonnet-5-5` to prove that model works
   end-to-end as a primary, not just as a fallback.
+- **Step C2a — Menu upload UI: scan/upload, analyze, review, save.** Two backend fixes first:
+  `DishRecipeSuggestion.dish_name` now accepts a `name` alias (no fallback-model retry for Haiku's
+  occasional slip), and `schemas.py`'s variant validator keeps a short bare number on one side of a
+  slash (e.g. "Gobi Manchurian/65" — a dish style) while still stripping real prices. New
+  `sectorCopy`'s `menuScanEnabled`/`menuNoun` (food + homestay types only) gates a choice screen
+  ("Scan or upload" vs "Add one by one") on onboarding's "What you sell" and a new "Add from menu"
+  button on Settings' sell-items screen. New `/menu-scan` route group (source: camera/gallery/PDF
+  picker with client-side resize; analyzing: polls with backoff; review: editable grouped dish list,
+  tick/edit/delete/add, section rename, skip-existing, incomplete-scan "add another photo"; done)
+  all saving through the existing `sell-items/bulk/` endpoint (section name -> `group`). Recipes/
+  ingredients and best-sellers are not in this step — see Not built yet.
 
 ## Permission table
 
@@ -402,7 +413,8 @@ both say so in the UI.
   there's no dedicated multi-business management screen.
 - **Sales file upload (Petpooja)** — Step 14 deliberately built manual sales entry only, no upload
   button or upload screen; a later step may add bulk/file-based sales import.
-- **AI/scan recipe estimation — screens.** Step C1 built the backend (menu reading, recipe
-  suggestions — see `ai/` above); no "scan your menu" card or choice screen before "Add what you
-  sell" exists yet. `RecipeStatus.UNCONFIRMED` and `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow
-  props exist as extension points but nothing creates or drives them yet — Step C2.
+- **AI/scan recipe estimation — guided ingredients flow.** Step C2a built the menu upload/review/
+  save screens (dishes only, no ingredients — `recipe_status: none`). `RecipeStatus.UNCONFIRMED` and
+  `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props exist as extension points but nothing
+  creates or drives the recipe-suggestions call or a guided per-dish ingredients flow yet — Step C2b,
+  which also owns best-sellers.

@@ -5,7 +5,7 @@ caps sizes and strips control characters, per Step C1's "never trust model outpu
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from .matching import normalise
 
@@ -21,7 +21,12 @@ _ALLOWED_NOTES = {"has options", "two names"}
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # A variant must be an option/alternate NAME, never a price — this is a backstop for prompt drift
 # (e.g. "Chicken Lollipop / Drums of Heaven" miscast as variants ["300", "320"]).
-_PRICE_LIKE_VARIANT = re.compile(r"^[₹$]?\s*(rs\.?|inr)?\s*\d[\d,.]*\s*$", re.IGNORECASE)
+_PRICE_LIKE_VARIANT = re.compile(
+    r"^(?:(?P<marker>[₹$]|rs\.?|inr)\s*)?(?P<number>\d[\d,]*\.?\d*)\s*$", re.IGNORECASE
+)
+# A bare number (no ₹/Rs/INR marker) below this is treated as a dish-style suffix, not a price —
+# e.g. "Gobi Manchurian/65" is two dishes, Gobi Manchurian and Gobi 65, not a price of 65.
+_BARE_PRICE_FLOOR = 100
 
 
 def _clean_text(value: str, max_length: int) -> str:
@@ -30,6 +35,19 @@ def _clean_text(value: str, max_length: int) -> str:
 
 def _clamp_unit(value: float) -> float:
     return max(0.0, min(1.0, value))
+
+
+def _is_price_like(value: str) -> bool:
+    match = _PRICE_LIKE_VARIANT.match(value)
+    if not match:
+        return False
+    if match.group("marker"):
+        return True
+    try:
+        number = float(match.group("number").replace(",", ""))
+    except ValueError:
+        return False
+    return number >= _BARE_PRICE_FLOOR
 
 
 class ExtractedDish(BaseModel):
@@ -65,9 +83,7 @@ class ExtractedDish(BaseModel):
     @classmethod
     def _clean_variants(cls, value: list[str]) -> list[str]:
         cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
-        return [v for v in cleaned if v and not _PRICE_LIKE_VARIANT.match(v)][
-            :MAX_VARIANTS_PER_DISH
-        ]
+        return [v for v in cleaned if v and not _is_price_like(v)][:MAX_VARIANTS_PER_DISH]
 
 
 class ExtractedSection(BaseModel):
@@ -184,7 +200,10 @@ class IngredientSuggestion(BaseModel):
 
 
 class DishRecipeSuggestion(BaseModel):
-    dish_name: str
+    # Haiku occasionally names this field "name" instead of "dish_name" despite the tool schema —
+    # accepting both avoids tripping run_with_fallback's (expensive) fallback-model retry for what
+    # is otherwise a perfectly usable response.
+    dish_name: str = Field(validation_alias=AliasChoices("dish_name", "name"))
     portion_label: str = ""
     ingredients: list[IngredientSuggestion] = Field(default_factory=list)
     minor_ingredients: list[IngredientSuggestion] = Field(default_factory=list)

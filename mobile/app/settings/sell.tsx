@@ -1,4 +1,4 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -8,6 +8,7 @@ import { can } from '../../src/auth/permissions';
 import { groupItems } from '../../src/forms/groupItems';
 import { sellItemLabel } from '../../src/labels';
 import { SellItemSheet } from '../../src/screens/SellItemSheet';
+import { sectorCopyFor } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import { formatRupees } from '../../src/format';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
@@ -30,8 +31,10 @@ import { HOME_CONTENT_WIDTH } from '../../src/ui/constants';
 
 const ss = strings.settings.sell;
 const sd = strings.dishForm;
+const sms = strings.menuScan;
 
 export default function SellItemsSettings() {
+  const router = useRouter();
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
@@ -100,6 +103,8 @@ export default function SellItemsSettings() {
   }
 
   const label = sellItemLabel(business?.business_type ?? '');
+  const sector = sectorCopyFor(business?.business_type ?? '');
+  const canAddFromMenu = sector.menuScanEnabled && can(permissions, 'sellitems.manage');
   const all = items ?? [];
 
   const matchingSearch = all.filter((item) =>
@@ -124,6 +129,14 @@ export default function SellItemsSettings() {
             setSheetVisible(true);
           }}
         />
+
+        {canAddFromMenu ? (
+          <Button
+            label={sms.entryButton(sector.menuNoun)}
+            variant="secondary"
+            onPress={() => router.push(`/menu-scan?businessId=${business.id}&returnTo=settings`)}
+          />
+        ) : null}
 
         <TextField
           label={ss.searchPlaceholder}

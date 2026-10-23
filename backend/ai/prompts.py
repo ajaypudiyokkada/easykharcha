@@ -30,8 +30,11 @@ MENU_SYSTEM_PROMPT = (
     "flagged. "
     'If a name offers a choice written inline, for example "Chicken Wings (Hot Garlic / BBQ / '
     'Crispy)" or "Gobi Manchurian/65" or "(Red)/(Green)", keep the name exactly as written and also '
-    'list each option in variants (e.g. ["Hot Garlic", "BBQ", "Crispy"]) — variants are always '
-    "option or alternate NAMES, never prices or other numbers. If a row has two names joined "
+    'list each option in variants (e.g. ["Hot Garlic", "BBQ", "Crispy"], or for "Gobi Manchurian/65" '
+    '["Manchurian", "65"] — "65" here is a dish style, as in "Gobi 65" or "Chicken 65", not a '
+    "price). Variants are always option or alternate NAMES, never prices or other numbers — a price "
+    "is a separate, standalone figure for the whole row, not one piece of the dish name itself. If "
+    "a row has two names joined "
     'together, for example "Chicken Lollipop / Drums of Heaven", that is NOT variants: keep the '
     'name as written and set note to "two names" instead (e.g. name "Chicken Lollipop / Drums of '
     'Heaven", note "two names", no variants). If a name has options as above but isn\'t two '
@@ -136,7 +139,13 @@ def recipe_tool() -> dict:
                     "items": {
                         "type": "object",
                         "properties": {
-                            "dish_name": {"type": "string"},
+                            "dish_name": {
+                                "type": "string",
+                                "description": (
+                                    "The dish's name, echoed back exactly as given in the "
+                                    "request. The field key must be dish_name, not name."
+                                ),
+                            },
                             "portion_label": {"type": "string"},
                             "ingredients": {"type": "array", "items": _ingredient_row_schema()},
                             "minor_ingredients": {

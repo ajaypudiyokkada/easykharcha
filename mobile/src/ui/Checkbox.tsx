@@ -11,18 +11,22 @@ type Props = {
   title: string;
   /** The kit's two-line label: a bold title plus a small muted explanation underneath. */
   helpText?: string;
+  /** Overrides the default `title`/`helpText`-derived accessibility label — for a row where the
+   * visible name already lives in an adjacent field (e.g. the menu-scan review list), so `title`
+   * can stay blank without leaving the checkbox unlabelled for a screen reader. */
+  accessibilityLabel?: string;
 };
 
 const BOX_SIZE = 24; // `.check-row input{width:24px;height:24px}` in the kit — the visual box, not the tap area.
 
 /** `.check-row` in the kit: a two-line label, with the whole row tappable at 48px minimum,
  * even though the visual box itself is smaller. */
-export function Checkbox({ checked, onChange, title, helpText }: Props) {
+export function Checkbox({ checked, onChange, title, helpText, accessibilityLabel }: Props) {
   return (
     <Pressable
       accessibilityRole="checkbox"
       accessibilityState={{ checked }}
-      accessibilityLabel={helpText ? `${title}. ${helpText}` : title}
+      accessibilityLabel={accessibilityLabel ?? (helpText ? `${title}. ${helpText}` : title)}
       onPress={() => onChange(!checked)}
       style={styles.row}
     >

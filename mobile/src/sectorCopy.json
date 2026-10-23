@@ -26,7 +26,9 @@
     "goesOffQuestion": "Does it go off?",
     "countHelp": "Count what's in the kitchen right now.",
     "wastageHelp": "Spoiled or thrown away — not what's still in the kitchen.",
-    "roleLabels": { "headChef": "Head cook" }
+    "roleLabels": { "headChef": "Head cook" },
+    "menuScanEnabled": true,
+    "menuNoun": "menu"
   },
   "cloud_kitchen": {
     "stockNoun": "ingredient",
@@ -55,7 +57,9 @@
     "goesOffQuestion": "Does it go off?",
     "countHelp": "Count what's in the kitchen right now.",
     "wastageHelp": "Spoiled or thrown away — not what's still in the kitchen.",
-    "roleLabels": { "headChef": "Head cook" }
+    "roleLabels": { "headChef": "Head cook" },
+    "menuScanEnabled": true,
+    "menuNoun": "menu"
   },
   "bakery_sweets": {
     "stockNoun": "ingredient",
@@ -84,7 +88,9 @@
     "goesOffQuestion": "Does it go off?",
     "countHelp": "Count what's in the kitchen right now.",
     "wastageHelp": "Spoiled or thrown away — not what's still in the kitchen.",
-    "roleLabels": { "headChef": "Head cook" }
+    "roleLabels": { "headChef": "Head cook" },
+    "menuScanEnabled": true,
+    "menuNoun": "menu"
   },
   "tiffin_catering": {
     "stockNoun": "ingredient",
@@ -113,7 +119,9 @@
     "goesOffQuestion": "Does it go off?",
     "countHelp": "Count what's in the kitchen right now.",
     "wastageHelp": "Spoiled or thrown away — not what's still in the kitchen.",
-    "roleLabels": { "headChef": "Head cook" }
+    "roleLabels": { "headChef": "Head cook" },
+    "menuScanEnabled": true,
+    "menuNoun": "menu"
   },
   "homestay": {
     "stockNoun": "supply",
@@ -141,7 +149,9 @@
     "goesOffQuestion": "Does it expire or spoil?",
     "countHelp": "Count what's in your store cupboard right now.",
     "wastageHelp": "Damaged, or used up faster than expected.",
-    "roleLabels": { "headChef": "Supervisor" }
+    "roleLabels": { "headChef": "Supervisor" },
+    "menuScanEnabled": true,
+    "menuNoun": "price list"
   },
   "small_manufacturing": {
     "stockNoun": "material",
@@ -183,7 +193,9 @@
     "goesOffQuestion": "Does it expire or spoil?",
     "countHelp": "Count what's on the shop floor right now.",
     "wastageHelp": "Damaged or scrapped — not what's still usable.",
-    "roleLabels": { "headChef": "Production lead" }
+    "roleLabels": { "headChef": "Production lead" },
+    "menuScanEnabled": false,
+    "menuNoun": ""
   },
   "pack_repack_shop": {
     "stockNoun": "bulk item or packing material",
@@ -211,7 +223,9 @@
     "goesOffQuestion": "Does it expire or spoil?",
     "countHelp": "Count what's physically in the shop right now.",
     "wastageHelp": "Damaged or scrapped — not what's still sellable.",
-    "roleLabels": { "headChef": "Supervisor" }
+    "roleLabels": { "headChef": "Supervisor" },
+    "menuScanEnabled": false,
+    "menuNoun": ""
   },
   "home_business": {
     "stockNoun": "supply",
@@ -234,7 +248,9 @@
     "goesOffQuestion": "Does it expire or spoil?",
     "countHelp": "Count what's physically there right now.",
     "wastageHelp": "Damaged or scrapped — not what's still usable.",
-    "roleLabels": { "headChef": "Supervisor" }
+    "roleLabels": { "headChef": "Supervisor" },
+    "menuScanEnabled": false,
+    "menuNoun": ""
   },
   "other": {
     "stockNoun": "item",
@@ -257,6 +273,8 @@
     "goesOffQuestion": "Does it expire or spoil?",
     "countHelp": "Count what's physically there right now.",
     "wastageHelp": "Damaged or scrapped — not what's still usable.",
-    "roleLabels": { "headChef": "Supervisor" }
+    "roleLabels": { "headChef": "Supervisor" },
+    "menuScanEnabled": false,
+    "menuNoun": ""
   }
 }
