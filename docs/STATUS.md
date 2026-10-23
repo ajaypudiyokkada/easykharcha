@@ -286,6 +286,21 @@ not built yet.
   variants). Found but didn't fix (pre-existing, out of this step's scope): `ai_try_menu.py`'s recipe-
   suggestion call fails against the real API — `AI_MODEL_FALLBACK`'s configured model rejects a forced
   `tool_choice`, unrelated to menu extraction.
+- **Step C1e — fallback-model call fix.** The real validation failure that triggers the fallback was
+  Haiku occasionally naming a recipe dish `name` instead of the required `dish_name` for some dishes
+  in a batch — a model slip the fallback retry exists for, not a prompt/schema bug (now logged, no raw
+  content, by `base.run_with_fallback` when it happens). The actual crash was the fallback call itself:
+  `claude-sonnet-5-5` defaults to adaptive thinking and rejects a forced `tool_choice`. New
+  `anthropic_provider.tool_choice_for_model` (`_MODELS_REQUIRING_AUTO_TOOL_CHOICE`) gives that model
+  `{"type": "auto"}` plus a system line forcing the tool, retried once if no `tool_use` block comes
+  back; every other model keeps the forced `tool_choice`. `check_ai_provider_signature` now also
+  asserts `AI_MODEL_FALLBACK` never gets a forced `tool_choice` and `AI_MODEL_MENU` still does.
+  New smoke case proves a recipe suggestion that fails validation once recovers via the fallback
+  model (previously only the menu-scan path had this case). Proved against real menus:
+  `fomomenu.pdf` (193 dishes, no truncation, ~$0.052) with its recipe batch genuinely hitting the
+  Haiku slip above and recovering on `claude-sonnet-5-5` (~$0.008); `menu1.jpeg` run a second time
+  with `AI_MODEL_MENU`/`AI_MODEL_RECIPE` forced to `claude-sonnet-5-5` to prove that model works
+  end-to-end as a primary, not just as a fallback.
 
 ## Permission table
 

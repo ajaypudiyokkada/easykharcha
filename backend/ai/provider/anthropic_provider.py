@@ -14,6 +14,15 @@ _REQUEST_TIMEOUT_SECONDS = 60.0
 _MAX_TOKENS_MENU = 8000
 _MAX_TOKENS_RECIPE = 4000
 
+# Models that default to adaptive extended thinking reject a forced tool_choice ("tool" or "any") —
+# the API returns a 400 ("tool_choice: type ... are not supported for this model"), since forcing an
+# immediate tool call is incompatible with the model reasoning first. For those, fall back to
+# tool_choice "auto" plus an explicit system instruction to only answer via the tool, and verify the
+# response actually contains a tool_use block (retrying once if it doesn't) since "auto" alone doesn't
+# guarantee one. Every other model keeps the simpler forced tool_choice. Update this set if a new
+# AI_MODEL_* value starts rejecting forced tool_choice too.
+_MODELS_REQUIRING_AUTO_TOOL_CHOICE = {"claude-sonnet-5-5"}
+
 
 def _client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=_REQUEST_TIMEOUT_SECONDS)
@@ -28,24 +37,47 @@ def _tool_input(response, tool_name: str) -> dict:
     return {}
 
 
+def tool_choice_for_model(model: str, system: str, tool_name: str) -> tuple[dict, str, bool]:
+    """Pure (no network) so scripts/smoke.py's check_ai_provider_signature can assert a given model
+    never gets a forced tool_choice, without an API key or a real call. Returns (tool_choice,
+    system_text, needs_auto)."""
+    if model in _MODELS_REQUIRING_AUTO_TOOL_CHOICE:
+        system_text = f"{system} You must answer only by calling the {tool_name} tool — never with plain text."
+        return {"type": "auto"}, system_text, True
+    return {"type": "tool", "name": tool_name}, system, False
+
+
 def _get_raw(
     *, model: str, system: str, messages: list[dict], tool: dict, max_tokens: int
 ) -> tuple[dict, str, int, int, bool]:
-    try:
-        response = _client().messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            tools=[tool],
-            tool_choice={"type": "tool", "name": tool["name"]},
-            messages=messages,
-        )
-    except anthropic.APIError as exc:
-        raise AiProviderCallError(str(exc)) from exc
+    tool_choice, system_text, needs_auto = tool_choice_for_model(model, system, tool["name"])
 
-    raw = _tool_input(response, tool["name"])
-    truncated = response.stop_reason == "max_tokens"
-    return raw, model, response.usage.input_tokens, response.usage.output_tokens, truncated
+    input_tokens = output_tokens = 0
+    raw: dict = {}
+    truncated = False
+    for _attempt in range(2 if needs_auto else 1):
+        try:
+            response = _client().messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=[
+                    {"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}
+                ],
+                tools=[tool],
+                tool_choice=tool_choice,
+                messages=messages,
+            )
+        except anthropic.APIError as exc:
+            raise AiProviderCallError(str(exc)) from exc
+
+        input_tokens += response.usage.input_tokens
+        output_tokens += response.usage.output_tokens
+        raw = _tool_input(response, tool["name"])
+        truncated = response.stop_reason == "max_tokens"
+        if raw or not needs_auto:
+            break
+
+    return raw, model, input_tokens, output_tokens, truncated
 
 
 def extract_menu(files: list[dict], business_type: str) -> AiCallResult:

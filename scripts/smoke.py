@@ -4726,7 +4726,10 @@ def check_ai_provider_signature() -> None:
     against inspect.signature(...) of that real method. Fails on any kwarg the installed SDK doesn't
     accept — the regression this guards against is an SDK upgrade silently dropping or renaming a
     parameter (as it did with `temperature` in anthropic 2.x) that only shows up once a real call is
-    made against the live API."""
+    made against the live API. Also checks tool_choice_for_model (same file) against
+    settings.AI_MODEL_FALLBACK/AI_MODEL_MENU: a model in _MODELS_REQUIRING_AUTO_TOOL_CHOICE must never
+    get a forced tool_choice (claude-sonnet-5-5 returns a 400 for one, Step C1e), while the configured
+    primary menu model keeps the forced one."""
     import inspect
 
     backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
@@ -4737,8 +4740,10 @@ def check_ai_provider_signature() -> None:
     django.setup()
 
     import anthropic
+    from django.conf import settings
 
     from ai import prompts
+    from ai.provider.anthropic_provider import tool_choice_for_model
 
     kwargs = dict(
         model="claude-x",
@@ -4762,6 +4767,28 @@ def check_ai_provider_signature() -> None:
     print(
         f"OK — anthropic {anthropic.__version__}'s Messages.create accepts every kwarg the real "
         "provider sends."
+    )
+
+    fallback_choice, _system, fallback_needs_auto = tool_choice_for_model(
+        settings.AI_MODEL_FALLBACK, "x", "record_x"
+    )
+    if fallback_choice.get("type") in ("tool", "any") or not fallback_needs_auto:
+        fail(
+            f"ai provider signature: AI_MODEL_FALLBACK={settings.AI_MODEL_FALLBACK!r} still gets a "
+            f"forced tool_choice ({fallback_choice}) — add it to _MODELS_REQUIRING_AUTO_TOOL_CHOICE "
+            "if the real API rejects one for this model."
+        )
+    menu_choice, _system, menu_needs_auto = tool_choice_for_model(
+        settings.AI_MODEL_MENU, "x", "record_x"
+    )
+    if menu_needs_auto or menu_choice.get("type") != "tool":
+        fail(
+            f"ai provider signature: AI_MODEL_MENU={settings.AI_MODEL_MENU!r} unexpectedly lost its "
+            f"forced tool_choice ({menu_choice})."
+        )
+    print(
+        "OK — AI_MODEL_FALLBACK gets tool_choice 'auto' (no forced tool_choice), AI_MODEL_MENU keeps "
+        "the forced one."
     )
 
 
@@ -5000,6 +5027,16 @@ def check_ai_flow() -> None:
     if status != 200 or body["dishes"][0]["dish_name"] != "Fake Dish 2":
         fail(f"ai flow: recipe suggestion by dish_ids expected the dish's own name, got {status} ({body})")
     print("OK — recipe-suggestions by dish_ids resolves to the business's own dish names.")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "FORCE_BAD_SCHEMA dish"}]},
+        token=owner_access,
+    )
+    if status != 200 or body["dishes"][0]["dish_name"] != "FORCE_BAD_SCHEMA dish":
+        fail(f"ai flow: recipe suggestion expected the fallback model to recover, got {status} ({body})")
+    print("OK — a recipe suggestion that fails schema validation once recovers on the fallback model.")
 
     status, body, _ = request(
         "POST",
