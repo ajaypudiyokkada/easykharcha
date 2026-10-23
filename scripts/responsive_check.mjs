@@ -542,14 +542,30 @@ async function buildOwnerSession(page) {
   await clickButton(page, '2 selected — Next');
   await waitForPath(page, '/setup/4');
 
-  // Step 22a: the wizard's quick dish form is name/price/portion/group only, no ingredient picker —
-  // Paneer Tikka lands here with no recipe; attaching one is Settings' "Add a dish" job instead.
+  // Step C2a: cloud_kitchen has the menu-scan choice enabled and nothing's been added yet, so step 4
+  // opens on the scan/manual choice card — "Add one by one" is this session's unchanged path.
+  await waitForText(page, 'Add one by one');
+  await clickAndSettle(await findVisible(page, '[aria-label="Add one by one"]'));
+
+  // Step 22a2: ticking a starter item is still the no-ingredients quick path; "Add menu item" opens
+  // the full DishRecipeForm sheet (portion + at least one real ingredient) for a hand-added dish.
   await waitForText(page, 'Add your own');
   await clickAndSettle(await findVisible(page, '[aria-label="Veg biryani"]'));
-  await typeInto(page, 'Selling price', '120', { minCount: 2 });
+  await typeInto(page, 'Selling price', '120');
+
+  await clickButton(page, 'Add menu item');
+  await waitForText(page, 'Add a dish');
+  await waitForText(page, '+ Add ingredient');
+  await new Promise((resolve) => setTimeout(resolve, 300));
   await typeInto(page, 'Name', 'Paneer Tikka', { last: true });
   await typeInto(page, 'Selling price', '180', { last: true });
-  await clickButton(page, 'Add item');
+  await typeInto(page, 'Portion (optional)', '1 plate', { last: true });
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, 'Fresh Paneer');
+  await typeInto(page, 'Amount', '0.300');
+  await clickButton(page, 'Save dish');
+  await waitForText(page, 'Dish added');
   await waitForText(page, 'Paneer Tikka');
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/5');

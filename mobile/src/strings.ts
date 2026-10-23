@@ -837,6 +837,85 @@ export const strings = {
       generic: 'Something went wrong. Please try again.',
     },
   },
+  /** Step C2a: the menu-scan flow (source photo/PDF upload, analyzing, review, done) — reached from
+   * onboarding's "What you sell" step and Settings' "What you sell" screen. `noun` throughout is the
+   * sector's menuNoun ("menu" or "price list") so the copy never says "menu" to a homestay owner. */
+  menuScan: {
+    choice: {
+      scanTitle: (noun: string) => `Scan or upload your ${noun}`,
+      scanSubtitle: 'Let AI read it and fill in your dishes for you.',
+      recommended: 'Recommended',
+      manualTitle: 'Add one by one',
+      manualSubtitle: 'Type each item in yourself.',
+    },
+    entryButton: (noun: string) => `Add from ${noun}`,
+    source: {
+      title: (noun: string) => `Scan your ${noun}`,
+      intro: (noun: string) => `Take a photo or choose files of your ${noun}.`,
+      takePhoto: 'Take a photo',
+      choosePhotos: 'Choose photos',
+      choosePdf: 'Choose a PDF',
+      removeFile: 'Remove',
+      privacyNote: 'Photos are used only to read your menu.',
+      readButton: (noun: string) => `Read my ${noun}`,
+      back: 'Back',
+      errors: {
+        tooMany: 'You can add up to 6 photos.',
+        tooBig: 'This photo is too big. Try a smaller one, or fewer at once.',
+        wrongType: "That file type isn't supported. Use JPEG, PNG or WEBP photos, or one PDF.",
+        pdfTooBig: 'That PDF is too big — keep it under 10 MB.',
+        network: "Can't reach EasyKharcha. Check your internet and try again.",
+        generic: 'Something went wrong. Please try again.',
+      },
+    },
+    analyzing: {
+      title: (noun: string) => `AI is analyzing your ${noun}...`,
+      takingAWhile: 'Taking a minute for a large file.',
+      errors: {
+        aiUnavailable: (sellNounPlural: string) =>
+          `Menu reading is not available right now. You can add ${sellNounPlural} one by one.`,
+        dailyLimitReached: (sellNounPlural: string) =>
+          `Menu reading has reached today's limit. You can add ${sellNounPlural} one by one.`,
+        scanFailed: 'Something went wrong reading that.',
+        tryAgain: 'Try again',
+        addOneByOne: 'Add one by one',
+      },
+    },
+    review: {
+      title: (sellNounPlural: string) => `Review your ${sellNounPlural}`,
+      incompleteBanner:
+        'We may have missed some items. Please check the list or add another photo.',
+      addAnotherPhoto: 'Add another photo',
+      checkThisChip: 'Check this',
+      noteHasOptions: 'has options',
+      noteTwoNames: 'two names',
+      searchPlaceholder: 'Search',
+      selectAll: 'Select all',
+      renameSection: 'Rename section',
+      sectionNameLabel: 'Section name',
+      addDish: (label: string) => `Add a ${label}`,
+      remove: 'Remove',
+      untitledSection: 'Menu',
+      untitledDish: 'Untitled item',
+      skippedExisting: (n: number) =>
+        `${n} ${n === 1 ? 'item was' : 'items were'} already on your list — skipped.`,
+      addSelected: (n: number, sellNounPlural: string) => `Add ${n} ${sellNounPlural}`,
+      back: 'Back',
+      errors: {
+        minimumOne: 'Tick at least one item to add.',
+        nameRequired: 'Enter a name.',
+        priceRequired: 'Enter a selling price.',
+        network: "Can't reach EasyKharcha. Check your internet and try again.",
+        generic: 'Something went wrong. Please try again.',
+      },
+    },
+    done: {
+      title: (n: number, sellNoun: string, sellNounPlural: string) =>
+        `${n} ${n === 1 ? sellNoun : sellNounPlural} added.`,
+      subtitle: 'They need ingredients so EasyKharcha can track stock. We will do this next.',
+      continueLabel: 'Continue',
+    },
+  },
   settings: {
     hub: {
       title: 'Settings',

@@ -45,6 +45,12 @@ export type SectorCopy = {
   roleLabels: {
     headChef: string;
   };
+  /** Step C2a: whether "Scan or upload" is offered as a way to add sell items — food and homestay
+   * types only; everyone else keeps the one-by-one form as their only path. */
+  menuScanEnabled: boolean;
+  /** "menu" or "price list" — the business-neutral word for what gets scanned, used wherever the
+   * scan flow's copy needs it. "" for types where menuScanEnabled is false. */
+  menuNoun: string;
 };
 
 const SECTOR_COPY = rawSectorCopy as unknown as Record<BusinessTypeValue, SectorCopy>;

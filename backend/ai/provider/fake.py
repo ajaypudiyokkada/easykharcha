@@ -15,6 +15,12 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
   the smoke suite to prove a long menu isn't silently cut short.
 - A menu scan file containing "FORCE_PRICE_VARIANTS" returns a dish whose variants are plain prices
   — proves schemas.py's variant validator strips them rather than passing them through.
+- A menu scan file containing "FORCE_SLASH_VARIANT" returns a dish like "Gobi Manchurian/65" with
+  variants on both sides of the slash — proves the short bare-number side ("65", a dish style, not
+  a price) survives schemas.py's variant validator.
+- A recipe-suggestion dish name containing "FORCE_NAME_ALIAS" returns the dish keyed "name" instead
+  of "dish_name" on the first attempt — proves schemas.py accepts "name" as an alias instead of
+  burning a fallback-model retry on it.
 """
 
 from django.conf import settings
@@ -36,6 +42,7 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
     force_max_tokens = any(b"FORCE_MAX_TOKENS" in blob for blob in blobs)
     force_many_dishes = any(b"FORCE_MANY_DISHES" in blob for blob in blobs)
     force_price_variants = any(b"FORCE_PRICE_VARIANTS" in blob for blob in blobs)
+    force_slash_variant = any(b"FORCE_SLASH_VARIANT" in blob for blob in blobs)
     is_menu = not any(b"NOT_A_MENU" in blob for blob in blobs)
 
     def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
@@ -62,6 +69,23 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
                     "price": 300,
                     "confidence": 0.9,
                     "variants": ["300", "Rs 320"],
+                }
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
+        if force_slash_variant:
+            dishes = [
+                {
+                    "name": "Gobi Manchurian/65",
+                    "price": 180,
+                    "confidence": 0.9,
+                    "note": "has options",
+                    "variants": ["Manchurian", "65"],
                 }
             ]
             return (
@@ -121,6 +145,7 @@ def suggest_recipes(
 ) -> AiCallResult:
     force_bad_persistent = any("FORCE_BAD_SCHEMA_PERSISTENT" in name for name in dish_names)
     force_bad = force_bad_persistent or any("FORCE_BAD_SCHEMA" in name for name in dish_names)
+    force_name_alias = any("FORCE_NAME_ALIAS" in name for name in dish_names)
     default_match = stock_items[0][0] if stock_items else None
 
     def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
@@ -133,9 +158,10 @@ def suggest_recipes(
                 _RECIPE_OUTPUT_TOKENS,
                 False,
             )
+        name_key = "name" if force_name_alias else "dish_name"
         result_dishes = [
             {
-                "dish_name": name,
+                name_key: name,
                 "portion_label": "1 plate",
                 "ingredients": [
                     {

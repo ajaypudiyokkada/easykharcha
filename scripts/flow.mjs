@@ -33,6 +33,7 @@
 
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
+import { resolve as resolvePath } from 'node:path';
 import puppeteer from 'puppeteer-core';
 
 import { ensureLandingServer } from './lib/landing_server.mjs';
@@ -60,6 +61,8 @@ const STEP22A2_SCREEN_DIR = 'docs/screens/step22a2';
 const STEP23A_SCREEN_DIR = 'docs/screens/step23a';
 const STEP23B_SCREEN_DIR = 'docs/screens/step23b';
 const STEP23D_SCREEN_DIR = 'docs/screens/step23d';
+const STEP25C2A_SCREEN_DIR = 'docs/screens/step25c2a';
+const STEP25C2A_FIXTURE_IMAGE = resolvePath('docs/images/ek_logo_icon.png');
 
 function findChrome() {
   const candidates = [
@@ -1358,6 +1361,100 @@ async function checkSectorChangeFlow(page) {
   await logoutFromAnywhere(page);
 }
 
+// Step C2a: the menu-scan flow — the onboarding "What you sell" choice screen, uploading a photo
+// (AI_FAKE's canned menu: 3 dishes + 1 addon), the Analyzing screen, the Review screen (untick one,
+// edit a price, add a dish by hand), saving, and the Done screen. restaurant_cafe has the choice
+// enabled (menuScanEnabled); AI_FAKE's default canned menu needs no special marker file.
+async function checkMenuScanFlow(page) {
+  await mkdir(STEP25C2A_SCREEN_DIR, { recursive: true });
+  const name = 'Menu Scan Flow';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password);
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+
+  await fillStepOne(page, 'Spice Route Diner', '411001', 'Restaurant or cafe');
+  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, '/setup/4');
+  console.log('OK — onboarded a restaurant_cafe business, reached step 4 with nothing added yet.');
+
+  // === Choice screen: "Scan or upload your menu" is offered first, recommended ===
+  await waitForText(page, 'Scan or upload your menu');
+  await waitForText(page, 'Add one by one');
+  await clickAndSettle(await findVisible(page, '[aria-label="Scan or upload your menu"]'));
+  await waitForPath(page, '/menu-scan');
+  console.log('OK — the choice screen opens, and "Scan or upload your menu" goes to the scan flow.');
+
+  // === Source screen: choose a photo (a real file-chooser dialog, via Puppeteer's interception) ===
+  await waitForText(page, 'Scan your menu');
+  const [fileChooser] = await Promise.all([
+    page.waitForFileChooser(),
+    clickButton(page, 'Choose photos'),
+  ]);
+  await fileChooser.accept([STEP25C2A_FIXTURE_IMAGE]);
+  await waitForText(page, 'Photos are used only to read your menu.');
+  await retryUntil(async () => (await page.$$('img')).length > 0);
+  // The thumbnail <img> exists as soon as the blob URL is set, but still needs a moment to decode.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/source-390.png` });
+  console.log('OK — a photo is picked, resized client-side, and shown as a thumbnail.');
+
+  await clickButton(page, 'Read my menu');
+  // AI_FAKE processes the scan inline during the create call itself, so by the time this polls,
+  // "done" may already be true and the Analyzing screen already passed through — waits for either
+  // path, and only screenshots Analyzing if it actually caught it.
+  await retryUntil(async () => {
+    const path = await page.evaluate(() => location.pathname);
+    return path === '/menu-scan/analyzing' || path === '/menu-scan/review';
+  });
+  if ((await page.evaluate(() => location.pathname)) === '/menu-scan/analyzing') {
+    await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/analyzing-390.png` });
+  }
+  console.log('OK — submitting opens the Analyzing screen and polls the scan.');
+
+  // === Review screen: untick one, edit a price, add a dish by hand ===
+  // Dish names live inside editable TextField/Checkbox values, not plain text nodes, so they're
+  // found via their aria-label (an input's value is invisible to document.body.innerText).
+  await waitForPath(page, '/menu-scan/review');
+  await findVisible(page, '[aria-label="Fake Dish 1"]');
+  await findVisible(page, '[aria-label^="Fake Dish 3"]');
+  await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/review-390.png` });
+  console.log('OK — the Review screen lists the scanned dishes, grouped by section.');
+
+  await clickAndSettle(await findVisible(page, '[aria-label="Fake Dish 1"]'));
+  console.log('OK — unticked one dish.');
+
+  await typeInto(page, 'Selling price — Fake Dish 2', '150');
+  console.log('OK — edited a price inline.');
+
+  await clickButton(page, 'Add a dish');
+  // Typing the name immediately relabels the price field too (both carry the dish's current name
+  // for a11y) — so the price field is found by its post-rename label, not "Untitled item".
+  await typeInto(page, 'Name — Untitled item', 'Mango Kulfi');
+  await typeInto(page, 'Selling price — Mango Kulfi', '60');
+  console.log('OK — added a dish by hand, filled in from the review list itself.');
+
+  await clickButton(page, 'Add 3 dishes');
+  await waitForPath(page, '/menu-scan/done');
+  console.log('OK — saving the ticked dishes goes through sell-items/bulk/ and lands on Done.');
+
+  // === Done screen ===
+  await waitForText(page, '3 dishes added.');
+  await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/done-390.png` });
+  console.log(`OK — saved Step C2a screenshots at 390px to ${STEP25C2A_SCREEN_DIR}/.`);
+
+  await clickButton(page, 'Continue');
+  await waitForPath(page, '/setup/5');
+  console.log('OK — Continue resumes the onboarding wizard at step 5.');
+
+  await logoutFromAnywhere(page);
+}
+
 // ---------- scenario tiering (--only <name>, --list) ----------
 
 /** Every scenario in the order main() runs them. "chain" scenarios share one Owner business/
@@ -1388,6 +1485,7 @@ const FLOW_SCENARIOS = [
   { name: 'step10-screens', kind: 'solo' },
   { name: 'step12-screens', kind: 'chain' },
   { name: 'step13-screens', kind: 'chain' },
+  { name: 'menu-scan', kind: 'solo' },
 ];
 
 function parseFlowArgs() {
@@ -1546,6 +1644,13 @@ async function main() {
     console.log('OK — Step 20: the saved items come back grouped under real headings, including "Dairy".');
     await page.goto(`${APP_URL}/setup/4`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await waitForPath(page, '/setup/4');
+
+    // Step C2a: cloud_kitchen has the menu-scan choice enabled and nothing's been added yet, so
+    // step 4 opens on the scan/manual choice card instead of the form directly — "Add one by one"
+    // is this scenario's unchanged, pre-C2a path.
+    await waitForText(page, 'Add one by one');
+    await clickAndSettle(await findVisible(page, '[aria-label="Add one by one"]'));
+    console.log('OK — Step C2a: "Add one by one" on the choice screen opens the manual form.');
 
     // Step 22a2: the wizard's "Add your own" dish form now opens the same DishRecipeForm sheet as
     // Settings' "What you sell" — a dish can't be saved here without at least one real ingredient
@@ -1835,6 +1940,10 @@ async function main() {
     if (shouldRun('step13-screens'))
       await timed('step13-screens', async () => {
     await captureStep13Screens(page, mobile, password, 'Chef Rahul');
+      });
+    if (shouldRun('menu-scan'))
+      await timed('menu-scan', async () => {
+    await checkMenuScanFlow(page);
       });
 
     console.log(only ? `\nOK — scenario "${only}" passed.` : '\nAll flow checks passed.');

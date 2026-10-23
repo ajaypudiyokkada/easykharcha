@@ -31,6 +31,10 @@ export type TextFieldProps = {
   left?: React.ReactNode;
   /** e.g. the Show/Hide toggle `PasswordField` renders. */
   right?: React.ReactNode;
+  /** Overrides the `label`-derived accessibility name — for a repeated field across rows (e.g. the
+   * menu-scan review list's per-dish Name/Price fields) where every row shares the same visible
+   * label but needs a distinct one for a screen reader. */
+  accessibilityLabel?: string;
 };
 
 /**
@@ -55,6 +59,7 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>(function Te
     editable = true,
     left,
     right,
+    accessibilityLabel,
   },
   ref,
 ) {
@@ -94,7 +99,7 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>(function Te
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           style={styles.input}
-          accessibilityLabel={label}
+          accessibilityLabel={accessibilityLabel ?? label}
           // Cross-platform aria-* prop aliases (RN 0.71+): map to the real DOM attribute on web, and
           // to the native accessibility description on iOS/Android.
           aria-invalid={Boolean(error)}

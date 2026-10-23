@@ -5048,6 +5048,26 @@ def check_ai_flow() -> None:
         fail(f"ai flow: persistently-invalid recipe suggestion expected 502, got {status} ({body})")
     print("OK — a recipe suggestion that never passes schema validation is rejected (502).")
 
+    # --- Haiku sometimes keys a dish "name" instead of "dish_name"; schemas.py accepts both so this
+    # doesn't burn the expensive fallback-model retry ---
+    before = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ? AND model = 'claude-sonnet-5-5'",
+        (business_id,),
+    )[0]
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/ai/recipe-suggestions/",
+        {"dishes": [{"name": "FORCE_NAME_ALIAS dish"}]},
+        token=owner_access,
+    )
+    after = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ? AND model = 'claude-sonnet-5-5'",
+        (business_id,),
+    )[0]
+    if status != 200 or body["dishes"][0]["dish_name"] != "FORCE_NAME_ALIAS dish" or after != before:
+        fail(f"ai flow: a dish keyed 'name' expected to resolve without a fallback retry, got {status} ({body})")
+    print("OK — a recipe suggestion keyed 'name' instead of 'dish_name' is accepted without a fallback retry.")
+
     # --- a long PDF is read a few pages at a time and merged, not sent (or capped) as one call;
     # every chunk's canned response is identical here, so a correct merge/dedupe leaves exactly the
     # 4 canned dishes, not 8 (2 chunks x 4) --- a fresh business, since the first one is already at
@@ -5198,6 +5218,38 @@ def check_ai_flow() -> None:
             f"got {price_variant_dish['variants']}"
         )
     print("OK — variants that are plain prices are rejected, never passed through as option names.")
+
+    # --- a short bare number on one side of a slash (e.g. "Gobi Manchurian/65") is a dish style,
+    # not a price, and must survive as a variant alongside the other side — reuses chunk_business_id
+    # (not a fresh business: the owner is already at the 3-business cap, see above) and stays within
+    # its daily scan limit (4 scans so far: the multi-page merge, the chunk-overflow retry, the
+    # single-page-overflow and the price-variants check, all above). ---
+    slash_variant_body, slash_variant_content_type = multipart_multi_body(
+        [("images", "slash.png", make_png(marker=b"FORCE_SLASH_VARIANT"), "image/png")]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{chunk_business_id}/ai/menu-scans/",
+        raw_body=slash_variant_body,
+        content_type=slash_variant_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: slash-variant scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{chunk_business_id}/ai/menu-scans/{body['id']}/", token=owner_access
+    )
+    if status != 200 or body["status"] != "done":
+        fail(f"ai flow: slash-variant scan expected done, got {status} ({body})")
+    slash_variant_dish = next(
+        d for section in body["sections"] for d in section["dishes"] if "Manchurian" in d["name"]
+    )
+    if slash_variant_dish["variants"] != ["Manchurian", "65"]:
+        fail(
+            "ai flow: expected both sides of 'Gobi Manchurian/65' kept as variants "
+            f"(['Manchurian', '65']), got {slash_variant_dish['variants']}"
+        )
+    print("OK — a short bare number on one side of a slash (a dish style, not a price) survives as a variant.")
 
     # --- a model that stops at max_tokens is flagged incomplete, not silently returned as whole ---
     status, body, _ = request(
