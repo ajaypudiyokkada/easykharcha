@@ -4807,6 +4807,38 @@ def check_ai_flow() -> None:
     print("OK — menu scan job lifecycle queued->done, dishes/sections, existing-dish flag.")
     print("OK — a finished scan's temp files are deleted.")
 
+    # --- add-on rows carry kind=addon; option/two-name rows carry note and variants ---
+    if "Extra Cheese" not in dishes or dishes["Extra Cheese"]["kind"] != "addon":
+        fail(f"ai flow: expected 'Extra Cheese' flagged kind=addon, got {dishes.get('Extra Cheese')}")
+    variant_dish = dishes.get("Fake Dish 3 (Veg/Chicken)")
+    if (
+        not variant_dish
+        or variant_dish["note"] != "has options"
+        or variant_dish["variants"] != ["Veg", "Chicken"]
+    ):
+        fail(f"ai flow: expected 'Fake Dish 3' note/variants, got {variant_dish}")
+    print("OK — add-on rows carry kind=addon; option rows carry note and variants.")
+
+    # --- cost: the recorded AiUsage row matches Decimal maths over the (realistic) fake token counts.
+    # Uses config/settings.py's AI_PRICE_IN_PER_MTOK/AI_PRICE_OUT_PER_MTOK defaults (1.00 / 5.00) —
+    # this script stays stdlib-only and talks to the server over HTTP only, same as the rest of
+    # smoke.py, so it doesn't import Django to read the live setting; a dev .env that overrides
+    # either price would need this updated to match. ---
+    usage_row = _ai_sql_read_one(
+        "SELECT est_cost_usd, input_tokens, output_tokens FROM ai_aiusage "
+        "WHERE business_id = ? ORDER BY id ASC LIMIT 1",
+        (business_id,),
+    )
+    if usage_row is None:
+        fail(f"ai flow: expected an AiUsage row for business {business_id}, found none")
+    expected_cost = (
+        Decimal(usage_row[1]) / Decimal(1_000_000) * Decimal("1.00")
+        + Decimal(usage_row[2]) / Decimal(1_000_000) * Decimal("5.00")
+    )
+    if Decimal(str(usage_row[0])) != expected_cost:
+        fail(f"ai flow: expected AiUsage.est_cost_usd {expected_cost}, got {usage_row}")
+    print(f"OK — AiUsage.est_cost_usd (${usage_row[0]}) matches Decimal maths over the real token counts.")
+
     # --- non-menu result ---
     status, body, _ = scan_with_images([("notmenu.png", make_png(marker=b"NOT_A_MENU"), "image/png")])
     if status != 202:
@@ -4877,6 +4909,11 @@ def check_ai_flow() -> None:
         fail(f"ai flow: expected the Rice stock item matched, got {ingredient}")
     print("OK — a suggested ingredient matches the owner's existing stock item.")
 
+    minor_ingredient = body["dishes"][0]["minor_ingredients"][0]
+    if minor_ingredient["name"] != "Salt":
+        fail(f"ai flow: expected a minor ingredient (salt) kept separate from ingredients, got {minor_ingredient}")
+    print("OK — minor ingredients (e.g. salt) come back in their own list, separate from the main one.")
+
     before = _ai_sql_read_one(
         "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (business_id,)
     )[0]
@@ -4912,6 +4949,111 @@ def check_ai_flow() -> None:
     if status != 502:
         fail(f"ai flow: persistently-invalid recipe suggestion expected 502, got {status} ({body})")
     print("OK — a recipe suggestion that never passes schema validation is rejected (502).")
+
+    # --- a long PDF is read a few pages at a time and merged, not sent (or capped) as one call;
+    # every chunk's canned response is identical here, so a correct merge/dedupe leaves exactly the
+    # 4 canned dishes, not 8 (2 chunks x 4) --- a fresh business, since the first one is already at
+    # today's scan limit.
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "AI Chunk Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ai flow: chunk-test business create expected 201, got {status} ({body})")
+    chunk_business_id = body["id"]
+    usage_before = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (chunk_business_id,)
+    )[0]
+    pdf_body, pdf_content_type = multipart_multi_body(
+        [("pdf", "menu.pdf", make_pdf(num_pages=4), "application/pdf")]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{chunk_business_id}/ai/menu-scans/",
+        raw_body=pdf_body,
+        content_type=pdf_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: 4-page pdf scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{chunk_business_id}/ai/menu-scans/{body['id']}/", token=owner_access
+    )
+    if status != 200 or body["status"] != "done":
+        fail(f"ai flow: 4-page pdf scan expected done, got {status} ({body})")
+    chunk_dish_names = {d["name"] for section in body["sections"] for d in section["dishes"]}
+    if len(chunk_dish_names) != 4:
+        fail(f"ai flow: expected a 4-page pdf's per-chunk duplicates deduped to 4 dishes, got {chunk_dish_names}")
+    usage_after = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (chunk_business_id,)
+    )[0]
+    if usage_after - usage_before != 2:
+        fail(
+            "ai flow: expected one AiUsage row per PDF page-chunk (2 chunks for 4 pages at 3/chunk), "
+            f"got {usage_after - usage_before}"
+        )
+    print("OK — a multi-page PDF is read in page chunks and merged/deduped, one AiUsage row per chunk.")
+
+    # --- a model that stops at max_tokens is flagged incomplete, not silently returned as whole ---
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "AI Incomplete Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ai flow: incomplete-test business create expected 201, got {status} ({body})")
+    incomplete_business_id = body["id"]
+    maxtok_body, maxtok_content_type = multipart_multi_body(
+        [("images", "maxtok.png", make_png(marker=b"FORCE_MAX_TOKENS"), "image/png")]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{incomplete_business_id}/ai/menu-scans/",
+        raw_body=maxtok_body,
+        content_type=maxtok_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: max-tokens scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{incomplete_business_id}/ai/menu-scans/{body['id']}/",
+        token=owner_access,
+    )
+    if status != 200 or body["status"] != "done" or not body.get("incomplete"):
+        fail(f"ai flow: expected a max_tokens stop flagged incomplete, got {status} ({body})")
+    print("OK — a scan where the model stops at max_tokens is flagged incomplete, not silently cut.")
+
+    # --- a fake 200-dish menu: the merge/cap logic returns every dish, none lost ---
+    many_body, many_content_type = multipart_multi_body(
+        [("images", "many.png", make_png(marker=b"FORCE_MANY_DISHES"), "image/png")]
+    )
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{incomplete_business_id}/ai/menu-scans/",
+        raw_body=many_body,
+        content_type=many_content_type,
+        token=owner_access,
+    )
+    if status != 202:
+        fail(f"ai flow: many-dishes scan create expected 202, got {status} ({body})")
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{incomplete_business_id}/ai/menu-scans/{body['id']}/",
+        token=owner_access,
+    )
+    if status != 200 or body["status"] != "done":
+        fail(f"ai flow: many-dishes scan expected done, got {status} ({body})")
+    many_dish_count = sum(len(section["dishes"]) for section in body["sections"])
+    if many_dish_count != 200 or body.get("incomplete"):
+        fail(
+            f"ai flow: expected all 200 dishes with none lost, got {many_dish_count} "
+            f"(incomplete={body.get('incomplete')})"
+        )
+    print("OK — a 200-dish menu comes back complete, none lost to the dish cap.")
 
     # --- monthly cost cap: a huge AiUsage row trips it, then cleanup restores normal service ---
     cap_row_id = _ai_sql_write(

@@ -16,24 +16,29 @@ class AiCallResult:
     input_tokens: int
     output_tokens: int
     used_fallback: bool = False
+    truncated: bool = False
 
 
 def run_with_fallback(
     *,
     primary_model: str,
     fallback_model: str,
-    get_raw: Callable[[int, str], tuple[dict, str, int, int]],
+    get_raw: Callable[[int, str], tuple[dict, str, int, int, bool]],
     parse: Callable[[dict], dict],
 ) -> AiCallResult:
-    raw, model, input_tokens, output_tokens = get_raw(0, primary_model)
+    raw, model, input_tokens, output_tokens, truncated = get_raw(0, primary_model)
     try:
         return AiCallResult(
-            data=parse(raw), model=model, input_tokens=input_tokens, output_tokens=output_tokens
+            data=parse(raw),
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            truncated=truncated,
         )
     except Exception:
         pass
 
-    raw, model, input_tokens, output_tokens = get_raw(1, fallback_model)
+    raw, model, input_tokens, output_tokens, truncated = get_raw(1, fallback_model)
     try:
         data: dict[str, Any] = parse(raw)
     except Exception as exc:
@@ -44,4 +49,5 @@ def run_with_fallback(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         used_fallback=True,
+        truncated=truncated,
     )

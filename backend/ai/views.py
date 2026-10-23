@@ -13,10 +13,10 @@ from businesses.models import Business
 from businesses.permissions import require_permission
 
 from . import files as ai_files
-from . import limits
+from . import limits, prompts
 from .exceptions import AiDailyLimitReached, AiProviderUnavailable, AiUnavailable, InvalidMenuFile
 from .jobs import process_menu_scan
-from .matching import match_stock_item, normalise, stock_items_by_normalised_name
+from .matching import match_stock_item, normalise, stock_items_by_normalised_name, unit_family
 from .models import AiRecipeCache, AiUsageKind, MenuScan, MenuScanStatus
 from .provider import suggest_recipes
 from .provider.errors import AiProviderCallError, AiSchemaError
@@ -122,6 +122,11 @@ class MenuScanDetailView(APIView):
         if scan.status == MenuScanStatus.DONE:
             data["is_menu"] = scan.result["is_menu"]
             data["sections"] = scan.result["sections"]
+            if scan.result.get("incomplete"):
+                data["incomplete"] = True
+                data["message"] = (
+                    "We may have missed some items. Please check the list or add another photo."
+                )
         elif scan.status == MenuScanStatus.FAILED:
             data["error_code"] = scan.error_code
         return Response(data)
@@ -148,10 +153,9 @@ class RecipeSuggestionView(APIView):
 
         to_call = [name for name in dish_names if normalise(name) not in suggestions_by_norm]
         if to_call:
+            stock_items = [(name, unit_family(unit)) for _id, name, unit in stock_by_norm.values()]
             try:
-                result = suggest_recipes(
-                    to_call, business.business_type, [name for _, name in stock_by_norm.values()]
-                )
+                result = suggest_recipes(to_call, business.business_type, stock_items)
             except (AiProviderCallError, AiSchemaError) as exc:
                 raise AiProviderUnavailable() from exc
 
@@ -168,6 +172,7 @@ class RecipeSuggestionView(APIView):
                 AiRecipeCache.objects.update_or_create(
                     dish_name_normalised=key,
                     business_type=business.business_type,
+                    prompt_version=prompts.RECIPE_PROMPT_VERSION,
                     defaults={"result": dish},
                 )
 
@@ -187,36 +192,46 @@ class RecipeSuggestionView(APIView):
     def _cached_suggestions(self, business, dish_names: list[str]) -> dict:
         keys = {normalise(name) for name in dish_names}
         rows = AiRecipeCache.objects.filter(
-            dish_name_normalised__in=keys, business_type=business.business_type
+            dish_name_normalised__in=keys,
+            business_type=business.business_type,
+            prompt_version=prompts.RECIPE_PROMPT_VERSION,
         )
         return {row.dish_name_normalised: row.result for row in rows}
+
+    def _ingredient_rows(self, ingredients: list[dict], stock_by_norm) -> list[dict]:
+        rows = []
+        for ingredient in ingredients:
+            match = match_stock_item(stock_by_norm, ingredient.get("matched_stock_name"))
+            rows.append(
+                {
+                    "name": ingredient["name"],
+                    "amount": ingredient["amount"],
+                    "unit": ingredient["unit"],
+                    "role": ingredient["role"],
+                    "confidence": ingredient["confidence"],
+                    "matched_stock_item_id": match[0] if match else None,
+                    "suggested_group": "",
+                    "suggested_unit": ingredient["unit"] if not match else "",
+                }
+            )
+        return rows
 
     def _build_response(self, dish_names, suggestions_by_norm, stock_by_norm) -> list[dict]:
         response = []
         for name in dish_names:
             suggestion = suggestions_by_norm.get(
-                normalise(name), {"portion_label": "", "ingredients": []}
+                normalise(name), {"portion_label": "", "ingredients": [], "minor_ingredients": []}
             )
-            ingredients = []
-            for ingredient in suggestion.get("ingredients", []):
-                match = match_stock_item(stock_by_norm, ingredient.get("matched_stock_name"))
-                ingredients.append(
-                    {
-                        "name": ingredient["name"],
-                        "amount": ingredient["amount"],
-                        "unit": ingredient["unit"],
-                        "role": ingredient["role"],
-                        "confidence": ingredient["confidence"],
-                        "matched_stock_item_id": match[0] if match else None,
-                        "suggested_group": "",
-                        "suggested_unit": ingredient["unit"] if not match else "",
-                    }
-                )
             response.append(
                 {
                     "dish_name": name,
                     "portion_label": suggestion.get("portion_label", ""),
-                    "ingredients": ingredients,
+                    "ingredients": self._ingredient_rows(
+                        suggestion.get("ingredients", []), stock_by_norm
+                    ),
+                    "minor_ingredients": self._ingredient_rows(
+                        suggestion.get("minor_ingredients", []), stock_by_norm
+                    ),
                 }
             )
         return response

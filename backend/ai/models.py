@@ -68,19 +68,24 @@ class AiUsage(models.Model):
 
 
 class AiRecipeCache(models.Model):
-    """Shared across every business — keyed only by normalised dish name + business_type, so a hit
-    costs nothing and skips the API entirely. Stores ONLY the generic suggestion (ingredient names,
-    grams, portion label): never a business's own prices, ids, or any other business-specific data."""
+    """Shared across every business — keyed by normalised dish name + business_type + prompt_version,
+    so a hit costs nothing and skips the API entirely. Stores ONLY the generic suggestion (ingredient
+    names, grams, portion label): never a business's own prices, ids, or any other business-specific
+    data. prompt_version (ai/prompts.py's RECIPE_PROMPT_VERSION) is bumped whenever the recipe prompt
+    or schema shape changes meaningfully, so a stale cache row from an old prompt is never served —
+    it just becomes an unreachable row rather than needing a data migration to clear it out."""
 
     dish_name_normalised = models.CharField(max_length=80)
     business_type = models.CharField(max_length=32)
+    prompt_version = models.PositiveSmallIntegerField(default=1)
     result = models.JSONField()
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["dish_name_normalised", "business_type"], name="unique_ai_recipe_cache_key"
+                fields=["dish_name_normalised", "business_type", "prompt_version"],
+                name="unique_ai_recipe_cache_key",
             )
         ]
 
