@@ -35,7 +35,6 @@ def _get_raw(
         response = _client().messages.create(
             model=model,
             max_tokens=max_tokens,
-            temperature=0,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=[tool],
             tool_choice={"type": "tool", "name": tool["name"]},
