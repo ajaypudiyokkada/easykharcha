@@ -41,7 +41,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
   models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
-- `ai/` — Step C1/C1b/C1c/C1d/C1e/C2a: menu reading + recipe suggestions via Anthropic (provider/ —
+- `ai/` — Step C1/C1b/C1c/C1d/C1e/C2a/C2c: menu reading + recipe suggestions via Anthropic (provider/ —
   fake.py for AI_FAKE with realistic token counts, anthropic_provider.py for real (no `temperature`
   kwarg —
   anthropic 2.x's Messages.create dropped it; `tool_choice_for_model`'s `_MODELS_REQUIRING_AUTO_TOOL_CHOICE`
@@ -65,15 +65,22 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   otherwise),
   matching.py (fuzzy stock-item matching + unit_family for the recipe prompt), prompts.py
   (RECIPE_PROMPT_VERSION, recipe_tool()'s dish_name field now carries a description naming the key),
-  views.py, urls.py
+  views.py (Step C2c's AI_FAKE-only `FORCE_NEVER_FINISH` marker — a PDF carrying it leaves the scan
+  QUEUED forever, for testing the stuck-scan UI; an image upload can't carry it, since the client
+  always resizes/re-encodes photos before upload), admin.py (`MenuScanAdmin`/`AiUsageAdmin`,
+  superuser-only, read-only), urls.py. `management/commands/run_ai_jobs.py` (the `worker` service's
+  poll loop — Step C2c: a per-job try/except marks a crash `failed` instead of dying, a heartbeat log
+  every 5 minutes, start/per-job id+outcome logging, 10-minute stuck-`reading` recovery)
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
-  admin_mixins.py` (the read-only mixins). Step F1: `accounts.UserAdmin` delete is superuser-only
-  (never self, never the last active superuser); `businesses.BusinessAdmin.delete_business_and_data`
-  (superuser-only action, confirm page at `businesses/templates/admin/businesses/
-  confirm_delete_business.html`) deletes a business and all its data in PROTECT-safe order, one
-  transaction, one audit-log line — `Business`/ledger models otherwise stay undeletable directly.
+  admin_mixins.py` (`ReadOnlyAdminMixin`/`ReadOnlyInlineMixin`; Step C2c's `SuperuserOnlyAdminMixin` —
+  hides the model from staff who aren't a superuser, used by `ai.MenuScanAdmin`/`AiUsageAdmin`). Step
+  F1: `accounts.UserAdmin` delete is superuser-only (never self, never the last active superuser);
+  `businesses.BusinessAdmin.delete_business_and_data` (superuser-only action, confirm page at
+  `businesses/templates/admin/businesses/confirm_delete_business.html`) deletes a business and all its
+  data in PROTECT-safe order, one transaction, one audit-log line — `Business`/ledger models otherwise
+  stay undeletable directly.
 
 ## Endpoints by URL (backend/*/urls.py, all under /api/v1/)
 
@@ -168,7 +175,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   gallery, client-resized to ~1600px/JPEG~0.8 via `forms/menuFileValidation.ts`'s
   `resizeImageForUpload`, web-only `forms/filePicker.ts`) or one PDF, POSTs `ai/menu-scans/`; the scan
   id is kept in `screens/menuScanDraft.ts` (web localStorage/native SecureStore) so leaving and
-  returning resumes polling instead of restarting; analyzing polls every 3s (6s after 30s); review is
+  returning resumes polling instead of restarting; analyzing polls every 3s (6s after 30s); Step C2c:
+  still queued/reading past `STUCK_AFTER_MS` (3 minutes, `EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS`-
+  overridable) shows "This is taking longer than usual" with Try again/Add one by one, same as a real
+  `failed` scan, but polling keeps running underneath in case it finishes right after; review is
   an editable grouped dish list (tick/edit name+price/delete, section rename via a `Sheet`, "Add a
   dish", "Add another photo" merges a second scan de-duplicated by name, skips dishes already on the
   sell-items list); save POSTs `sell-items/bulk/` (section name -> `group`, `skip_existing: true`);
@@ -335,8 +345,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   Step 23e's `--only <scenario>` (`--list` to see names) runs one scenario — a "solo" one stands alone,
   a "chain" one reruns every earlier chain scenario first (shared Owner session) then stops; Step
   C2a's `menu-scan` (solo) drives the whole scan/upload/analyze/review/save/done flow via a real
-  file-chooser (Puppeteer's `waitForFileChooser`) against `docs/images/ek_logo_icon.png`, and the
-  `wizard` chain scenario now clicks "Add one by one" on step 4's new choice card first
+  file-chooser (Puppeteer's `waitForFileChooser`) against `docs/images/ek_logo_icon.png`, then Step
+  C2c appends a second scan (via `docs/images/menu_scan_force_never_finish.pdf`, whose AI_FAKE-only
+  marker leaves it queued forever) proving the stuck-scan "taking longer than usual" UI; the `wizard`
+  chain scenario now clicks "Add one by one" on step 4's new choice card first
 - `npm run responsive` → `scripts/responsive_check.mjs` — every route + sheet/dialog at 7 widths; Step
   23e's `--screen <name>` (`--list` to see names) builds only the session tier that screen needs
   (Step C2a also fixed `buildOwnerSession`'s stale pre-22a2 "Add your own" steps — it still assumed
@@ -351,6 +363,8 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `npm run check:sector-copy` → `scripts/check_sector_copy.py` — Step 22: fails if food wording
   (dish, chef, kitchen, ingredient, ...) appears in a non-food business type's sectorCopy.json or
   starter_packs.json, or a catalogue item's unit isn't in its type's `allowedUnits`
+- `npm run check:entrypoint` → `scripts/check_entrypoint.sh` — Step C2c: proves backend/entrypoint.sh
+  `exec`s a given command and still defaults to gunicorn with none, without Docker or a real database
 - `npm run build:web` / `serve:web` → `scripts/patch_web_shell.mjs` / `serve_web.mjs` — static web export
 - `scripts/lib/landing_server.mjs` — throwaway static server for landing/index.html, used by flow/responsive
 

@@ -340,6 +340,31 @@ not built yet.
   nothing if a post-login redirect landed before AuthContext's businesses fetch had committed —
   invisible before (every field was blank right after signup); now re-hydrates via `useLayoutEffect`.
 
+- **Step C2c — Worker container fix + stuck-scan handling.** Production bug: `backend/entrypoint.sh`
+  ignored any command it was given and always ran gunicorn, so the `worker` service (meant to run
+  `manage.py run_ai_jobs`) actually ran a second gunicorn and never processed scans — they stayed
+  `queued` forever. Fixed: `exec "$@"` when a command is passed, gunicorn only as the no-args default;
+  `RUN_SETUP=0` on the worker (docker-compose.prod.yml) skips migrate/load_pincodes/collectstatic
+  there, and it now `depends_on` the backend's healthcheck too, so only one container ever migrates.
+  `run_ai_jobs`: a per-job try/except marks a crashing job failed (`worker_error`) instead of killing
+  the loop, a heartbeat log every 5 minutes, start/per-job result logging (ids/status only, never menu
+  content), and the stuck-`reading`-job recovery window is now 10 minutes (was 2). New Django admin
+  (superuser-only, read-only): `MenuScanAdmin` (id/business/status/created/finished/error/page_count);
+  `AiUsageAdmin` gained the same superuser gate. Mobile: `analyzing.tsx` now shows "This is taking
+  longer than usual" with Try again/Add one by one once a scan is still queued/reading past
+  `STUCK_AFTER_MS` (3 minutes, `EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS`-overridable for tests) — polling
+  continues underneath in case it finishes right after. New `ai/views.py` AI_FAKE-only
+  `FORCE_NEVER_FINISH` marker (a scan that stays queued forever) backs a new stuck-scan check appended
+  to `flow.mjs`'s `menu-scan` scenario; new `npm run check:entrypoint` unit-tests the entrypoint fix
+  without Docker. Verified by `npm run check` + `npm run verify -- --area ai` (both green) and the new
+  `check:entrypoint` unit test — **the `verify:ui` stuck-scan browser run was started but stopped
+  before it finished** (it waits out a real ~3-minute timeout against the shared dev server) and was
+  never confirmed end to end; `analyzing.tsx`'s stuck-UI branch and the `flow.mjs`/fixture-PDF check
+  are unverified in a live browser as of this step. Found but didn't fix (pre-existing, confirmed on
+  untouched `main` too, unrelated to this step): `check_ai_flow`'s own `owner_access` user hits the
+  3-business cap partway through (`AI Incomplete Biz` create gets 422 `BUSINESS_LIMIT_REACHED`) — the
+  smoke test itself creates one business too many for one user.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

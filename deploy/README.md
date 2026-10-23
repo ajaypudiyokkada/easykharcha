@@ -6,6 +6,19 @@ uploaded menus — see backend/ai/), the PWA web export, the landing page, and C
 four on `easykharcha.com` / `app.easykharcha.com` / `api.easykharcha.com`. The server builds its own
 images from a `git pull` — nothing is built on Windows and pushed.
 
+### The `worker` service
+
+Same image as `backend`, just a different command (`python manage.py run_ai_jobs`) — both share
+`backend/entrypoint.sh`, which `exec`s whatever command it's given (falling back to gunicorn only
+when none is passed), so this really does run the job-polling loop rather than a second gunicorn. The
+worker sets `RUN_SETUP=0` so it skips migrate/load_pincodes/collectstatic (only `backend` runs those)
+and `depends_on` the backend's own healthcheck, so it never starts before the schema it needs exists.
+`restart: unless-stopped` brings it back if the loop ever crashes outright; the loop itself logs a
+start line, a heartbeat every 5 minutes while idle, and each job's id and outcome (never menu
+content) — `docker compose -f docker-compose.prod.yml logs -f worker` is the place to check if scans
+are stuck. A job that raises is marked failed (not left `queued`/`reading` forever) and the loop keeps
+going; a job stuck in `reading` for more than 10 minutes is recovered the same way on the next poll.
+
 ## First time on a new server
 
 1. Clone the repo and `cd` into it.

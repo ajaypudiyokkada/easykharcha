@@ -56,13 +56,21 @@ services:
     # a 2 GB droplet — see backend/ai/management/commands/run_ai_jobs.py. Shares ai_tmp_files with
     # backend: the web process saves an uploaded menu's files there, this process reads and deletes
     # them — two different containers, so without the shared volume the worker couldn't see them.
+    # restart: unless-stopped restarts it if the job loop ever crashes outright.
     build:
       context: ./backend
     restart: unless-stopped
     env_file: deploy/.env.production
+    environment:
+      # Only the backend runs migrate/load_pincodes/collectstatic (entrypoint.sh) — two containers
+      # migrating at once would race. depends_on below also waits for the backend to be healthy
+      # (schema in place) before this starts.
+      - RUN_SETUP=0
     command: python manage.py run_ai_jobs
     depends_on:
       db:
+        condition: service_healthy
+      backend:
         condition: service_healthy
     volumes:
       - ai_tmp_files:/app/ai_tmp
