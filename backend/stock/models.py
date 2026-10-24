@@ -4,6 +4,8 @@ from django.db.models.functions import Lower
 
 from businesses.models import Business
 
+from .units import UnitFamily
+
 
 class Unit(models.TextChoices):
     """A StockItem is locked to one unit for its whole life (see StockItemDetailView's unit-change
@@ -13,7 +15,12 @@ class Unit(models.TextChoices):
     ml<->L conversion happens at all, purely client-side at entry time (see
     mobile/src/forms/unitConversion.ts), so the owner can type "150 g" against a kg-denominated
     stock item; everything described above still holds once that's converted. Adding a label here
-    with no sibling in that conversion table is still purely cosmetic and needs no gap-maths change."""
+    with no sibling in that conversion table is still purely cosmetic and needs no gap-maths change.
+
+    Step U1b-1: `kg`/`L`/`tonne` remain valid choices here for now (U1b-2 narrows what a *new*
+    stock item can store as its own `unit`) but every *existing* row using one of them has already
+    been rebased to its family's base unit (g/ml) by the base-unit migration — see `StockItem.
+    unit_family`/`units.py`."""
 
     KG = "kg", "kg"
     G = "g", "g"
@@ -39,7 +46,23 @@ class StockItem(models.Model):
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="stock_items")
     name = models.CharField(max_length=120)
     unit = models.CharField(max_length=10, choices=Unit.choices)
-    usual_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Step U1b-1: derived from `unit` via `units.unit_family()` — set once at creation, backfilled
+    # for existing rows by the base-unit migration. Locked the same way `unit` is locked, once this
+    # item has any purchase/count/wastage/sale history (see StockItemDetailView.patch), so a family
+    # change can never retroactively rescale a past row.
+    unit_family = models.CharField(
+        max_length=10, choices=UnitFamily.CHOICES, default=UnitFamily.COUNT
+    )
+    # "1 pack unit = N base units" (e.g. 1 packet = 500 g, 1 bottle = 750 ml) — only meaningful for
+    # a packaged/pack-style entry unit. Set once but, unlike `unit`/`unit_family`, never locked by
+    # history (Decision 3, U1b-1 report): every past row is already stored in the base unit, never
+    # in packs, so correcting a pack's real-world size can't rescale anything already recorded.
+    pack_size_base_qty = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    # Step U1b-1: widened 2dp->4dp, max_digits 10->12 (Decision 1) — this is a price *per base
+    # unit* (g/ml/piece) now, not per kg/L/piece, so 2dp alone would floor a cheap-per-kg item
+    # (e.g. ₹0.05/kg flour) straight to ₹0.00/g. Still displayed to the owner per kg/L (x1000),
+    # never typed or stored that way.
+    usual_price = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     supplier = models.CharField(max_length=120, blank=True)
     # "Used in many items" — oil, salt, packaging. A shared item can't be picked as a dish's
     # ingredient (see SellItemIngredient) since it doesn't point to any one thing sold.

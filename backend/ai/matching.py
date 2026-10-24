@@ -12,13 +12,15 @@ FUZZY_CUTOFF = 0.82
 # Every stock Unit (stock/models.py) grouped into the three per-portion units a recipe ingredient
 # can use (schemas.IngredientSuggestion) — recipe_messages tells the model which family a matched
 # stock item belongs to, since the backend never converts between units itself.
+# Step U1b-1 (Decision 5): `bottle` is a count-family pack unit now, not a volume one — a business
+# counts bottles as discrete pieces, so it's deliberately absent here and falls through to the
+# "pieces" default below, same as piece/dozen/sheet/etc.
 _UNIT_FAMILY_BY_UNIT = {
     "kg": "g",
     "g": "g",
     "tonne": "g",
     "L": "ml",
     "ml": "ml",
-    "bottle": "ml",
 }
 
 

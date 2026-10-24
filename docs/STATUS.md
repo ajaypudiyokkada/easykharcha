@@ -382,6 +382,22 @@ not built yet.
   change — the review screen still has no batching or a specific message for this error, just a
   much higher ceiling before it's hit.
 
+- **Step U1b-1 — Base units, backend foundation (docs/UNIT_REDESIGN.md).** Every weight stock item's
+  base unit is now `g`, every volume item's `ml` — new `stock/units.py` (`UnitFamily`,
+  `unit_family()`), `StockItem.unit_family` (locked by history same as `unit`, once there's a
+  purchase/count/wastage/sale row — broadened from the old purchase/count-only check) and
+  `pack_size_base_qty` (never locked). `usual_price`/`PurchaseLine.unit_price`/`WastageEntry.
+  unit_cost_at_entry` widened 2dp->4dp (12 digits) — a per-base-unit price now, not per-kg/L.
+  Migrations `0006_base_units`/`0007_backfill_base_units` rebased all 766 dev stock items (533 kg,
+  199 L) and their purchase/count/wastage/ingredient rows, reversibly; tested on a DB copy first,
+  proven against the real Milk example (22,500 ml used, 2,500 ml gap, ₹160, 12.5%) and a kg-bought/
+  gram-used item via `manage.py verify_u1b1_base_units`, both through the real `counts/gap.py` with
+  zero logic changes there, confirming the audit's "gap maths is unit-agnostic" finding. `ai/
+  matching.py`'s `bottle` moved out of the `ml` family (Decision 5: a pack-of-pieces count unit now).
+  `kg`/`L`/`tonne` still work as *creatable* `StockItem.unit` values for now — U1b-2 narrows entry
+  and adds the shared conversion screens; no app screen was touched this step. See that migration's
+  docstring for its one known gap: a tonne-origin item (none in dev data) would reverse as kg-scale.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

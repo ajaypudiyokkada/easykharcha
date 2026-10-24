@@ -25,8 +25,8 @@ class TooManyRows(APIException):
 class StockItemUnitLocked(APIException):
     status_code = 422
     default_detail = (
-        "This item's unit can't be changed — it already has purchases or stock counts "
-        "recorded in the old unit."
+        "This item's unit can't be changed — it already has purchase, count, wastage or sale "
+        "history in the old unit."
     )
     default_code = "STOCK_ITEM_UNIT_LOCKED"
 

@@ -20,8 +20,15 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   serializers.py, gap.py (Step 14's stock-gap math, shared with alerts/ — Step 23d's `_local_date`
   matches sales by each count's plain local calendar date, not its shifted business_date), config.py
   (unusual-value guard constants, `CLOSING_GRACE_HOURS`), exceptions.py (`OpeningRequired`), urls.py
-- `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine), views.py, serializers.py, exceptions.py, urls.py
-- `stock/` — stock items, dishes (SellItem); models.py (StockItem, SellItem — Step 19 added `group`;
+- `purchases/` — purchase CRUD, suppliers; models.py (Purchase, PurchaseLine — Step U1b-1 widened
+  `unit_price` to 4dp/12 digits, a per-base-unit price now), views.py, serializers.py, exceptions.py, urls.py
+- `stock/` — stock items, dishes (SellItem); units.py (Step U1b-1: `UnitFamily`
+  (weight/volume/count), `UNIT_FAMILY`/`unit_family()` — kg/g/tonne->weight, L/ml->volume, bottle
+  and everything else->count; frozen separately inside the backfill migration, not imported by it);
+  models.py (StockItem, SellItem — Step 19 added `group`; Step U1b-1 added `unit_family` and
+  `pack_size_base_qty` (never locked by history, unlike `unit`/`unit_family` — see
+  StockItemDetailView.patch) and widened `usual_price` to 4dp/12 digits (a per-base-unit price now,
+  not per-kg/L);
   Step 22's `Unit` has 16 pure-label choices, no backend conversion between any of them; Step 22a
   replaced `main_stock_item`/`uses_qty` with `SellItemIngredient` (one row per ingredient, qty
   always in the stock item's own unit) and added `portion_label`/`recipe_status`
@@ -36,7 +43,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   Step C2a built the choice screen and a bulk-create-without-ingredients caller (`mobile/app/
   menu-scan/`, below). Still unbuilt: `RecipeStatus.UNCONFIRMED` and `DishRecipeForm`'s `stepLabel`/
   `onSkip` card-flow props, for Step C2b's guided ingredients pass.
-- `wastage/` — wastage entries; models.py (WastageEntry), views.py, serializers.py, urls.py
+  Step U1b-1: migrations `0006_base_units`/`0007_backfill_base_units` rebase every existing kg/L/
+  tonne stock item (and its purchase/count/wastage/ingredient rows) onto g/ml, reversibly
+  (`manage.py migrate stock 0005` to undo — see that migration's docstring for its one known
+  reverse-precision gap: a tonne-origin item, none exist in dev data today, would reverse as if
+  kg-scale); `management/commands/verify_u1b1_base_units.py` proves the Milk and kg-bought/
+  gram-used regression cases against real seed data (rolled back, nothing persisted).
+- `wastage/` — wastage entries; models.py (WastageEntry — Step U1b-1 widened `unit_cost_at_entry`
+  to 4dp/12 digits, matching `usual_price`), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (opening_late/closing_late — Step 23b's split of the
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
@@ -64,7 +78,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   saves the scan, stamps each dish `existing` against this business's own sell items — Step C2a's
   review screen skips those; run inline when AI_FAKE or by management/commands/run_ai_jobs.py
   otherwise),
-  matching.py (fuzzy stock-item matching + unit_family for the recipe prompt), prompts.py
+  matching.py (fuzzy stock-item matching + unit_family for the recipe prompt — Step U1b-1: `bottle`
+  dropped from the ml family, now falls through to the "pieces" default, a count-family pack unit),
+  prompts.py
   (RECIPE_PROMPT_VERSION, recipe_tool()'s dish_name field now carries a description naming the key),
   views.py (Step C2c's AI_FAKE-only `FORCE_NEVER_FINISH` marker — a PDF carrying it leaves the scan
   QUEUED forever, for testing the stuck-scan UI; an image upload can't carry it, since the client
