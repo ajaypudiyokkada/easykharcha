@@ -29,6 +29,7 @@ from .serializers import (
     StockItemSerializer,
     StockItemUpdateSerializer,
 )
+from .units import UnitEntryError, convert_entry_quantity
 
 PRICE_HISTORY_POINTS = 12
 RECENT_PURCHASES = 5
@@ -177,10 +178,14 @@ class StockItemDetailView(APIView):
                 _group_resolver(business.stock_items.exclude(id=item.id)), data["group"]
             )
 
-        if "unit" in data and data["unit"] != item.unit:
+        # Step U1b-2: the lock is on the *family* a history-bearing item belongs to, not the raw
+        # entry unit typed this time — re-picking "kg" on an item already stored in g is a no-op,
+        # not a lock violation, since `_resolve_unit_and_family` already rewrote `data["unit"]` to
+        # the base unit and `data["unit_family"]` to its family before this check runs.
+        if "unit_family" in data and data["unit_family"] != item.unit_family:
             # Decision 3 (U1b-1 report): broadened from purchase/count to also cover wastage and
             # sale (recipe-usage) history — any of the four means some past row's quantity is
-            # already meaningless the moment the unit changes under it.
+            # already meaningless the moment the unit's family changes under it.
             has_history = (
                 PurchaseLine.objects.filter(stock_item=item).exists()
                 or CountLine.objects.filter(stock_item=item).exists()
@@ -299,7 +304,11 @@ def _resolve_ingredient_rows(
             raise ValidationError(
                 {"ingredients": "Choose stock items from this business — not a shared item."}
             )
-        resolved.append((stock_item, row["quantity"]))
+        try:
+            quantity = convert_entry_quantity(row["quantity"], row.get("entry_unit"), stock_item)
+        except UnitEntryError as exc:
+            raise ValidationError({"ingredients": str(exc)}) from exc
+        resolved.append((stock_item, quantity))
     return resolved
 
 

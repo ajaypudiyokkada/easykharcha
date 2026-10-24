@@ -3190,10 +3190,13 @@ def check_settings_flow() -> None:
     if status != 201:
         fail(f"settings flow: purchase create expected 201, got {status} ({body})")
 
+    # Step U1b-2: re-picking "kg" is a no-op now (it resolves to the same weight family/g base
+    # this item already stores as) — the real lock is on the *family*, so this now has to attempt
+    # an actual family change (weight -> count) to prove the lock still holds.
     status, body, _ = request(
         "PATCH",
         f"/businesses/{business_id}/stock-items/{rice_id}/",
-        {"unit": "g"},
+        {"unit": "piece"},
         token=owner_access,
     )
     if (
@@ -3203,7 +3206,7 @@ def check_settings_flow() -> None:
         fail(
             f"unit change after purchase: expected STOCK_ITEM_UNIT_LOCKED, got {status} ({body})"
         )
-    print("OK — changing a stock item's unit is refused once it has a purchase.")
+    print("OK — changing a stock item's unit family is refused once it has a purchase.")
 
     # a dish has Basmati Rice as an ingredient
     rice_bowl_id, _ = _create_dish(

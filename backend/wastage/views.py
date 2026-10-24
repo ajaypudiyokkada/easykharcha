@@ -14,6 +14,7 @@ from audit.log import log_action
 from businesses.models import Business
 from businesses.permissions import access_or_403, permissions_for, require_permission
 from purchases.models import PurchaseLine
+from stock.units import UnitEntryError, convert_entry_quantity
 
 from .models import WastageEntry
 from .serializers import WastageCreateSerializer, WastageEntrySerializer
@@ -98,6 +99,7 @@ class WastageListCreateView(APIView):
         if not can_value:
             for item in data:
                 item.pop("value", None)
+                item.pop("unit_cost_at_entry_per_major_unit", None)
 
         body = {"results": data}
         if summary is not None:
@@ -116,10 +118,15 @@ class WastageListCreateView(APIView):
         if stock_item is None:
             raise ValidationError({"stock_item": "Choose a stock item from this business."})
 
+        try:
+            quantity = convert_entry_quantity(data["quantity"], data.get("entry_unit"), stock_item)
+        except UnitEntryError as exc:
+            raise ValidationError({"entry_unit": str(exc)}) from exc
+
         entry = WastageEntry.objects.create(
             business=business,
             stock_item=stock_item,
-            quantity=data["quantity"],
+            quantity=quantity,
             reason=data["reason"],
             note=data["note"],
             recorded_by=request.user,

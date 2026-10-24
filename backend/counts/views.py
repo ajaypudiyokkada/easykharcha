@@ -19,6 +19,7 @@ from businesses.access import owner_access_or_403
 from businesses.models import Access, Business
 from businesses.permissions import access_or_403, permissions_for, require_permission
 from purchases.models import PurchaseLine
+from stock.units import UnitEntryError, convert_entry_quantity
 from wastage.models import WastageEntry
 
 from .business_day import business_date_for, has_any_count
@@ -195,6 +196,15 @@ class CountListCreateView(APIView):
                 continue
             seen_ids.add(item.id)
             data["stock_item"] = item
+            entry_unit = data.pop("entry_unit", None)
+            if data["counted_qty"] is not None:
+                try:
+                    data["counted_qty"] = convert_entry_quantity(
+                        data["counted_qty"], entry_unit, item
+                    )
+                except UnitEntryError as exc:
+                    row_errors.append({"row": index, "field": "entry_unit", "message": str(exc)})
+                    continue
             cleaned.append(data)
 
         if seen_ids != set(active_items):

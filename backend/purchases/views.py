@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from audit.log import log_action
 from businesses.models import Business
 from businesses.permissions import require_permission
+from stock.units import UnitEntryError, convert_entry_price, convert_entry_quantity
 
 from .exceptions import PurchaseValidationError, TooManyLines
 from .models import Purchase, PurchaseLine, Supplier
@@ -73,6 +74,13 @@ def _validate_lines(business: Business, raw_lines: list) -> list[dict]:
             )
             continue
         data["stock_item"] = stock_item
+        entry_unit = data.pop("entry_unit", None)
+        try:
+            data["quantity"] = convert_entry_quantity(data["quantity"], entry_unit, stock_item)
+            data["unit_price"] = convert_entry_price(data["unit_price"], entry_unit, stock_item)
+        except UnitEntryError as exc:
+            row_errors.append({"row": index, "field": "entry_unit", "message": str(exc)})
+            continue
         cleaned.append(data)
 
     if row_errors:
