@@ -173,3 +173,36 @@ def display_price_per_major_unit(base_price: Decimal | None, unit: str) -> Decim
     if family in (UnitFamily.WEIGHT, UnitFamily.VOLUME):
         return (base_price * MAJOR_UNIT_FACTOR).quantize(Decimal("0.01"))
     return base_price.quantize(Decimal("0.01"))
+
+
+def display_quantities(
+    values: dict[str, Decimal | None], unit: str
+) -> tuple[dict[str, Decimal | None], str]:
+    """Several related stored base-unit quantities for the same item (gap vs expected, wasted vs
+    bought, ...), rolled up onto one shared display unit so a UI showing them side by side never
+    mixes g and kg — the unit is picked from whichever of them is biggest, same 1,000+ threshold as
+    display_quantity."""
+    family = unit_family(unit)
+    major_unit = MAJOR_UNIT_FOR_FAMILY.get(family)
+    biggest = max((abs(v) for v in values.values() if v is not None), default=Decimal("0"))
+    if major_unit is not None and biggest >= MAJOR_UNIT_FACTOR:
+        converted = {
+            k: (_trim(v / MAJOR_UNIT_FACTOR) if v is not None else None) for k, v in values.items()
+        }
+        return converted, major_unit
+    return {k: (_trim(v) if v is not None else None) for k, v in values.items()}, unit
+
+
+def report_group_key(unit: str) -> str:
+    """The bucket a report sums multiple stock items' quantities under: weight/volume units are
+    fungible across every item (all stored as g, all as ml), so they share one family bucket; any
+    other unit (piece, box, dozen, ...) has no sibling to convert into (see UNIT_FAMILY above), so
+    it stays its own one-member bucket, keyed by itself."""
+    family = unit_family(unit)
+    return family if family in (UnitFamily.WEIGHT, UnitFamily.VOLUME) else unit
+
+
+def report_group_base_unit(group_key: str) -> str:
+    """The representative unit a `report_group_key` bucket should display through — the family's
+    base unit for weight/volume, or the bucket's own (one-member) unit otherwise."""
+    return BASE_UNIT_FOR_FAMILY.get(group_key, group_key)

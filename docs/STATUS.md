@@ -419,6 +419,22 @@ not built yet.
   a pack-size field, and shows a lock message (`StockItem.unit_locked`, new) once an item has
   history. **U1b-3b-2 still owes**: stock/sell lists, reports, home, alerts and admin screens'
   display-unit formatting.
+- **Step U1b-3b-2 (backend half only) — Report/alert/admin display-unit fixes.** Fixed the real bug:
+  `reports/service.py`'s wastage trend grouped quantities by each stock item's own raw unit (`g`/`ml`
+  post-migration, previously read as the old `kg`/`L`), so mixed-family totals and `verify --area
+  reports`'s own assertion (still checking for a `"L"` key) were wrong; now `quantity_by_family`
+  (`stock/units.py`'s new `report_group_key`/`display_quantities`) sums weight/volume into one
+  fungible bucket each with `base_qty`/`display_qty`/`display_unit`, every other unit its own bucket.
+  `alerts/service.py`'s wastage_high/gap_flagged/expiry_soon detail text and `numbers` and
+  price_rise's prices now go through `display_quantity(ies)`/`display_price_per_major_unit` instead
+  of raw base numbers/per-gram prices; same for `reports/service.py`'s used_vs_expected/biggest_gaps.
+  Django admin (`StockItemAdmin`, `PurchaseLineInline`, `WastageEntryAdmin`, `CountLineInline`) gained
+  display-converted columns alongside the raw stored ones. New `scripts/smoke.py` check builds
+  wastage entries with `entry_unit: "kg"`/`"L"` and asserts the report's family rollup (2 kg -> 2,000
+  g, 1.2 L -> 1,200 ml). **Still owed** (not done this step, ran out of time): Part 2's mobile screen
+  sweep — stock/sell/dish lists, purchases/wastage/count history, counts review (backend
+  `counts/gap.py`'s own `CountDetailView` output is also still raw base units, untouched), home cards,
+  the AI review screens, Settings/team screens. See the branch's own commit for exact scope.
 
 ## Permission table
 

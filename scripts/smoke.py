@@ -4337,6 +4337,72 @@ def check_expiry_alerts_flow() -> None:
     )
 
 
+def _check_reports_unit_family_rollup() -> None:
+    """Step U1b-3b-2: wastage entries typed in kg and L (packaged as weight/volume, not the item's
+    stored base unit) must still roll up correctly in the wastage trend's quantity_by_family —
+    this is what used to read the stale "L" key and get 0 after the base-unit migration moved
+    storage to g/ml."""
+    _, owner_access, _ = signup_and_login("Reports Rollup Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Reports Rollup Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports rollup flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Rice", "unit": "kg"}, {"name": "Oil", "unit": "L"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"reports rollup flow: stock items create expected 201, got {status} ({body})")
+    rice_id, oil_id = body[0]["id"], body[1]["id"]
+
+    for stock_item_id, qty, entry_unit in ((rice_id, "2", "kg"), (oil_id, "1.2", "L")):
+        status, body, _ = request(
+            "POST",
+            f"/businesses/{business_id}/wastage/",
+            {
+                "stock_item": stock_item_id,
+                "quantity": qty,
+                "entry_unit": entry_unit,
+                "reason": "spillage",
+            },
+            token=owner_access,
+        )
+        if status != 201:
+            fail(f"reports rollup flow: wastage create expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{business_id}/reports/summary/?period=today",
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"reports rollup flow: summary expected 200, got {status} ({body})")
+
+    family = body["wastage_trend"]["total"]["quantity_by_family"]
+    weight = family.get("weight")
+    volume = family.get("volume")
+    if weight is None or Decimal(weight["base_qty"]) != Decimal("2000"):
+        fail(f"reports rollup flow: expected weight base_qty 2000 (2 kg), got {weight}")
+    if weight["display_unit"] != "kg" or Decimal(weight["display_qty"]) != Decimal("2"):
+        fail(f"reports rollup flow: expected weight display 2 kg, got {weight}")
+    if volume is None or Decimal(volume["base_qty"]) != Decimal("1200"):
+        fail(f"reports rollup flow: expected volume base_qty 1200 (1.2 L), got {volume}")
+    if volume["display_unit"] != "L" or Decimal(volume["display_qty"]) != Decimal("1.2"):
+        fail(f"reports rollup flow: expected volume display 1.2 L, got {volume}")
+    print(
+        "OK — wastage entries typed in kg/L roll up correctly in the report's quantity_by_family "
+        "(2 kg -> weight 2000 g, 1.2 L -> volume 1200 ml)."
+    )
+
+
 def check_reports_flow() -> None:
     _, owner_access, _ = signup_and_login("Reports Owner")
     status, body, _ = request(
@@ -4552,21 +4618,26 @@ def check_reports_flow() -> None:
     print("OK — sales_vs_cost: (100 x 0.2 x 64) / 2000 = 64.0% cost.")
 
     wastage_trend = body["wastage_trend"]
-    if Decimal(wastage_trend["total"]["quantity_by_unit"].get("L", "0")) != Decimal(
+    volume_total = wastage_trend["total"]["quantity_by_family"].get("volume")
+    if volume_total is None or Decimal(volume_total["base_qty"]) != Decimal("1.5"):
+        fail(
+            f"reports flow: expected wastage_trend volume base_qty 1.5, got {wastage_trend['total']}"
+        )
+    if volume_total["display_unit"] != "ml" or Decimal(volume_total["display_qty"]) != Decimal(
         "1.5"
     ):
-        fail(
-            f"reports flow: expected wastage_trend L total 1.5, got {wastage_trend['total']}"
-        )
+        fail(f"reports flow: expected wastage_trend volume display 1.5 ml, got {volume_total}")
     bucket_qty_total = sum(
-        Decimal(bucket["quantity_by_unit"].get("L", "0"))
+        Decimal(bucket["quantity_by_family"].get("volume", {}).get("base_qty", "0"))
         for bucket in wastage_trend["buckets"]
     )
     if bucket_qty_total != Decimal("1.5"):
         fail(
-            f"reports flow: expected wastage_trend buckets to add up to 1.5 L, got {bucket_qty_total}"
+            f"reports flow: expected wastage_trend buckets to add up to 1.5, got {bucket_qty_total}"
         )
     print("OK — wastage_trend's bucket quantities add up to the period total.")
+
+    _check_reports_unit_family_rollup()
 
     _, helper_access, _ = _add_team_member(
         business_id, owner_access, "Reports Helper", "helper"
