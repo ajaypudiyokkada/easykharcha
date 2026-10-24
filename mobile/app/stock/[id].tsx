@@ -5,7 +5,8 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import type { StockItemDetail } from '../../src/api/purchases';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { formatDate, formatDateTime, formatRupees } from '../../src/format';
+import { formatDate, formatDateTime, formatQty, formatRupees } from '../../src/format';
+import { MAJOR_UNIT_FOR_FAMILY, unitFamily } from '../../src/units';
 import { RecordPurchaseSheet } from '../../src/screens/RecordPurchaseSheet';
 import { StockItemSheet } from '../../src/screens/StockItemSheet';
 import { strings } from '../../src/strings';
@@ -147,7 +148,7 @@ export default function StockItemDetailScreen() {
                 <Small style={styles.factLabel}>{s.lastCounted}</Small>
                 <Body>
                   {item.last_counted_qty
-                    ? `${item.last_counted_qty} ${item.unit} · ${
+                    ? `${formatQty(item.last_counted_qty, item.unit)} · ${
                         item.last_counted_at ? formatDate(item.last_counted_at, timezone) : ''
                       }`
                     : '—'}
@@ -157,7 +158,7 @@ export default function StockItemDetailScreen() {
 
             <PriceChart
               title={s.priceHistory}
-              unit={`₹ per ${item.unit}`}
+              unit={`₹ per ${MAJOR_UNIT_FOR_FAMILY[unitFamily(item.unit)] ?? item.unit}`}
               points={chartPoints}
               valuePrefix="₹"
               takeawayText={takeawayFor(item.name, item.price_points)}

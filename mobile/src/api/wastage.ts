@@ -6,6 +6,9 @@ export type WastageEntry = {
   stock_item_name: string;
   unit: string;
   quantity: string;
+  /** `quantity` rolled up for display (e.g. 500 g -> "0.5"/"kg") — see src/units.ts. */
+  display_quantity: string;
+  display_unit: string;
   reason: WastageReason;
   note: string;
   recorded_by: number;

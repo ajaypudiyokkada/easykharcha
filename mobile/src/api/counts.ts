@@ -68,6 +68,16 @@ export type CountDetailLine = {
   gap_status: GapStatus;
   gap_reason: GapReason | null;
   flagged: boolean;
+  /** U1b-3b-3: every quantity above, rolled onto one shared display unit (kg/L once any of them
+   * is big enough) — base values above are kept untouched for anything still doing its own maths. */
+  display_unit: string;
+  display_counted_qty: string | null;
+  display_previous_counted_qty: string | null;
+  display_quantity_bought_since: string | null;
+  display_quantity_wasted_since: string | null;
+  display_used_since_last_count: string | null;
+  display_expected_used: string | null;
+  display_gap_qty: string | null;
 };
 
 export type CountDetail = StockCount & { lines: CountDetailLine[] };

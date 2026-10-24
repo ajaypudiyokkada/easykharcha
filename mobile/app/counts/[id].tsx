@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import type { CountDetail, CountDetailLine } from '../../src/api/counts';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { formatDate, formatDateTime, formatRupees } from '../../src/format';
+import { formatDate, formatDateTime, formatQty, formatRupees } from '../../src/format';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
@@ -22,11 +22,6 @@ import {
 import { HOME_CONTENT_WIDTH } from '../../src/ui/constants';
 
 const s = strings.countReview;
-
-function formatQty(value: string | null, unit: string): string {
-  if (value === null) return '—';
-  return `${value} ${unit}`;
-}
 
 function gapReasonText(line: CountDetailLine, timezone: string): string {
   const reason = line.gap_reason;
@@ -148,28 +143,46 @@ function LineCard({
         {line.confirmed_unusual ? <Badge label={s.confirmedBadge} /> : null}
         {gapFlagged ? <Badge label={s.gapBadge} danger /> : null}
       </View>
-      <Row label={s.countedLabel} value={formatQty(line.counted_qty, line.unit)} />
+      <Row
+        label={s.countedLabel}
+        value={formatQty(line.counted_qty, line.unit, {
+          quantity: line.display_counted_qty,
+          unit: line.display_unit,
+        })}
+      />
       <Row
         label={s.previousLabel}
         value={
           line.previous_counted_qty === null
             ? s.noPreviousCount
-            : formatQty(line.previous_counted_qty, line.unit)
+            : formatQty(line.previous_counted_qty, line.unit, {
+                quantity: line.display_previous_counted_qty,
+                unit: line.display_unit,
+              })
         }
       />
       {line.previous_counted_qty !== null ? (
         <>
           <Row
             label={s.boughtSinceLabel}
-            value={formatQty(line.quantity_bought_since, line.unit)}
+            value={formatQty(line.quantity_bought_since, line.unit, {
+              quantity: line.display_quantity_bought_since,
+              unit: line.display_unit,
+            })}
           />
           <Row
             label={s.wastedSinceLabel}
-            value={formatQty(line.quantity_wasted_since, line.unit)}
+            value={formatQty(line.quantity_wasted_since, line.unit, {
+              quantity: line.display_quantity_wasted_since,
+              unit: line.display_unit,
+            })}
           />
           <Row
             label={s.usedSinceLabel}
-            value={formatQty(line.used_since_last_count, line.unit)}
+            value={formatQty(line.used_since_last_count, line.unit, {
+              quantity: line.display_used_since_last_count,
+              unit: line.display_unit,
+            })}
             emphasise
           />
         </>
@@ -177,13 +190,19 @@ function LineCard({
 
       {line.gap_status === 'ok' ? (
         <>
-          <Row label={s.expectedLabel} value={formatQty(line.expected_used, line.unit)} />
+          <Row
+            label={s.expectedLabel}
+            value={formatQty(line.expected_used, line.unit, {
+              quantity: line.display_expected_used,
+              unit: line.display_unit,
+            })}
+          />
           <View style={styles.row}>
             <Small style={styles.rowLabel}>{s.gapLabel}</Small>
             <View style={styles.gapValueWrap}>
               {gapFlagged ? <Icon name="warning" size={16} colour={colours.danger} /> : null}
               <Body style={gapFlagged ? styles.gapValueFlagged : styles.rowValue}>
-                {s.gapQty(line.gap_qty ?? '—', line.unit)}
+                {s.gapQty(line.display_gap_qty ?? '—', line.display_unit)}
                 {line.gap_value !== null ? ` ${s.gapValue(formatRupees(line.gap_value))}` : ''}
               </Body>
             </View>

@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import type { WastageEntry, WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
 import { can } from '../src/auth/permissions';
-import { formatDateTime, formatRupees } from '../src/format';
+import { formatDateTime, formatQty, formatRupees } from '../src/format';
 import { RecordWastageSheet } from '../src/screens/RecordWastageSheet';
 import { strings } from '../src/strings';
 import { colours, fonts, radii, spacing } from '../src/theme/tokens';
@@ -195,7 +195,11 @@ function WastageRow({
     <View style={styles.row}>
       <View style={styles.rowMain}>
         <Body style={styles.rowName}>
-          {entry.stock_item_name} · {entry.quantity} {entry.unit}
+          {entry.stock_item_name} ·{' '}
+          {formatQty(entry.quantity, entry.unit, {
+            quantity: entry.display_quantity,
+            unit: entry.display_unit,
+          })}
         </Body>
         <Small style={styles.rowMeta}>
           {reasonLabel} · {formatDateTime(entry.recorded_at, timezone)}
