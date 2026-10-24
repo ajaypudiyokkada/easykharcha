@@ -123,11 +123,19 @@ export default function StockItemDetailScreen() {
               <Heading level={2}>{item.name}</Heading>
               <View style={styles.factRow}>
                 <Small style={styles.factLabel}>{s.usualPrice}</Small>
-                <Body>{item.usual_price ? formatRupees(item.usual_price) : '—'}</Body>
+                <Body>
+                  {item.usual_price_per_major_unit
+                    ? formatRupees(item.usual_price_per_major_unit)
+                    : '—'}
+                </Body>
               </View>
               <View style={styles.factRow}>
                 <Small style={styles.factLabel}>{s.lastPricePaid}</Small>
-                <Body>{item.last_unit_price ? formatRupees(item.last_unit_price) : '—'}</Body>
+                <Body>
+                  {item.last_unit_price_per_major_unit
+                    ? formatRupees(item.last_unit_price_per_major_unit)
+                    : '—'}
+                </Body>
               </View>
               <View style={styles.factRow}>
                 <Small style={styles.factLabel}>{s.lastPurchased}</Small>

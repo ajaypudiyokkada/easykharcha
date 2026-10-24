@@ -615,7 +615,7 @@ async function buildOwnerSession(page) {
   await typeInto(page, 'Supplier', 'Sunrise Supplies');
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
   await typeInto(page, 'Quantity', '2');
-  await typeInto(page, 'Price per unit', '40');
+  await typeInto(page, 'Price per kg', '40');
   await clickButton(page, 'Save purchase');
   await waitForText(page, 'Purchase saved');
   await waitForText(page, 'Sunrise Supplies');

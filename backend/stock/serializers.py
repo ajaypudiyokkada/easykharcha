@@ -129,6 +129,10 @@ class StockItemSerializer(serializers.ModelSerializer):
     last_unit_price = serializers.DecimalField(
         max_digits=12, decimal_places=4, read_only=True, default=None
     )
+    # Step U1b-3a: `last_unit_price` stays the stored per-base-unit figure (now per g/ml, since
+    # purchases can be typed in kg/L and converted down) — this is the owner-facing "last paid",
+    # always per kg/L for a weight/volume item, same rollup as `usual_price_per_major_unit`.
+    last_unit_price_per_major_unit = serializers.SerializerMethodField()
     last_purchased_at = serializers.DateTimeField(read_only=True, default=None)
     # Step 10: populated via annotation too (see _with_last_count_info). Deliberately no "on hand"
     # or gap field — that needs usage math this step doesn't build yet.
@@ -159,6 +163,7 @@ class StockItemSerializer(serializers.ModelSerializer):
             "active",
             "created_at",
             "last_unit_price",
+            "last_unit_price_per_major_unit",
             "last_purchased_at",
             "last_counted_qty",
             "last_counted_at",
@@ -166,6 +171,14 @@ class StockItemSerializer(serializers.ModelSerializer):
 
     def get_usual_price_per_major_unit(self, obj: StockItem) -> str | None:
         price = display_price_per_major_unit(obj.usual_price, obj.unit)
+        return str(price) if price is not None else None
+
+    def get_last_unit_price_per_major_unit(self, obj: StockItem) -> str | None:
+        # `last_unit_price` only exists on instances fetched through _with_last_purchase_info's
+        # annotation (list/detail views) — absent on a freshly created/updated instance (bulk
+        # create, PATCH), same as the declared `last_unit_price` field's own default=None covers.
+        last_unit_price = getattr(obj, "last_unit_price", None)
+        price = display_price_per_major_unit(last_unit_price, obj.unit)
         return str(price) if price is not None else None
 
 

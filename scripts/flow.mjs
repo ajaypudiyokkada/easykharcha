@@ -363,7 +363,7 @@ async function captureStep9Screens(page, { purchasePath, stockItemPath }) {
     await typeInto(page, 'Supplier', 'Sunrise Supplies');
     await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
     await typeInto(page, 'Quantity', '2');
-    await typeInto(page, 'Price per unit', '40');
+    await typeInto(page, 'Price per kg', '40');
     await page.screenshot({ path: `${STEP9_SCREEN_DIR}/record-purchase-${width}.png` });
   }
 
@@ -385,14 +385,16 @@ async function checkPurchaseFlow(page) {
 
   await typeInto(page, 'Supplier', 'Sunrise Supplies');
 
+  // Step U1b-3a: the price label now names the entry unit (Rice is weight-family, defaults to kg;
+  // Cooking oil is volume-family, defaults to L) — see QuantityInput's defaultEntryUnit.
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Rice'));
   await typeInto(page, 'Quantity', '2');
-  await typeInto(page, 'Price per unit', '40');
+  await typeInto(page, 'Price per kg', '40');
 
   await clickButton(page, 'Add another item');
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Cooking oil', { last: true }));
   await typeInto(page, 'Quantity', '1', { last: true });
-  await typeInto(page, 'Price per unit', '60', { last: true });
+  await typeInto(page, 'Price per L', '60', { last: true });
 
   await clickButton(page, 'Save purchase');
   await waitForText(page, 'Purchase saved');

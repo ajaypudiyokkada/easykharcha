@@ -29,7 +29,7 @@ from .serializers import (
     StockItemSerializer,
     StockItemUpdateSerializer,
 )
-from .units import UnitEntryError, convert_entry_quantity
+from .units import UnitEntryError, convert_entry_quantity, display_price_per_major_unit
 
 PRICE_HISTORY_POINTS = 12
 RECENT_PURCHASES = 5
@@ -149,7 +149,12 @@ class StockItemDetailView(APIView):
                 "price_points": [
                     {
                         "date": point["purchase__purchase_date_time"],
-                        "unit_price": point["unit_price"],
+                        # Step U1b-3a: rolled up per kg/L same as last_unit_price_per_major_unit —
+                        # the stored figure is per g/ml, meaningless to chart or take away from
+                        # directly once purchases can be typed in kg/L.
+                        "unit_price": str(
+                            display_price_per_major_unit(point["unit_price"], item.unit)
+                        ),
                     }
                     for point in price_points
                 ],

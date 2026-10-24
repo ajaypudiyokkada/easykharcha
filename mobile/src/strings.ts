@@ -210,8 +210,10 @@ export const strings = {
     lineItemLabel: 'Stock item',
     lineItemPlaceholder: 'Choose an item',
     lineQuantityLabel: 'Quantity',
-    lineUnitPriceLabel: 'Price per unit',
+    lineUnitPriceLabel: 'Price per',
     lineTotalLabel: 'Line total',
+    missingPackSizeHint:
+      'Add a pack size for this item in Settings to buy it by the packet, bag, tin, bottle or box.',
     addAnotherItem: 'Add another item',
     removeLine: 'Remove item',
     noteLabel: 'Note (optional)',

@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../api/client';
-import type { Purchase } from '../api/purchases';
+import type { Purchase, PurchaseLineDraft } from '../api/purchases';
 import type { StockItem } from '../api/stock';
 import { useAuth } from '../auth/AuthContext';
+import { defaultEntryUnit, QuantityInput } from '../forms/QuantityInput';
 import { formatRupees } from '../format';
 import { strings } from '../strings';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
@@ -12,11 +13,7 @@ import { Banner, Body, Button, Icon, Sheet, Small, TextField } from '../ui';
 
 const s = strings.purchase;
 
-type LineDraft = {
-  stockItemId: number | null;
-  quantity: string;
-  unitPrice: string;
-};
+type LineDraft = PurchaseLineDraft;
 
 function pad(n: number): string {
   return String(n).padStart(2, '0');
@@ -27,7 +24,7 @@ function toLocalInput(date: Date): string {
 }
 
 function emptyLine(stockItemId: number | null = null): LineDraft {
-  return { stockItemId, quantity: '', unitPrice: '' };
+  return { stockItemId, quantity: '', unitPrice: '', entryUnit: null };
 }
 
 function lineTotal(line: LineDraft): number {
@@ -95,6 +92,8 @@ export function RecordPurchaseSheet({
           stockItemId: line.stock_item,
           quantity: line.quantity,
           unitPrice: line.unit_price,
+          // The item's base unit — the original typed entry unit (if any) isn't stored server-side.
+          entryUnit: null,
         })),
       );
     } else {
@@ -140,6 +139,7 @@ export function RecordPurchaseSheet({
           stock_item: line.stockItemId,
           quantity: line.quantity,
           unit_price: line.unitPrice,
+          entry_unit: line.entryUnit,
           line_total: lineTotal(line).toFixed(2),
         })),
       };
@@ -245,7 +245,12 @@ export function RecordPurchaseSheet({
                   key={item.id}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: selected }}
-                  onPress={() => updateLine(index, { stockItemId: item.id })}
+                  onPress={() =>
+                    updateLine(index, {
+                      stockItemId: item.id,
+                      entryUnit: defaultEntryUnit(item, 'major'),
+                    })
+                  }
                   style={[styles.itemChip, selected ? styles.itemChipSelected : null]}
                 >
                   <Small style={selected ? styles.itemChipTextSelected : styles.itemChipText}>
@@ -255,24 +260,44 @@ export function RecordPurchaseSheet({
               );
             })}
           </View>
-          <View style={styles.formGrid}>
-            <View style={styles.formGridItem}>
-              <TextField
-                label={s.lineQuantityLabel}
-                value={line.quantity}
-                onChangeText={(text) => updateLine(index, { quantity: text })}
-                keyboardType="decimal-pad"
-              />
-            </View>
-            <View style={styles.formGridItem}>
-              <TextField
-                label={s.lineUnitPriceLabel}
-                value={line.unitPrice}
-                onChangeText={(text) => updateLine(index, { unitPrice: text })}
-                keyboardType="decimal-pad"
-              />
-            </View>
-          </View>
+          {(() => {
+            const selectedItem = stockItems.find((item) => item.id === line.stockItemId);
+            const priceUnit = line.entryUnit || selectedItem?.unit || '';
+            return (
+              <View style={styles.formGrid}>
+                <View style={styles.formGridItem}>
+                  {selectedItem ? (
+                    <QuantityInput
+                      label={s.lineQuantityLabel}
+                      quantity={line.quantity}
+                      onQuantityChange={(text) => updateLine(index, { quantity: text })}
+                      entryUnit={line.entryUnit}
+                      onEntryUnitChange={(unit) => updateLine(index, { entryUnit: unit })}
+                      stockItem={selectedItem}
+                      missingPackSizeHint={s.missingPackSizeHint}
+                    />
+                  ) : (
+                    <TextField
+                      label={s.lineQuantityLabel}
+                      value={line.quantity}
+                      onChangeText={(text) => updateLine(index, { quantity: text })}
+                      keyboardType="decimal-pad"
+                    />
+                  )}
+                </View>
+                <View style={styles.formGridItem}>
+                  <TextField
+                    label={
+                      priceUnit ? `${s.lineUnitPriceLabel} ${priceUnit}` : s.lineUnitPriceLabel
+                    }
+                    value={line.unitPrice}
+                    onChangeText={(text) => updateLine(index, { unitPrice: text })}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+            );
+          })()}
           <Small style={styles.lineTotal}>
             {s.lineTotalLabel}: {formatRupees(lineTotal(line))}
           </Small>
