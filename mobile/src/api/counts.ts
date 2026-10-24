@@ -1,12 +1,15 @@
 export type CountType = 'opening' | 'closing';
 export type CountLineState = 'counted' | 'skipped' | 'not_sure';
 
-/** What counts/form/ returns — id, name and unit only, for every role. No last count, no expected,
- * no prices, no usual values: the server enforces the blind rule by simply never selecting them. */
+/** What counts/form/ returns — id, name, unit and the unit-conversion fields QuantityInput needs,
+ * for every role. No last count, no expected, no prices, no usual values: the server enforces the
+ * blind rule by simply never selecting them. */
 export type CountFormItem = {
   id: number;
   name: string;
   unit: string;
+  unit_family: string;
+  pack_size_base_qty: string | null;
 };
 
 export type StockCount = {

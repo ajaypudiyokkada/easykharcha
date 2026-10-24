@@ -81,6 +81,7 @@ export function StockItemSheet({ visible, onClose, onSaved, editingItem, existin
         body: {
           name: draft.name.trim(),
           unit: draft.unit,
+          pack_size_base_qty: draft.packSizeBaseQty.trim() || null,
           usual_price: draft.usualPrice.trim() || null,
           supplier: draft.supplier.trim(),
           shared: draft.shared,
@@ -113,6 +114,7 @@ export function StockItemSheet({ visible, onClose, onSaved, editingItem, existin
           errors={errors}
           businessType={business?.business_type ?? ''}
           existingGroups={existingGroups}
+          unitLocked={editingItem.unit_locked}
           showActive
         />
       </View>

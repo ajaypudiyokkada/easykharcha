@@ -7,6 +7,9 @@ export type StockItem = {
   unit_family: string;
   /** "1 packet = N base units" — null until the owner sets it once. Never locked by history. */
   pack_size_base_qty: string | null;
+  /** True once this item has any purchase/count/wastage/sale history — `unit`/`unit_family` can't
+   * be changed to a different family any more (the server rejects it regardless). */
+  unit_locked: boolean;
   usual_price: string | null;
   /** `usual_price` rolled up per kg/L (per piece/pack for a count item) — see src/units.ts. */
   usual_price_per_major_unit: string | null;
@@ -41,10 +44,13 @@ export type SellItemIngredient = {
   id: number;
   stock_item: number;
   stock_item_name: string;
-  /** The stock item's own unit — the quantity below is always already in it. */
+  /** The stock item's own base unit — `quantity` below is always already in it. */
   unit: string;
-  /** Per ONE portion. */
+  /** Per ONE portion, in the stock item's base unit. */
   quantity: string;
+  /** `quantity` rolled up for display (e.g. 500 g -> "0.5"/"kg") — see src/units.ts. */
+  display_quantity: string;
+  display_unit: string;
 };
 
 export type SellItem = {

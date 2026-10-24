@@ -139,7 +139,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `GET businesses/<id>/suppliers/` — SupplierListView — distinct supplier names typed so far
 - `GET/POST businesses/<id>/purchases/` — PurchaseListCreateView — list + today/7-day summary, record
 - `GET/PATCH/DELETE businesses/<id>/purchases/<pid>/` — PurchaseDetailView — soft-delete on DELETE
-- `GET businesses/<id>/counts/form/?type=` — CountFormView — blind form: id/name/unit only
+- `GET businesses/<id>/counts/form/?type=` — CountFormView — blind form: id/name/unit plus
+  unit_family/pack_size_base_qty (Step U1b-3b-1, for QuantityInput) — still no last count/expected/
+  prices
 - `GET businesses/<id>/counts/today/` — CountsTodayStatusView — Step 23b: opening/closing
   locked/due/late/done + `next_action`, `counts.create` or `counts.review`, no stock quantities
 - `GET/POST businesses/<id>/counts/` — CountListCreateView — review list (Owner/Manager get a
@@ -316,9 +318,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `screens/ProfileSheet.tsx` — name/role/business, Switch business (if >1), Account (coming soon),
   Log out — the only place Log out lives now, opened from AppShell's avatar/user block
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx`, `RecordSalesSheet.tsx` — the shared
-  record sheets; Step U1b-3a: `RecordPurchaseSheet` is the first to use `forms/QuantityInput.tsx`
-  (amount + unit chips, entryUnitsFor-driven) and send `entry_unit` per line — `RecordWastageSheet`
-  and count/wastage/dish screens still use the pre-U1b-3 plain amount field (U1b-3b)
+  record sheets; `RecordPurchaseSheet` (U1b-3a) and `RecordWastageSheet` (U1b-3b-1) both use
+  `forms/QuantityInput.tsx` (amount + unit chips, entryUnitsFor-driven) and send `entry_unit` per
+  line. `RecordSalesSheet` doesn't (sales quantities are whole units sold, not entry-convertible)
 - `screens/ChangeBusinessTypeSheet.tsx` — Step 23: the keep-or-remove-items sheet shown on a
   `business_type` change, from setup/1 (going back) and Settings' Business profile
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
@@ -333,10 +335,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   the Settings entry point
 - `forms/StockItemForm.tsx`, `BusinessForm.tsx` (Step F2's `showName` prop — false on setup/1 once a
   business already has a name, always true on Settings' Business details), `BrandForm.tsx` — one
-  shared form component each, used by both the setup wizard and Settings; Step 22a's `DishRecipeForm.tsx` (+ `unitConversion.ts`'s
-  g<->kg/ml<->L entry-time conversion, `validateDish.ts`) is the full dish form with ingredients,
-  used only via `SellItemSheet` — Step 22a2 deleted the old ingredients-free `SellItemForm.tsx`/
-  `validateSellItem.ts`, now unused everywhere
+  shared form component each, used by both the setup wizard and Settings. Step U1b-3b-1:
+  `StockItemForm` groups its unit chips into Weight/Volume/Count (`units.ts`'s `unitFamily`), adds a
+  pack-size field (`packSizeBaseQty`, shown for weight/volume units and `bottle`), and shows a
+  `unitLocked` banner (from `StockItem.unit_locked`) once the item has history. Step 22a's `DishRecipeForm.tsx`
+  (+ `validateDish.ts`) is the full dish form with ingredients, used only via `SellItemSheet` — Step
+  22a2 deleted the old ingredients-free `SellItemForm.tsx`/`validateSellItem.ts`, now unused
+  everywhere. Step U1b-3b-1: ingredient rows use the shared `forms/QuantityInput.tsx` + `entry_unit`
+  (same as counts/wastage/purchases), not the old ingredient-only conversion
 - `forms/PincodeLocationField.tsx` — Step 21b: Country (fixed) + Pincode lookup -> State (read-only) +
   City (the pincode's district(s), first preselected) + optional searchable Area; "Enter city
   yourself" falls back to free-text City + a State picker (sets `manual_location`) when a pincode
@@ -352,8 +358,12 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   true for the 4 food types + homestay, false elsewhere); `labels.ts` is now a thin wrapper over it
 - `labels.ts` — copy that varies by business type (delegates to sectorCopy.ts)
 - `units.ts` — Step U1b-3a: the shared unit-family/entry-unit/rounding module, mirrors
-  `backend/stock/units.py` exactly (`scripts/check_units_parity.mjs` fails the build if they drift);
-  `forms/unitConversion.ts` (g<->kg/ml<->L only) still backs `DishRecipeForm` until U1b-3b migrates it
+  `backend/stock/units.py` exactly (`scripts/check_units_parity.mjs` fails the build if they drift).
+  Step U1b-3b-1 migrated `DishRecipeForm` onto it too and deleted the old ingredient-only
+  `forms/unitConversion.ts` — every quantity-entry screen now shares this one module
+- `forms/QuantityInput.tsx` — Step U1b-3a: the shared quantity-entry control (number field + unit
+  chips from `units.ts`'s `entryUnitsFor`) used by purchases, counts (`app/count.tsx`), wastage
+  (`RecordWastageSheet.tsx`) and dish ingredients (`DishRecipeForm.tsx`, Step U1b-3b-1)
 - `format.ts` — ₹ and date/time formatting in the business's own timezone
 - `theme/tokens.ts` — colours, spacing, radii, type sizes (closed set)
 - `theme/brand.ts` — per-business brand colour + WCAG contrast

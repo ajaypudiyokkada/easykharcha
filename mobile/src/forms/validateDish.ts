@@ -1,6 +1,6 @@
 import { strings } from '../strings';
+import { parseDecimalInput } from '../units';
 import { findDuplicateName } from './groupItems';
-import { parseDecimalInput } from './unitConversion';
 import { validateRequiredNumber } from './validateNumber';
 import type { DishDraft, DishFieldErrors, DishRowErrors } from './DishRecipeForm';
 

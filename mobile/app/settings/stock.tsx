@@ -78,7 +78,8 @@ export default function StockItemsSettings() {
       name: draft.name.trim(),
       unit: draft.unit || 'piece',
       unit_family: unitFamily(draft.unit || 'piece'),
-      pack_size_base_qty: null,
+      pack_size_base_qty: draft.packSizeBaseQty.trim() || null,
+      unit_locked: false,
       usual_price: draft.usualPrice.trim() || null,
       usual_price_per_major_unit: draft.usualPrice.trim() || null,
       supplier: draft.supplier.trim(),
@@ -105,6 +106,7 @@ export default function StockItemsSettings() {
               {
                 name: draft.name.trim(),
                 unit: draft.unit,
+                pack_size_base_qty: draft.packSizeBaseQty.trim() || undefined,
                 usual_price: draft.usualPrice.trim() || undefined,
                 supplier: draft.supplier.trim() || undefined,
                 shared: draft.shared,
