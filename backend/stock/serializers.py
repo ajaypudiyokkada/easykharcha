@@ -3,16 +3,31 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from .models import SellItem, SellItemIngredient, StockItem, Unit
+from .units import base_unit_for, display_price_per_major_unit, display_quantity
+from .units import unit_family as _unit_family_for
 
 ZERO = Decimal("0")
 # An ingredient quantity states "one portion uses this much of the stock item" — 0 isn't a
 # meaningful answer to that, so a provided value must be a real positive amount.
 MIN_POSITIVE_QTY = Decimal("0.001")
 MAX_INGREDIENT_QTY = Decimal("100000")
+MIN_POSITIVE_PACK_SIZE = Decimal("0.001")
 
 
 def _clean_group(value: str) -> str:
     return value.strip()
+
+
+def _resolve_unit_and_family(attrs: dict) -> None:
+    """Step U1b-2: the `unit` an owner picks at create/edit time is an entry unit (kg, g, L, ml, or
+    any of the plain count labels) — this derives the family it belongs to and rewrites `unit` to
+    the base it actually stores as (g/ml for weight/volume; unchanged for count), same rule
+    docs/UNIT_REDESIGN.md's "Stock-item creation" section describes."""
+    if "unit" not in attrs:
+        return
+    entry_unit = attrs["unit"]
+    attrs["unit_family"] = _unit_family_for(entry_unit)
+    attrs["unit"] = base_unit_for(entry_unit)
 
 
 class StockItemRowSerializer(serializers.Serializer):
@@ -21,6 +36,13 @@ class StockItemRowSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=120)
     unit = serializers.ChoiceField(choices=Unit.choices)
+    pack_size_base_qty = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        required=False,
+        allow_null=True,
+        min_value=MIN_POSITIVE_PACK_SIZE,
+    )
     usual_price = serializers.DecimalField(
         max_digits=12, decimal_places=4, required=False, allow_null=True, min_value=ZERO
     )
@@ -48,6 +70,7 @@ class StockItemRowSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"shelf_life_days": "Enter a shelf life in days, or turn that off."}
             )
+        _resolve_unit_and_family(attrs)
         return attrs
 
 
@@ -58,6 +81,15 @@ class StockItemUpdateSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=120, required=False)
     unit = serializers.ChoiceField(choices=Unit.choices, required=False)
+    # Step U1b-2: never locked by history, unlike `unit`/`unit_family` (Decision 3, U1b-1 report) —
+    # correcting a pack's real-world size can't rescale anything already recorded in base units.
+    pack_size_base_qty = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        required=False,
+        allow_null=True,
+        min_value=MIN_POSITIVE_PACK_SIZE,
+    )
     usual_price = serializers.DecimalField(
         max_digits=12, decimal_places=4, required=False, allow_null=True, min_value=ZERO
     )
@@ -86,6 +118,7 @@ class StockItemUpdateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"shelf_life_days": "Enter a shelf life in days, or turn that off."}
             )
+        _resolve_unit_and_family(attrs)
         return attrs
 
 
@@ -104,13 +137,20 @@ class StockItemSerializer(serializers.ModelSerializer):
     )
     last_counted_at = serializers.DateTimeField(read_only=True, default=None)
 
+    # Step U1b-2: the owner-facing price, always per kg/L for a weight/volume item — `usual_price`
+    # itself stays the stored per-base-unit figure (see StockItem.usual_price's comment).
+    usual_price_per_major_unit = serializers.SerializerMethodField()
+
     class Meta:
         model = StockItem
         fields = (
             "id",
             "name",
             "unit",
+            "unit_family",
+            "pack_size_base_qty",
             "usual_price",
+            "usual_price_per_major_unit",
             "supplier",
             "shared",
             "goes_off",
@@ -123,6 +163,10 @@ class StockItemSerializer(serializers.ModelSerializer):
             "last_counted_qty",
             "last_counted_at",
         )
+
+    def get_usual_price_per_major_unit(self, obj: StockItem) -> str | None:
+        price = display_price_per_major_unit(obj.usual_price, obj.unit)
+        return str(price) if price is not None else None
 
 
 def _clean_portion_label(value: str) -> str:
@@ -156,8 +200,10 @@ class SellItemRowSerializer(serializers.Serializer):
 
 
 class IngredientRowSerializer(serializers.Serializer):
-    """One ingredient row of a dish — quantity is always in the stock item's own unit (the client
-    converts g/ml/pieces to it before sending, see mobile/src/forms/unitConversion.ts)."""
+    """One ingredient row of a dish. Step U1b-2: `quantity` may be typed in any entry unit this
+    stock item accepts (see stock/units.py's entry_units_for) — `entry_unit` None means the item's
+    own base unit, the pre-U1b-2 behaviour (the client used to convert g/ml itself before sending,
+    see mobile/src/forms/unitConversion.ts; the view now does it once `stock_item` is resolved)."""
 
     stock_item = serializers.IntegerField()
     quantity = serializers.DecimalField(
@@ -165,6 +211,9 @@ class IngredientRowSerializer(serializers.Serializer):
         decimal_places=3,
         min_value=MIN_POSITIVE_QTY,
         max_value=MAX_INGREDIENT_QTY,
+    )
+    entry_unit = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None
     )
 
 
@@ -244,10 +293,28 @@ class SellItemUpdateSerializer(serializers.Serializer):
 class SellItemIngredientSerializer(serializers.ModelSerializer):
     stock_item_name = serializers.CharField(source="stock_item.name", read_only=True)
     unit = serializers.CharField(source="stock_item.unit", read_only=True)
+    display_quantity = serializers.SerializerMethodField()
+    display_unit = serializers.SerializerMethodField()
 
     class Meta:
         model = SellItemIngredient
-        fields = ("id", "stock_item", "stock_item_name", "unit", "quantity")
+        fields = (
+            "id",
+            "stock_item",
+            "stock_item_name",
+            "unit",
+            "quantity",
+            "display_quantity",
+            "display_unit",
+        )
+
+    def get_display_quantity(self, obj: SellItemIngredient) -> str:
+        value, _ = display_quantity(obj.quantity, obj.stock_item.unit)
+        return str(value)
+
+    def get_display_unit(self, obj: SellItemIngredient) -> str:
+        _, unit = display_quantity(obj.quantity, obj.stock_item.unit)
+        return unit
 
 
 class SellItemSerializer(serializers.ModelSerializer):

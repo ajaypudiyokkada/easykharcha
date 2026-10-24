@@ -2,6 +2,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from stock.units import display_price_per_major_unit, display_quantity
+
 from .models import Purchase, PurchaseLine
 
 ZERO = Decimal("0")
@@ -21,8 +23,18 @@ class PurchaseLineRowSerializer(serializers.Serializer):
     # Step U1b-1: widened 2dp->4dp, max_digits 10->12, matching PurchaseLine.unit_price.
     unit_price = serializers.DecimalField(max_digits=12, decimal_places=4, min_value=ZERO)
     line_total = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=ZERO)
+    # Step U1b-2: what unit `quantity`/`unit_price` were typed in ("kg", "packet", ...) — None means
+    # the item's own base unit, the pre-U1b-2 behaviour. The view converts both down to the stock
+    # item's base unit once it's resolved `stock_item` (see stock/units.py's convert_entry_*);
+    # never stored itself, so it's popped from the cleaned row before the model is built.
+    entry_unit = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None
+    )
 
     def validate(self, attrs: dict) -> dict:
+        # The quantity/price-per-unit/total relationship holds regardless of which unit they were
+        # typed in (the unit cancels out of quantity x price), so this check runs on the raw typed
+        # values, before any base-unit conversion.
         expected = (attrs["quantity"] * attrs["unit_price"]).quantize(Decimal("0.01"))
         if abs(attrs["line_total"] - expected) > LINE_TOTAL_TOLERANCE:
             raise serializers.ValidationError(
@@ -48,6 +60,11 @@ class PurchaseCreateSerializer(serializers.Serializer):
 class PurchaseLineSerializer(serializers.ModelSerializer):
     stock_item_name = serializers.CharField(source="stock_item.name", read_only=True)
     unit = serializers.CharField(source="stock_item.unit", read_only=True)
+    # Step U1b-2: `quantity` stays the stored base-unit figure; these are the rolled-up owner-facing
+    # versions (3,200 g -> "3.2"/"kg"; 999 g -> "999"/"g") and the per-kg/L price.
+    display_quantity = serializers.SerializerMethodField()
+    display_unit = serializers.SerializerMethodField()
+    unit_price_per_major_unit = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseLine
@@ -57,9 +74,23 @@ class PurchaseLineSerializer(serializers.ModelSerializer):
             "stock_item_name",
             "unit",
             "quantity",
+            "display_quantity",
+            "display_unit",
             "unit_price",
+            "unit_price_per_major_unit",
             "line_total",
         )
+
+    def get_display_quantity(self, obj: PurchaseLine) -> str:
+        value, _ = display_quantity(obj.quantity, obj.stock_item.unit)
+        return str(value)
+
+    def get_display_unit(self, obj: PurchaseLine) -> str:
+        _, unit = display_quantity(obj.quantity, obj.stock_item.unit)
+        return unit
+
+    def get_unit_price_per_major_unit(self, obj: PurchaseLine) -> str:
+        return str(display_price_per_major_unit(obj.unit_price, obj.stock_item.unit))
 
 
 class PurchaseSerializer(serializers.ModelSerializer):

@@ -17,6 +17,11 @@ class CountLineRowSerializer(serializers.Serializer):
     counted_qty = serializers.DecimalField(
         max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=ZERO
     )
+    # Step U1b-2: what unit `counted_qty` was typed in — None means the item's own base unit. The
+    # view converts it once the stock item is resolved (see stock/units.py's convert_entry_quantity).
+    entry_unit = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None
+    )
 
     def validate(self, attrs: dict) -> dict:
         if attrs["state"] == CountLineState.SKIPPED:
