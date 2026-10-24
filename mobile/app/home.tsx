@@ -10,7 +10,7 @@ import type { SellItem } from '../src/api/stock';
 import type { WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
 import { can, isLimitedRole } from '../src/auth/permissions';
-import { formatDateTime, formatRupees } from '../src/format';
+import { formatDateTime, formatQty, formatRupees } from '../src/format';
 import { RecordPurchaseSheet } from '../src/screens/RecordPurchaseSheet';
 import { RecordSalesSheet } from '../src/screens/RecordSalesSheet';
 import { RecordWastageSheet } from '../src/screens/RecordWastageSheet';
@@ -236,7 +236,11 @@ function TodayHome() {
                   </View>
                   <View style={styles.entryMain}>
                     <Body style={styles.entryTitle}>
-                      {entry.stock_item_name} · {entry.quantity} {entry.unit}
+                      {entry.stock_item_name} ·{' '}
+                      {formatQty(entry.quantity, entry.unit, {
+                        quantity: entry.display_quantity,
+                        unit: entry.display_unit,
+                      })}
                     </Body>
                     <Small style={styles.entryMeta}>
                       {strings.wastageForm.reasons[entry.reason] ?? entry.reason} ·{' '}

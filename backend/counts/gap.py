@@ -12,6 +12,7 @@ from businesses.models import Business
 from purchases.models import PurchaseLine
 from sales.models import Sale
 from stock.models import RecipeStatus, SellItemIngredient
+from stock.units import display_quantities
 from wastage.models import WastageEntry
 
 from .models import CountLine, CountLineState, CountType, StockCount
@@ -230,6 +231,23 @@ def lines_with_gap(business: Business, count: StockCount) -> list[dict]:
             gap_alert_pct,
         )
 
+        # U1b-3b-3: every quantity on this line rolled up onto one shared display unit (the
+        # biggest of them decides kg/L vs g/ml, same rule display_quantities uses for the
+        # wastage/gap alerts above) — base values are kept alongside, untouched, for anything
+        # still doing its own maths against them.
+        display, display_unit = display_quantities(
+            {
+                "counted_qty": line.counted_qty,
+                "previous_counted_qty": previous_qty,
+                "quantity_bought_since": bought,
+                "quantity_wasted_since": wasted,
+                "used_since_last_count": used_since_last_count,
+                "expected_used": gap["expected_used"],
+                "gap_qty": gap["gap_qty"],
+            },
+            line.stock_item.unit,
+        )
+
         result_lines.append(
             {
                 "id": line.id,
@@ -244,6 +262,14 @@ def lines_with_gap(business: Business, count: StockCount) -> list[dict]:
                 "quantity_wasted_since": wasted,
                 "used_since_last_count": used_since_last_count,
                 **gap,
+                "display_unit": display_unit,
+                "display_counted_qty": display["counted_qty"],
+                "display_previous_counted_qty": display["previous_counted_qty"],
+                "display_quantity_bought_since": display["quantity_bought_since"],
+                "display_quantity_wasted_since": display["quantity_wasted_since"],
+                "display_used_since_last_count": display["used_since_last_count"],
+                "display_expected_used": display["expected_used"],
+                "display_gap_qty": display["gap_qty"],
             }
         )
     return result_lines

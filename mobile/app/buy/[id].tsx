@@ -5,7 +5,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import type { Purchase } from '../../src/api/purchases';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { formatDateTime, formatRupees } from '../../src/format';
+import { formatDateTime, formatQty, formatRupees } from '../../src/format';
 import { RecordPurchaseSheet } from '../../src/screens/RecordPurchaseSheet';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
@@ -121,7 +121,11 @@ export default function PurchaseDetail() {
                   <View style={styles.lineMain}>
                     <Body style={styles.lineName}>{line.stock_item_name}</Body>
                     <Small style={styles.meta}>
-                      {line.quantity} {line.unit} × {formatRupees(line.unit_price)}
+                      {formatQty(line.quantity, line.unit, {
+                        quantity: line.display_quantity,
+                        unit: line.display_unit,
+                      })}{' '}
+                      × {formatRupees(line.unit_price_per_major_unit)}
                     </Small>
                   </View>
                   <Body style={styles.lineTotal}>{formatRupees(line.line_total)}</Body>

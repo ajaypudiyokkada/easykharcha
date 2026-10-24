@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import type { StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { formatDate, formatRupees } from '../../src/format';
+import { formatDate, formatQty, formatRupees } from '../../src/format';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
@@ -107,18 +107,20 @@ export default function Stock() {
                 <View style={styles.rowMain}>
                   <Body style={styles.rowName}>{item.name}</Body>
                   <Small style={styles.rowMeta}>
-                    {item.usual_price ? s.usualPrice(formatRupees(item.usual_price)) : null}
+                    {item.usual_price_per_major_unit
+                      ? s.usualPrice(formatRupees(item.usual_price_per_major_unit))
+                      : null}
                   </Small>
                   <Small style={styles.rowMeta}>
                     {item.last_counted_qty
-                      ? s.lastCounted(`${item.last_counted_qty} ${item.unit}`)
+                      ? s.lastCounted(formatQty(item.last_counted_qty, item.unit))
                       : s.neverCounted}
                   </Small>
                 </View>
                 <View style={styles.rowSide}>
-                  {item.last_unit_price ? (
+                  {item.last_unit_price_per_major_unit ? (
                     <Small style={styles.rowPrice}>
-                      {s.lastPricePaid(formatRupees(item.last_unit_price))}
+                      {s.lastPricePaid(formatRupees(item.last_unit_price_per_major_unit))}
                     </Small>
                   ) : (
                     <Small style={styles.rowMeta}>{s.neverPurchased}</Small>
