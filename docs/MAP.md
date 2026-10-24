@@ -316,7 +316,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `screens/ProfileSheet.tsx` — name/role/business, Switch business (if >1), Account (coming soon),
   Log out — the only place Log out lives now, opened from AppShell's avatar/user block
 - `screens/RecordPurchaseSheet.tsx`, `RecordWastageSheet.tsx`, `RecordSalesSheet.tsx` — the shared
-  record sheets
+  record sheets; Step U1b-3a: `RecordPurchaseSheet` is the first to use `forms/QuantityInput.tsx`
+  (amount + unit chips, entryUnitsFor-driven) and send `entry_unit` per line — `RecordWastageSheet`
+  and count/wastage/dish screens still use the pre-U1b-3 plain amount field (U1b-3b)
 - `screens/ChangeBusinessTypeSheet.tsx` — Step 23: the keep-or-remove-items sheet shown on a
   `business_type` change, from setup/1 (going back) and Settings' Business profile
 - `screens/TeamAddSheet.tsx`, `ChangeRoleSheet.tsx`, `ResetSecretSheet.tsx` — Team screen sheets: add
@@ -349,6 +351,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   `sellPortionPlaceholder`; Step C2a added `menuScanEnabled`/`menuNoun` ("menu" or "price list") —
   true for the 4 food types + homestay, false elsewhere); `labels.ts` is now a thin wrapper over it
 - `labels.ts` — copy that varies by business type (delegates to sectorCopy.ts)
+- `units.ts` — Step U1b-3a: the shared unit-family/entry-unit/rounding module, mirrors
+  `backend/stock/units.py` exactly (`scripts/check_units_parity.mjs` fails the build if they drift);
+  `forms/unitConversion.ts` (g<->kg/ml<->L only) still backs `DishRecipeForm` until U1b-3b migrates it
 - `format.ts` — ₹ and date/time formatting in the business's own timezone
 - `theme/tokens.ts` — colours, spacing, radii, type sizes (closed set)
 - `theme/brand.ts` — per-business brand colour + WCAG contrast

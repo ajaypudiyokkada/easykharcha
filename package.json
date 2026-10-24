@@ -3,10 +3,11 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "check": "npm run check:backend && npm run check:mobile && npm run check:sector-copy",
+    "check": "npm run check:backend && npm run check:mobile && npm run check:sector-copy && npm run check:units-parity",
     "check:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_backend.ps1",
     "check:mobile": "npm --prefix mobile run check",
     "check:sector-copy": "python scripts/check_sector_copy.py",
+    "check:units-parity": "node scripts/check_units_parity.mjs",
     "check:entrypoint": "sh scripts/check_entrypoint.sh",
     "smoke": "python scripts/smoke.py",
     "flow": "node scripts/flow.mjs",

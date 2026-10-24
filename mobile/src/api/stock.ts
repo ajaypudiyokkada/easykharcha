@@ -2,7 +2,14 @@ export type StockItem = {
   id: number;
   name: string;
   unit: string;
+  /** Step U1b-2: 'weight', 'volume' or 'count' — see src/units.ts. Drives which entry units
+   * (kg/L/tonne, packet/bag/tin/bottle/box) this item accepts. */
+  unit_family: string;
+  /** "1 packet = N base units" — null until the owner sets it once. Never locked by history. */
+  pack_size_base_qty: string | null;
   usual_price: string | null;
+  /** `usual_price` rolled up per kg/L (per piece/pack for a count item) — see src/units.ts. */
+  usual_price_per_major_unit: string | null;
   supplier: string;
   shared: boolean;
   goes_off: boolean;
@@ -14,6 +21,8 @@ export type StockItem = {
   created_at: string;
   /** From this item's purchase history — null until it's been bought at least once. */
   last_unit_price: string | null;
+  /** `last_unit_price` rolled up per kg/L (per piece/pack for a count item) — see src/units.ts. */
+  last_unit_price_per_major_unit: string | null;
   last_purchased_at: string | null;
   /** From this item's count history — null until it's been counted at least once. No "on hand"
    * estimate here — that needs usage math a later step builds. */

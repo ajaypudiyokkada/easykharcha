@@ -6,7 +6,11 @@ export type PurchaseLine = {
   stock_item_name: string;
   unit: string;
   quantity: string;
+  /** Step U1b-2: `quantity` rolled up for display (3,200 g -> "3.2"/"kg") — see src/units.ts. */
+  display_quantity: string;
+  display_unit: string;
   unit_price: string;
+  unit_price_per_major_unit: string;
   line_total: string;
 };
 
@@ -43,6 +47,9 @@ export type PurchaseLineDraft = {
   stockItemId: number | null;
   quantity: string;
   unitPrice: string;
+  /** What unit `quantity`/`unitPrice` were typed in (kg, packet, ...) — null means the item's own
+   * base unit. The API converts both down to the stock item's base unit (see src/units.ts). */
+  entryUnit: string | null;
 };
 
 export type StockItemDetail = StockItem & {

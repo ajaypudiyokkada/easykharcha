@@ -13,6 +13,7 @@ import { useInstantAdd } from '../../src/hooks/useInstantAdd';
 import { StarterStockPickerSheet } from '../../src/screens/StarterStockPickerSheet';
 import { StockItemSheet } from '../../src/screens/StockItemSheet';
 import { strings } from '../../src/strings';
+import { unitFamily } from '../../src/units';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
   AppShell,
@@ -76,7 +77,10 @@ export default function StockItemsSettings() {
       id: 0,
       name: draft.name.trim(),
       unit: draft.unit || 'piece',
+      unit_family: unitFamily(draft.unit || 'piece'),
+      pack_size_base_qty: null,
       usual_price: draft.usualPrice.trim() || null,
+      usual_price_per_major_unit: draft.usualPrice.trim() || null,
       supplier: draft.supplier.trim(),
       shared: draft.shared,
       goes_off: draft.goesOff,
@@ -86,6 +90,7 @@ export default function StockItemsSettings() {
       active: true,
       created_at: new Date().toISOString(),
       last_unit_price: null,
+      last_unit_price_per_major_unit: null,
       last_purchased_at: null,
       last_counted_qty: null,
       last_counted_at: null,

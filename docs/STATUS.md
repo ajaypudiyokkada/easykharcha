@@ -405,6 +405,15 @@ not built yet.
   now keys off the derived family. Read responses add a rolled-up `display_quantity`/`display_unit`
   and an owner-facing price per kg/L. **U1b-2 backend done; frontend module, sector unit lists and
   screens remain (U1b-3). Do not deploy until U1b-3.**
+- **Step U1b-3a — Shared unit module + Record purchase.** `mobile/src/units.ts` promotes the old
+  ingredient-only `unitConversion.ts` into one shared mirror of `backend/stock/units.py`, checked by
+  a new `check:units-parity` script (transpiles units.ts, diffs it against the real backend tables,
+  plus the 3,200 g/999 g/1,000 ml rounding cases). New `forms/QuantityInput.tsx` (amount + unit
+  chips from `entryUnitsFor`, a missing-pack-size hint) is wired into `RecordPurchaseSheet` only;
+  `stock/[id].tsx` and the stock bulk-create/list serializer now show `*_price_per_major_unit`
+  (kg/L), not the raw per-g/ml figure. **U1b-3b still owes**: count/wastage/dish-ingredient screens,
+  `StockItemForm`'s family chip + pack-size field, sector unit-list remap, stock/sell list+reports
+  display formatting.
 
 ## Permission table
 
