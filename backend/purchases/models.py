@@ -69,7 +69,10 @@ class PurchaseLine(models.Model):
         StockItem, on_delete=models.PROTECT, related_name="purchase_lines"
     )
     quantity = models.DecimalField(max_digits=10, decimal_places=3)
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Step U1b-1: widened 2dp->4dp, max_digits 10->12 — see StockItem.usual_price's comment; this
+    # is the same per-base-unit price, just captured per purchase line instead of as a running
+    # "usual" figure.
+    unit_price = models.DecimalField(max_digits=12, decimal_places=4)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
 
     def __str__(self) -> str:

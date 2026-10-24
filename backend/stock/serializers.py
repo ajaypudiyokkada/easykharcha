@@ -22,7 +22,7 @@ class StockItemRowSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
     unit = serializers.ChoiceField(choices=Unit.choices)
     usual_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, required=False, allow_null=True, min_value=ZERO
+        max_digits=12, decimal_places=4, required=False, allow_null=True, min_value=ZERO
     )
     supplier = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
     shared = serializers.BooleanField(required=False, default=False)
@@ -59,7 +59,7 @@ class StockItemUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120, required=False)
     unit = serializers.ChoiceField(choices=Unit.choices, required=False)
     usual_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, required=False, allow_null=True, min_value=ZERO
+        max_digits=12, decimal_places=4, required=False, allow_null=True, min_value=ZERO
     )
     supplier = serializers.CharField(max_length=120, required=False, allow_blank=True)
     shared = serializers.BooleanField(required=False)
@@ -94,7 +94,7 @@ class StockItemSerializer(serializers.ModelSerializer):
     # history — plain declared fields here just expose whatever the queryset already computed, same
     # as any other read-only field. None for an item that's never been bought yet.
     last_unit_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, read_only=True, default=None
+        max_digits=12, decimal_places=4, read_only=True, default=None
     )
     last_purchased_at = serializers.DateTimeField(read_only=True, default=None)
     # Step 10: populated via annotation too (see _with_last_count_info). Deliberately no "on hand"

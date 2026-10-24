@@ -16,6 +16,7 @@ from businesses.permissions import access_or_403, permissions_for, require_permi
 from counts.models import CountLine, CountLineState
 from purchases.models import Purchase, PurchaseLine
 from purchases.serializers import PurchaseSerializer
+from wastage.models import WastageEntry
 
 from .exceptions import BulkValidationError, StockItemInUse, StockItemUnitLocked, TooManyRows
 from .models import RecipeStatus, SellItem, SellItemIngredient, StockItem
@@ -177,8 +178,14 @@ class StockItemDetailView(APIView):
             )
 
         if "unit" in data and data["unit"] != item.unit:
-            has_history = PurchaseLine.objects.filter(stock_item=item).exists() or (
-                CountLine.objects.filter(stock_item=item).exists()
+            # Decision 3 (U1b-1 report): broadened from purchase/count to also cover wastage and
+            # sale (recipe-usage) history — any of the four means some past row's quantity is
+            # already meaningless the moment the unit changes under it.
+            has_history = (
+                PurchaseLine.objects.filter(stock_item=item).exists()
+                or CountLine.objects.filter(stock_item=item).exists()
+                or WastageEntry.objects.filter(stock_item=item).exists()
+                or SellItemIngredient.objects.filter(stock_item=item).exists()
             )
             if has_history:
                 raise StockItemUnitLocked()

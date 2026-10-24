@@ -18,7 +18,8 @@ class PurchaseLineRowSerializer(serializers.Serializer):
 
     stock_item = serializers.IntegerField()
     quantity = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=MIN_QUANTITY)
-    unit_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=ZERO)
+    # Step U1b-1: widened 2dp->4dp, max_digits 10->12, matching PurchaseLine.unit_price.
+    unit_price = serializers.DecimalField(max_digits=12, decimal_places=4, min_value=ZERO)
     line_total = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=ZERO)
 
     def validate(self, attrs: dict) -> dict:
