@@ -397,6 +397,14 @@ not built yet.
   `kg`/`L`/`tonne` still work as *creatable* `StockItem.unit` values for now — U1b-2 narrows entry
   and adds the shared conversion screens; no app screen was touched this step. See that migration's
   docstring for its one known gap: a tonne-origin item (none in dev data) would reverse as kg-scale.
+- **Step U1b-2 — Entry units and shared conversion, backend only.** Purchases, counts, wastage and
+  recipe-ingredient rows now accept an optional entry unit (kg/L/tonne, or a packet/bag/tin/bottle/
+  box backed by the new `StockItem.pack_size_base_qty`) and convert to the item's base unit
+  server-side (`stock/units.py`'s `convert_entry_quantity`/`convert_entry_price`); stock-item
+  create/edit resolves a chosen unit into its base + `unit_family` automatically, and the unit lock
+  now keys off the derived family. Read responses add a rolled-up `display_quantity`/`display_unit`
+  and an owner-facing price per kg/L. **U1b-2 backend done; frontend module, sector unit lists and
+  screens remain (U1b-3). Do not deploy until U1b-3.**
 
 ## Permission table
 
