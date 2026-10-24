@@ -307,6 +307,8 @@ export const strings = {
     progress: (done: number, total: number) => `${done} of ${total} counted`,
     progressHint: 'Count or skip every item before saving.',
     quantityLabel: (name: string) => `${name} quantity`,
+    missingPackSizeHint:
+      'Add a pack size for this item in Settings to count it by the packet, bag, tin, bottle or box.',
     notSure: 'Not sure',
     skipForNow: 'Skip for now',
     skipped: 'Skipped',
@@ -339,6 +341,8 @@ export const strings = {
     itemLabel: 'Stock item',
     itemPlaceholder: 'Choose an item',
     quantityLabel: 'How much',
+    missingPackSizeHint:
+      'Add a pack size for this item in Settings to record it by the packet, bag, tin, bottle or box.',
     reasonLabel: 'Reason',
     reasons: {
       spillage: 'Spillage',
@@ -690,6 +694,16 @@ export const strings = {
       unitLabel: 'Unit',
       moreUnits: 'More units',
       fewerUnits: 'Fewer units',
+      unitFamilyLabels: {
+        weight: 'Weight',
+        volume: 'Volume',
+        count: 'Count',
+      } as Record<string, string>,
+      packSizeLabel: (baseUnit: string) => `1 pack = how many ${baseUnit}`,
+      packSizePlaceholder: 'e.g. 500',
+      unitLockedMessage:
+        "This item already has purchase, count, wastage or sale history, so its unit can't be " +
+        'changed.',
       priceLabel: 'Usual price per unit (optional)',
       pricePlaceholder: '0.00',
       supplierLabel: 'Supplier (optional)',
@@ -714,7 +728,9 @@ export const strings = {
         duplicateName: (name: string) => `You already have ${name}.`,
         invalidNumber: 'Enter a valid number, like 12.50 (use a dot, not a comma).',
         negativeNumber: "This can't be negative.",
+        packSizePositive: 'Enter a pack size greater than 0, or leave it blank.',
         shelfLifeRequired: 'Enter a shelf life in days, or turn that off.',
+
         shelfLifeInvalid: 'Enter a whole number of days.',
         network: "Can't reach EasyKharcha. Check your internet and try again.",
         generic: 'Something went wrong. Please try again.',
@@ -817,6 +833,8 @@ export const strings = {
     removeIngredient: 'Remove',
     amountLabel: 'Amount',
     amountPlaceholder: '0.000',
+    missingPackSizeHint:
+      'Add a pack size for this item in Settings to use it by the packet, bag, tin, bottle or box.',
     noStockItemsYet: 'Add stock items first to pick one.',
     activeToggle: 'Active',
     addDish: (label: string) => `Add ${label}`,

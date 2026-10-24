@@ -2,6 +2,10 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from counts.models import CountLine
+from purchases.models import PurchaseLine
+from wastage.models import WastageEntry
+
 from .models import SellItem, SellItemIngredient, StockItem, Unit
 from .units import base_unit_for, display_price_per_major_unit, display_quantity
 from .units import unit_family as _unit_family_for
@@ -144,6 +148,9 @@ class StockItemSerializer(serializers.ModelSerializer):
     # Step U1b-2: the owner-facing price, always per kg/L for a weight/volume item — `usual_price`
     # itself stays the stored per-base-unit figure (see StockItem.usual_price's comment).
     usual_price_per_major_unit = serializers.SerializerMethodField()
+    # Step U1b-3b-1: mirrors the PATCH view's own has_history check (same four tables) so the edit
+    # form can show the lock message up front instead of only after a rejected save.
+    unit_locked = serializers.SerializerMethodField()
 
     class Meta:
         model = StockItem
@@ -153,6 +160,7 @@ class StockItemSerializer(serializers.ModelSerializer):
             "unit",
             "unit_family",
             "pack_size_base_qty",
+            "unit_locked",
             "usual_price",
             "usual_price_per_major_unit",
             "supplier",
@@ -167,6 +175,14 @@ class StockItemSerializer(serializers.ModelSerializer):
             "last_purchased_at",
             "last_counted_qty",
             "last_counted_at",
+        )
+
+    def get_unit_locked(self, obj: StockItem) -> bool:
+        return (
+            PurchaseLine.objects.filter(stock_item=obj).exists()
+            or CountLine.objects.filter(stock_item=obj).exists()
+            or WastageEntry.objects.filter(stock_item=obj).exists()
+            or SellItemIngredient.objects.filter(stock_item=obj).exists()
         )
 
     def get_usual_price_per_major_unit(self, obj: StockItem) -> str | None:

@@ -77,9 +77,10 @@ def _is_unusual(business: Business, stock_item, counted_qty: Decimal | None, now
 
 
 class CountFormView(APIView):
-    """The blind form: active stock items with id, name and unit only. Nothing else — no last
-    count, no expected, no prices, no usual values — enforced here by simply never selecting those
-    fields, not by hiding them client-side."""
+    """The blind form: active stock items with id, name, unit and the unit-conversion fields
+    (unit_family, pack_size_base_qty) QuantityInput needs to offer kg/L/tonne/pack entry units.
+    Nothing else — no last count, no expected, no prices, no usual values — enforced here by simply
+    never selecting those fields, not by hiding them client-side."""
 
     permission_classes = [IsAuthenticated]
 
@@ -92,7 +93,9 @@ class CountFormView(APIView):
             raise ValidationError({"type": "Choose opening or closing."})
 
         items = (
-            business.stock_items.filter(active=True).order_by("name").values("id", "name", "unit")
+            business.stock_items.filter(active=True)
+            .order_by("name")
+            .values("id", "name", "unit", "unit_family", "pack_size_base_qty")
         )
         return Response({"items": list(items)})
 

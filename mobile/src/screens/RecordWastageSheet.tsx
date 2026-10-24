@@ -5,6 +5,7 @@ import type { CountFormItem } from '../api/counts';
 import { ApiError } from '../api/client';
 import type { WastageEntry, WastageReason } from '../api/wastage';
 import { useAuth } from '../auth/AuthContext';
+import { defaultEntryUnit, QuantityInput } from '../forms/QuantityInput';
 import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
@@ -35,6 +36,7 @@ export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItem
   const [items, setItems] = useState<CountFormItem[]>([]);
   const [stockItemId, setStockItemId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState('');
+  const [entryUnit, setEntryUnit] = useState<string | null>(null);
   const [reason, setReason] = useState<WastageReason>('spillage');
   const [note, setNote] = useState('');
   const [itemError, setItemError] = useState<string | null>(null);
@@ -54,6 +56,7 @@ export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItem
     if (!visible) return;
     setStockItemId(initialStockItemId ?? null);
     setQuantity('');
+    setEntryUnit(null);
     setReason('spillage');
     setNote('');
     setItemError(null);
@@ -83,7 +86,13 @@ export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItem
     try {
       const entry = await authedFetch<WastageEntry>(`/businesses/${business.id}/wastage/`, {
         method: 'POST',
-        body: { stock_item: stockItemId, quantity, reason, note: note.trim() },
+        body: {
+          stock_item: stockItemId,
+          quantity,
+          entry_unit: entryUnit,
+          reason,
+          note: note.trim(),
+        },
       });
       onSaved(entry);
     } catch (err) {
@@ -114,7 +123,10 @@ export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItem
                 key={item.id}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: selected }}
-                onPress={() => setStockItemId(item.id)}
+                onPress={() => {
+                  setStockItemId(item.id);
+                  setEntryUnit(defaultEntryUnit(item));
+                }}
                 style={[styles.chip, selected ? styles.chipSelected : null]}
               >
                 <Small style={selected ? styles.chipTextSelected : styles.chipText}>
@@ -127,13 +139,29 @@ export function RecordWastageSheet({ visible, onClose, onSaved, initialStockItem
         {itemError ? <Small style={styles.errorText}>{itemError}</Small> : null}
       </View>
 
-      <TextField
-        label={s.quantityLabel}
-        value={quantity}
-        onChangeText={setQuantity}
-        keyboardType="decimal-pad"
-        error={quantityError ?? undefined}
-      />
+      {(() => {
+        const selectedItem = items.find((item) => item.id === stockItemId);
+        return selectedItem ? (
+          <QuantityInput
+            label={s.quantityLabel}
+            quantity={quantity}
+            onQuantityChange={setQuantity}
+            entryUnit={entryUnit}
+            onEntryUnitChange={setEntryUnit}
+            stockItem={selectedItem}
+            error={quantityError ?? undefined}
+            missingPackSizeHint={s.missingPackSizeHint}
+          />
+        ) : (
+          <TextField
+            label={s.quantityLabel}
+            value={quantity}
+            onChangeText={setQuantity}
+            keyboardType="decimal-pad"
+            error={quantityError ?? undefined}
+          />
+        );
+      })()}
 
       <View style={styles.field}>
         <Small style={styles.label}>{s.reasonLabel}</Small>

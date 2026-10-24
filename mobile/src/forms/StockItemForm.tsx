@@ -5,7 +5,8 @@ import type { StockItem } from '../api/stock';
 import { UNITS, type UnitValue } from '../constants/units';
 import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
-import { Small, TextField, Toggle } from '../ui';
+import { baseUnitFor, unitFamily } from '../units';
+import { Banner, Small, TextField, Toggle } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 
@@ -15,6 +16,8 @@ const ss = strings.settings.stock;
 export type StockItemDraft = {
   name: string;
   unit: UnitValue | '';
+  /** "1 pack = N base units" (e.g. 500 for "1 packet = 500 g") — set once, never locked. */
+  packSizeBaseQty: string;
   usualPrice: string;
   supplier: string;
   shared: boolean;
@@ -27,6 +30,7 @@ export type StockItemDraft = {
 export const EMPTY_STOCK_ITEM_DRAFT: StockItemDraft = {
   name: '',
   unit: '',
+  packSizeBaseQty: '',
   usualPrice: '',
   supplier: '',
   shared: false,
@@ -40,6 +44,7 @@ export function stockItemToDraft(item: StockItem): StockItemDraft {
   return {
     name: item.name,
     unit: item.unit as UnitValue,
+    packSizeBaseQty: item.pack_size_base_qty ?? '',
     usualPrice: item.usual_price ?? '',
     supplier: item.supplier,
     shared: item.shared,
@@ -59,9 +64,19 @@ export function emptyStockItemDraft(businessType: string): StockItemDraft {
 type Props = {
   value: StockItemDraft;
   onChange: (patch: Partial<StockItemDraft>) => void;
-  errors?: { name?: string; unit?: string; usualPrice?: string; shelfLifeDays?: string };
+  errors?: {
+    name?: string;
+    unit?: string;
+    usualPrice?: string;
+    packSizeBaseQty?: string;
+    shelfLifeDays?: string;
+  };
   /** Drives every sector-varying placeholder, unit list and toggle wording — see sectorCopy.ts. */
   businessType: string;
+  /** True once this item has purchase/count/wastage/sale history — picking a different unit
+   * *family* (not just its kg/g/tonne-style alias) would be rejected on save, so this shows a
+   * heads-up instead of only an error after the fact. Never set for a brand-new item. */
+  unitLocked?: boolean;
   /** Settings' edit sheet shows this; the wizard's "add your own" form never does. */
   showActive?: boolean;
   /** This business's existing stock-item groups (from whatever list the caller already loaded),
@@ -86,6 +101,7 @@ export function StockItemForm({
   onChange,
   errors,
   businessType,
+  unitLocked,
   showActive,
   existingGroups,
   nameFieldRef,
@@ -119,6 +135,36 @@ export function StockItemForm({
     );
   }
 
+  /** Groups a row of unit chips into Weight/Volume/Count sections (src/units.ts's families) so the
+   * picker reads as "what kind of thing is this" first, "which label exactly" second — without
+   * dropping any unit from the row it's given (sectorCopy.json's lists plus the "More units"
+   * fallback already guarantee every Unit choice is reachable). */
+  function unitFamilyGroups(units: (typeof UNITS)[number][]) {
+    return (['weight', 'volume', 'count'] as const)
+      .map((family) => ({
+        family,
+        units: units.filter((unit) => unitFamily(unit.value) === family),
+      }))
+      .filter((group) => group.units.length > 0);
+  }
+
+  function unitFamilyRows(units: (typeof UNITS)[number][]) {
+    return unitFamilyGroups(units).map((group) => (
+      <View key={group.family} style={styles.unitFamilyBlock}>
+        <Small style={styles.unitFamilyLabel}>{s3.unitFamilyLabels[group.family]}</Small>
+        <View style={styles.unitRow}>{group.units.map(unitChip)}</View>
+      </View>
+    ));
+  }
+
+  // Weight/volume items (g/ml base, kg/L/tonne entry aliases) and a count item whose own unit is
+  // "bottle" (a pack of pieces with a known size, Decision 5 — U1b-1 report) can set a pack size;
+  // any other count label (piece, dozen, box, ...) has no meaningful "1 pack = N" to ask for.
+  const canSetPackSize =
+    !!value.unit && (unitFamily(value.unit) !== 'count' || value.unit === 'bottle');
+  const packSizeUnit =
+    value.unit && unitFamily(value.unit) !== 'count' ? baseUnitFor(value.unit) : 'ml';
+
   return (
     <View style={styles.field}>
       <TextField
@@ -133,10 +179,10 @@ export function StockItemForm({
 
       <View style={styles.field}>
         <Small style={styles.unitLabel}>{s3.unitLabel}</Small>
-        <View style={styles.unitRow}>{primaryUnits.map(unitChip)}</View>
+        {unitFamilyRows(primaryUnits)}
         {moreUnits.length > 0 ? (
           <>
-            {showMoreUnits ? <View style={styles.unitRow}>{moreUnits.map(unitChip)}</View> : null}
+            {showMoreUnits ? unitFamilyRows(moreUnits) : null}
             <Pressable accessibilityRole="button" onPress={() => setShowMoreUnits((s) => !s)}>
               <Small style={styles.disclosureText}>
                 {showMoreUnits ? s3.fewerUnits : s3.moreUnits}
@@ -145,7 +191,23 @@ export function StockItemForm({
           </>
         ) : null}
         {errors?.unit ? <Small style={styles.errorText}>{errors.unit}</Small> : null}
+        {unitLocked ? (
+          <View style={styles.lockBanner}>
+            <Banner kind="info">{s3.unitLockedMessage}</Banner>
+          </View>
+        ) : null}
       </View>
+
+      {!minimal && canSetPackSize ? (
+        <TextField
+          label={s3.packSizeLabel(packSizeUnit)}
+          value={value.packSizeBaseQty}
+          onChangeText={(packSizeBaseQty) => onChange({ packSizeBaseQty })}
+          placeholder={s3.packSizePlaceholder}
+          keyboardType="decimal-pad"
+          error={errors?.packSizeBaseQty}
+        />
+      ) : null}
 
       {!minimal ? (
         <>
@@ -262,6 +324,15 @@ const styles = StyleSheet.create({
   },
   unitLabel: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  unitFamilyBlock: {
+    gap: spacing.xs,
+  },
+  unitFamilyLabel: {
+    color: colours.muted,
+  },
+  lockBanner: {
+    marginTop: spacing.xs,
   },
   disclosureText: {
     color: colours.primary,

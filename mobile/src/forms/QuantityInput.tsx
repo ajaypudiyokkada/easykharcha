@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 import { Small, TextField } from '../ui';
+import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { MAJOR_UNIT_FOR_FAMILY, type UnitStockItem, entryUnitsFor } from '../units';
 
 /** The item's sensibly-chosen default entry unit: kg/L for a weight/volume item (most purchase,
@@ -99,9 +100,11 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   chip: {
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
+    paddingHorizontal: spacing.lg,
     justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 2,
     borderColor: colours.mint,
     borderRadius: radii.pill,

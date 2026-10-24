@@ -2331,7 +2331,8 @@ def check_count_and_wastage_flow() -> None:
         business_id, owner_access, "Count Manager", "manager"
     )
 
-    # the blind form returns only id/name/unit — no last count, no expected, no prices, no usual
+    # the blind form returns only id/name/unit plus the unit-conversion fields QuantityInput needs
+    # (unit_family, pack_size_base_qty) — no last count, no expected, no prices, no usual
     status, body, _ = request(
         "GET",
         f"/businesses/{business_id}/counts/form/?type=opening",
@@ -2342,12 +2343,11 @@ def check_count_and_wastage_flow() -> None:
     items = body.get("items", [])
     if len(items) != 2:
         fail(f"counts form: expected 2 items, got {items}")
+    expected_keys = {"id", "name", "unit", "unit_family", "pack_size_base_qty"}
     for item in items:
-        if set(item.keys()) != {"id", "name", "unit"}:
-            fail(
-                f"counts form: expected only id/name/unit, got keys {set(item.keys())}"
-            )
-    print("OK — the blind count form returns only id, name and unit.")
+        if set(item.keys()) != expected_keys:
+            fail(f"counts form: expected only {expected_keys}, got keys {set(item.keys())}")
+    print("OK — the blind count form returns only id, name, unit and unit-conversion fields.")
 
     # a Helper gets 403 on purchases and stock detail
     status, _, _ = request(

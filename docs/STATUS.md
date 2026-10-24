@@ -411,9 +411,14 @@ not built yet.
   plus the 3,200 g/999 g/1,000 ml rounding cases). New `forms/QuantityInput.tsx` (amount + unit
   chips from `entryUnitsFor`, a missing-pack-size hint) is wired into `RecordPurchaseSheet` only;
   `stock/[id].tsx` and the stock bulk-create/list serializer now show `*_price_per_major_unit`
-  (kg/L), not the raw per-g/ml figure. **U1b-3b still owes**: count/wastage/dish-ingredient screens,
-  `StockItemForm`'s family chip + pack-size field, sector unit-list remap, stock/sell list+reports
-  display formatting.
+  (kg/L), not the raw per-g/ml figure.
+- **Step U1b-3b-1 — Remaining entry screens.** Count entry (`app/count.tsx`, opening/closing/
+  starting stock), `RecordWastageSheet` and `DishRecipeForm` all now use `QuantityInput` + send
+  `entry_unit`; `counts/form/` adds `unit_family`/`pack_size_base_qty` for this. Old ingredient-only
+  `forms/unitConversion.ts` deleted. `StockItemForm` groups unit chips into Weight/Volume/Count, adds
+  a pack-size field, and shows a lock message (`StockItem.unit_locked`, new) once an item has
+  history. **U1b-3b-2 still owes**: stock/sell lists, reports, home, alerts and admin screens'
+  display-unit formatting.
 
 ## Permission table
 

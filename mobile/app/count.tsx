@@ -1,11 +1,12 @@
 import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../src/api/client';
 import type { CountFormItem, CountsTodayStatus, CountType } from '../src/api/counts';
 import { useAuth } from '../src/auth/AuthContext';
 import { can } from '../src/auth/permissions';
+import { defaultEntryUnit, QuantityInput } from '../src/forms/QuantityInput';
 import { countDraftStorage, type CountDraftLine } from '../src/screens/countDraftStorage';
 import { formatDateTime } from '../src/format';
 import { sectorCopyFor } from '../src/sectorCopy';
@@ -29,12 +30,13 @@ const s = strings.count;
 
 type LineState = {
   countedQty: string;
+  entryUnit: string | null;
   notSure: boolean;
   skipped: boolean;
 };
 
 function emptyLine(): LineState {
-  return { countedQty: '', notSure: false, skipped: false };
+  return { countedQty: '', entryUnit: null, notSure: false, skipped: false };
 }
 
 function isDone(line: LineState): boolean {
@@ -99,10 +101,11 @@ export default function Count() {
         initial[item.id] = draftLine
           ? {
               countedQty: draftLine.countedQty,
+              entryUnit: draftLine.entryUnit,
               notSure: draftLine.state === 'not_sure',
               skipped: draftLine.state === 'skipped',
             }
-          : emptyLine();
+          : { ...emptyLine(), entryUnit: defaultEntryUnit(item) };
       }
       setLines(initial);
       setResumedDraft(Boolean(draft));
@@ -129,6 +132,7 @@ export default function Count() {
         stockItem: item.id,
         state: line.skipped ? 'skipped' : line.notSure ? 'not_sure' : 'counted',
         countedQty: line.countedQty,
+        entryUnit: line.entryUnit,
       };
     });
     countDraftStorage.save({ businessId: business.id, countType, lines: draftLines });
@@ -190,6 +194,7 @@ export default function Count() {
             stock_item: item.id,
             state,
             counted_qty: skipped ? null : line.countedQty.trim() || null,
+            entry_unit: skipped ? null : line.entryUnit,
           };
         }),
       };
@@ -242,7 +247,9 @@ export default function Count() {
   }
 
   const guardItem = items.find((item) => item.id === guardItemId);
-  const guardValue = guardItem ? (lines[guardItem.id]?.countedQty ?? '') : '';
+  const guardLine = guardItem ? lines[guardItem.id] : undefined;
+  const guardValue = guardLine?.countedQty ?? '';
+  const guardUnit = guardLine?.entryUnit || guardItem?.unit || '';
 
   return (
     <AppShell active="home">
@@ -324,18 +331,19 @@ export default function Count() {
                     >
                       <Icon name="minus" size={18} colour={colours.text} />
                     </Pressable>
-                    <TextInput
-                      value={line.countedQty}
-                      onChangeText={(text) =>
-                        updateLine(item.id, { countedQty: text, skipped: false })
-                      }
-                      keyboardType="decimal-pad"
-                      inputMode="decimal"
-                      accessibilityLabel={s.quantityLabel(item.name)}
-                      placeholder={item.unit}
-                      placeholderTextColor={colours.muted}
-                      style={styles.qtyInput}
-                    />
+                    <View style={styles.qtyInputWrap}>
+                      <QuantityInput
+                        label={s.quantityLabel(item.name)}
+                        quantity={line.countedQty}
+                        onQuantityChange={(text) =>
+                          updateLine(item.id, { countedQty: text, skipped: false })
+                        }
+                        entryUnit={line.entryUnit}
+                        onEntryUnitChange={(unit) => updateLine(item.id, { entryUnit: unit })}
+                        stockItem={item}
+                        missingPackSizeHint={s.missingPackSizeHint}
+                      />
+                    </View>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Increase ${item.name}`}
@@ -390,9 +398,9 @@ export default function Count() {
         <View style={styles.guardOverlay}>
           <View style={styles.guardDialog}>
             <Heading level={3}>{s.guardTitle}</Heading>
-            <Body style={styles.guardQuestion}>{s.guardQuestion(guardValue, guardItem.unit)}</Body>
+            <Body style={styles.guardQuestion}>{s.guardQuestion(guardValue, guardUnit)}</Body>
             <Button
-              label={s.guardYes(guardValue, guardItem.unit)}
+              label={s.guardYes(guardValue, guardUnit)}
               variant="primary"
               onPress={confirmGuard}
             />
@@ -463,31 +471,24 @@ const styles = StyleSheet.create({
   },
   qtyRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.sm,
   },
   qtyBtn: {
     width: 48,
     height: 48,
+    // Roughly lines up with QuantityInput's own number field, below its label.
+    marginTop: 28,
     borderRadius: radii.pill,
     backgroundColor: colours.mint,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  qtyInput: {
+  qtyInputWrap: {
     flex: 1,
     // Without an explicit minWidth, a bare <input>'s own intrinsic min-content size (react-native-web
     // renders TextInput as one) wins over flex:1's shrink — the classic flexbox input-overflow trap.
     minWidth: 0,
-    minHeight: 48,
-    borderWidth: 2,
-    borderColor: colours.mint,
-    borderRadius: radii.md,
-    textAlign: 'center',
-    fontFamily: fonts.bodyExtraBold,
-    fontSize: 17,
-    color: colours.text,
-    paddingHorizontal: spacing.sm,
   },
   optionsRow: {
     flexDirection: 'row',

@@ -7,6 +7,8 @@ export type CountDraftLine = {
   stockItem: number;
   state: CountLineState;
   countedQty: string;
+  /** What unit countedQty was typed in — see src/units.ts. Null means the item's own base unit. */
+  entryUnit: string | null;
 };
 
 export type CountDraft = {

@@ -9,6 +9,7 @@ export type StockItemFieldErrors = {
   name?: string;
   unit?: string;
   usualPrice?: string;
+  packSizeBaseQty?: string;
   shelfLifeDays?: string;
 };
 
@@ -37,6 +38,13 @@ export function validateStockItemDraft(
   const priceCheck = validateOptionalNumber(draft.usualPrice);
   if (priceCheck === 'invalid') errors.usualPrice = s3.errors.invalidNumber;
   else if (priceCheck === 'negative') errors.usualPrice = s3.errors.negativeNumber;
+
+  const packSizeCheck = validateOptionalNumber(draft.packSizeBaseQty);
+  if (packSizeCheck === 'invalid') errors.packSizeBaseQty = s3.errors.invalidNumber;
+  else if (packSizeCheck === 'negative') errors.packSizeBaseQty = s3.errors.packSizePositive;
+  else if (draft.packSizeBaseQty.trim() && Number(draft.packSizeBaseQty.trim()) === 0) {
+    errors.packSizeBaseQty = s3.errors.packSizePositive;
+  }
 
   if (draft.goesOff) {
     if (!draft.shelfLifeDays.trim()) {

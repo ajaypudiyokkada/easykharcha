@@ -2,15 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View, type TextInput } from 'react-native';
 
 import type { SellItem, StockItem } from '../api/stock';
-import type { UnitValue } from '../constants/units';
 import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
 import { Banner, Body, Button, Icon, Small, TextField, Toggle } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 import { groupItems } from './groupItems';
+import { defaultEntryUnit, QuantityInput } from './QuantityInput';
 import { emptyStockItemDraft, StockItemForm, type StockItemDraft } from './StockItemForm';
-import { convertedHint, convertToStockUnit, entryUnitsFor } from './unitConversion';
 
 const sd = strings.dishForm;
 const s3 = strings.setup.step3;
@@ -21,9 +20,8 @@ export type DishIngredientDraft = {
   /** Stable per-row key for list rendering/removal — not sent to the server. */
   key: string;
   stockItemId: number | null;
-  /** What unit the amount is typed in — defaults to the stock item's own, but may be g/ml/pieces
-   * when that's convertible to it (see unitConversion.ts). */
-  entryUnit: UnitValue | '';
+  /** What unit `amount` is typed in — null means the stock item's own base unit. See units.ts. */
+  entryUnit: string | null;
   amount: string;
 };
 
@@ -45,22 +43,20 @@ export const EMPTY_DISH_DRAFT: DishDraft = {
   active: true,
 };
 
-/** Builds the `ingredients` the server expects — each row's amount converted into the stock item's
- * own unit (see unitConversion.ts). Only call once validateDishDraft has confirmed every row is
- * complete; the non-null lookups here assume that's already true. */
+/** Builds the `ingredients` the server expects — each row's amount sent as typed, plus its entry
+ * unit; the server converts it down to the stock item's base unit (see stock/units.py's
+ * convert_entry_quantity). Only call once validateDishDraft has confirmed every row is complete. */
 export function ingredientsPayload(
   draft: DishDraft,
   stockItemsById: Map<number, StockItem>,
-): { stock_item: number; quantity: string }[] {
+): { stock_item: number; quantity: string; entry_unit: string | null }[] {
   return draft.ingredients.map((row) => {
     const stockItem = stockItemsById.get(row.stockItemId as number)!;
-    const amount = Number(row.amount.trim().replace(',', '.'));
-    const converted = convertToStockUnit(
-      amount,
-      row.entryUnit as UnitValue,
-      stockItem.unit as UnitValue,
-    );
-    return { stock_item: stockItem.id, quantity: (converted ?? amount).toFixed(3) };
+    return {
+      stock_item: stockItem.id,
+      quantity: row.amount.trim().replace(',', '.'),
+      entry_unit: row.entryUnit,
+    };
   });
 }
 
@@ -71,11 +67,14 @@ export function dishToDraft(item: SellItem): DishDraft {
     portionLabel: item.portion_label,
     group: item.group,
     active: item.active,
+    // Every saved ingredient — whether typed by hand, imported from a menu, or AI-estimated — is
+    // already stored in the stock item's base unit, so it's shown rolled up for display, same as
+    // every other screen; the owner can still retype it in a different entry unit from here.
     ingredients: item.ingredients.map((ingredient) => ({
       key: `existing-${ingredient.id}`,
       stockItemId: ingredient.stock_item,
-      entryUnit: ingredient.unit as UnitValue,
-      amount: ingredient.quantity,
+      entryUnit: ingredient.display_unit,
+      amount: ingredient.display_quantity,
     })),
   };
 }
@@ -191,7 +190,9 @@ export function DishRecipeForm({
       {
         key: newRowKey(),
         stockItemId: stockItem.id,
-        entryUnit: stockItem.unit as UnitValue,
+        // Recipe amounts are small (grams/ml per portion) — defaults to the item's own base unit,
+        // not its kg/L major unit (see QuantityInput.defaultEntryUnit).
+        entryUnit: defaultEntryUnit(stockItem, 'base'),
         amount: '',
       },
     ]);
@@ -282,12 +283,6 @@ export function DishRecipeForm({
         {value.ingredients.map((row) => {
           const stockItem = row.stockItemId !== null ? stockItemsById.get(row.stockItemId) : null;
           const rowError = errors?.rows?.[row.key];
-          const entryUnits = stockItem ? entryUnitsFor(stockItem.unit as UnitValue) : [];
-          const amountNumber = Number(row.amount.trim().replace(',', '.'));
-          const hint =
-            stockItem && row.entryUnit && !Number.isNaN(amountNumber) && row.amount.trim()
-              ? convertedHint(amountNumber, row.entryUnit as UnitValue, stockItem.unit as UnitValue)
-              : null;
           return (
             <View key={row.key} style={styles.ingredientRow}>
               <View style={styles.ingredientHead}>
@@ -305,40 +300,27 @@ export function DishRecipeForm({
                 <Small style={styles.errorText}>{rowError.stockItem}</Small>
               ) : null}
 
-              <TextField
-                label={sd.amountLabel}
-                value={row.amount}
-                onChangeText={(amount) => updateRow(row.key, { amount })}
-                placeholder={sd.amountPlaceholder}
-                keyboardType="decimal-pad"
-                hint={hint ?? undefined}
-                error={rowError?.amount}
-              />
-
-              {entryUnits.length > 1 ? (
-                <View style={styles.unitRow}>
-                  {entryUnits.map((unit) => (
-                    <Pressable
-                      key={unit}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: row.entryUnit === unit }}
-                      onPress={() => updateRow(row.key, { entryUnit: unit })}
-                      style={[
-                        styles.unitChip,
-                        row.entryUnit === unit ? styles.unitChipSelected : null,
-                      ]}
-                    >
-                      <Small
-                        style={
-                          row.entryUnit === unit ? styles.unitChipTextSelected : styles.unitChipText
-                        }
-                      >
-                        {unit}
-                      </Small>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
+              {stockItem ? (
+                <QuantityInput
+                  label={sd.amountLabel}
+                  quantity={row.amount}
+                  onQuantityChange={(amount) => updateRow(row.key, { amount })}
+                  entryUnit={row.entryUnit}
+                  onEntryUnitChange={(unit) => updateRow(row.key, { entryUnit: unit })}
+                  stockItem={stockItem}
+                  error={rowError?.amount}
+                  missingPackSizeHint={sd.missingPackSizeHint}
+                />
+              ) : (
+                <TextField
+                  label={sd.amountLabel}
+                  value={row.amount}
+                  onChangeText={(amount) => updateRow(row.key, { amount })}
+                  placeholder={sd.amountPlaceholder}
+                  keyboardType="decimal-pad"
+                  error={rowError?.amount}
+                />
+              )}
             </View>
           );
         })}
