@@ -21,6 +21,12 @@ from counts.models import CountType, StockCount
 from purchases.models import Purchase, PurchaseLine
 from sales.models import Sale
 from stock.models import RecipeStatus
+from stock.units import (
+    display_quantities,
+    display_quantity,
+    report_group_base_unit,
+    report_group_key,
+)
 from wastage.models import WastageEntry
 
 ZERO = Decimal("0")
@@ -215,39 +221,61 @@ def _used_vs_expected(per_item: dict):
     items = sorted(per_item.values(), key=lambda e: abs(e["gap_value"]), reverse=True)
     top = items[:TOP_USED_VS_EXPECTED]
     total_gap_value = sum((abs(e["gap_value"]) for e in top), ZERO)
-    return {
-        "items": [
+    rows = []
+    for e in top:
+        display, display_unit = display_quantities(
+            {"used": e["used"], "expected": e["expected"], "gap_qty": e["gap_qty"]}, e["unit"]
+        )
+        rows.append(
             {
                 "stock_item": e["stock_item"],
                 "name": e["name"],
-                "unit": e["unit"],
-                "used": str(e["used"]),
-                "expected": str(e["expected"]),
-                "gap_qty": str(e["gap_qty"]),
+                "unit": display_unit,
+                "used": str(display["used"]),
+                "expected": str(display["expected"]),
+                "gap_qty": str(display["gap_qty"]),
                 "gap_value": _money(e["gap_value"]),
             }
-            for e in top
-        ],
-        "total_gap_value": _money(total_gap_value),
-    }
+        )
+    return {"items": rows, "total_gap_value": _money(total_gap_value)}
 
 
 def _biggest_gaps(per_item: dict):
     flagged = [e for e in per_item.values() if e["flagged_gap_value_abs"] > ZERO]
     flagged.sort(key=lambda e: e["flagged_gap_value_abs"], reverse=True)
     top = flagged[:TOP_BIGGEST_GAPS]
-    return {
-        "items": [
+    rows = []
+    for e in top:
+        qty, display_unit = display_quantity(e["flagged_gap_qty_abs"], e["unit"])
+        rows.append(
             {
                 "stock_item": e["stock_item"],
                 "name": e["name"],
-                "quantity": str(e["flagged_gap_qty_abs"]),
-                "unit": e["unit"],
+                "quantity": str(qty),
+                "unit": display_unit,
                 "value": _money(e["flagged_gap_value_abs"]),
             }
-            for e in top
-        ]
-    }
+        )
+    return {"items": rows}
+
+
+def _quantity_by_family(qty_by_unit: dict) -> dict:
+    """Raw per-unit base quantities (e.g. {"g": 500, "ml": 1500, "piece": 3}) rolled up into
+    fungible family buckets (weight/volume share one bucket each; every other unit stays its own
+    one-member bucket — report_group_key) and given a display quantity/unit alongside the stored
+    base figure, per the shared display rule."""
+    totals: dict = defaultdict(lambda: ZERO)
+    for unit, qty in qty_by_unit.items():
+        totals[report_group_key(unit)] += qty
+    result = {}
+    for key, base_qty in totals.items():
+        display_qty, display_unit = display_quantity(base_qty, report_group_base_unit(key))
+        result[key] = {
+            "base_qty": str(base_qty),
+            "display_qty": str(display_qty),
+            "display_unit": display_unit,
+        }
+    return result
 
 
 def _wastage_trend(
@@ -270,7 +298,7 @@ def _wastage_trend(
             {
                 **_bucket_label(start, end),
                 "value": _money(value),
-                "quantity_by_unit": {unit: str(qty) for unit, qty in bucket_qty_by_unit.items()},
+                "quantity_by_family": _quantity_by_family(bucket_qty_by_unit),
             }
         )
 
@@ -294,7 +322,7 @@ def _wastage_trend(
         "buckets": rows,
         "total": {
             "value": _money(total_value),
-            "quantity_by_unit": {unit: str(qty) for unit, qty in total_qty_by_unit.items()},
+            "quantity_by_family": _quantity_by_family(total_qty_by_unit),
         },
         "change_pct": _pct(total_value - previous_value, previous_value),
     }

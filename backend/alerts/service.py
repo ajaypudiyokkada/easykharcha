@@ -19,6 +19,7 @@ from counts.business_day import business_date_for, has_any_count
 from counts.gap import lines_with_gap, unit_cost_for
 from counts.models import CountLine, CountLineState, CountType, StockCount
 from purchases.models import PurchaseLine
+from stock.units import display_price_per_major_unit, display_quantities, display_quantity
 from wastage.models import WastageEntry
 
 from .models import AlertCheck
@@ -184,20 +185,21 @@ def _price_rise_alerts(business: Business) -> list[dict]:
         if pct_increase <= rate_creep_pct:
             continue
         purchase_date = timezone.localtime(item.last_purchased_at, tz).date()
-        avg_display = avg_price.quantize(Decimal("0.01"))
         pct_display = pct_increase.quantize(Decimal("0.01"))
+        latest_display = display_price_per_major_unit(item.last_unit_price, item.unit)
+        avg_display = display_price_per_major_unit(avg_price, item.unit)
         alerts.append(
             {
                 "key": f"price_rise:{item.id}:{purchase_date.isoformat()}",
                 "type": "price_rise",
                 "title": f"{item.name} price is up",
                 "detail": (
-                    f"Latest purchase ₹{item.last_unit_price} vs average ₹{avg_display} "
+                    f"Latest purchase ₹{latest_display} vs average ₹{avg_display} "
                     f"({pct_display}% higher)."
                 ),
                 "severity": "danger",
                 "numbers": {
-                    "latest_price": str(item.last_unit_price),
+                    "latest_price": str(latest_display),
                     "average_price": str(avg_display),
                     "pct_increase": str(pct_display),
                 },
@@ -249,21 +251,22 @@ def _wastage_high_alerts(business: Business) -> list[dict]:
         unit_cost = unit_cost_for(item)
         value = wasted * unit_cost if unit_cost is not None else ZERO
         pct_display = pct.quantize(Decimal("0.01"))
+        display, display_unit = display_quantities({"wasted": wasted, "bought": bought}, item.unit)
         alerts.append(
             {
                 "key": f"wastage_high:{item.id}:{today.isoformat()}",
                 "type": "wastage_high",
                 "title": f"{item.name} wastage is high",
                 "detail": (
-                    f"{wasted} {item.unit} wasted out of {bought} {item.unit} bought in the "
-                    f"last 7 days ({pct_display}%)."
+                    f"{display['wasted']} {display_unit} wasted out of {display['bought']} "
+                    f"{display_unit} bought in the last 7 days ({pct_display}%)."
                 ),
                 "severity": "warning",
                 "numbers": {
-                    "wasted_qty": str(wasted),
-                    "bought_qty": str(bought),
+                    "wasted_qty": str(display["wasted"]),
+                    "bought_qty": str(display["bought"]),
                     "pct": str(pct_display),
-                    "unit": item.unit,
+                    "unit": display_unit,
                 },
                 "next_action": {"label": "Open wastage", "route": "/wastage"},
                 "value": value,
@@ -289,23 +292,26 @@ def _gap_flagged_alerts(business: Business) -> list[dict]:
         gap_qty = line["gap_qty"]
         gap_value = line["gap_value"]
         value_part = f" (₹{gap_value})" if gap_value is not None else ""
+        display, display_unit = display_quantities(
+            {"gap_qty": gap_qty, "expected_used": line["expected_used"]}, line["unit"]
+        )
         alerts.append(
             {
                 "key": f"gap_flagged:{line['stock_item']}:{date_label}",
                 "type": "gap_flagged",
                 "title": f"{line['stock_item_name']} has an unexplained gap",
                 "detail": (
-                    f"Gap of {gap_qty} {line['unit']}{value_part} in the {date_label} "
+                    f"Gap of {display['gap_qty']} {display_unit}{value_part} in the {date_label} "
                     "closing count."
                 ),
                 "severity": "danger",
                 "numbers": {
-                    "gap_qty": str(gap_qty) if gap_qty is not None else None,
+                    "gap_qty": str(display["gap_qty"]) if gap_qty is not None else None,
                     "gap_value": str(gap_value) if gap_value is not None else None,
                     "expected_used": (
-                        str(line["expected_used"]) if line["expected_used"] is not None else None
+                        str(display["expected_used"]) if line["expected_used"] is not None else None
                     ),
-                    "unit": line["unit"],
+                    "unit": display_unit,
                 },
                 "next_action": {"label": "Review count", "route": f"/counts/{latest_closing.id}"},
                 "value": abs(gap_value) if gap_value is not None else ZERO,
@@ -393,7 +399,10 @@ def _expiry_soon_alerts(business: Business) -> list[dict]:
             shelf_phrase = (
                 f"{days_left} {day_word} left of its {item.shelf_life_days}-day shelf life"
             )
-        detail = f"{at_risk_qty} {item.unit} from the {purchase_label} purchase — {shelf_phrase}."
+        display_qty, display_unit = display_quantity(at_risk_qty, item.unit)
+        detail = (
+            f"{display_qty} {display_unit} from the {purchase_label} purchase — {shelf_phrase}."
+        )
 
         is_stale = (timezone.now() - count.submitted_at) > timedelta(days=EXPIRY_STALE_COUNT_DAYS)
         if is_stale:
@@ -410,8 +419,8 @@ def _expiry_soon_alerts(business: Business) -> list[dict]:
                 "severity": severity,
                 "numbers": {
                     "item_name": item.name,
-                    "at_risk_qty": str(at_risk_qty),
-                    "unit": item.unit,
+                    "at_risk_qty": str(display_qty),
+                    "unit": display_unit,
                     "expiry_date": expiry_date.isoformat(),
                     "days_left": days_left,
                     "value_at_risk": str(value),

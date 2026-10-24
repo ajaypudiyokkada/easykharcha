@@ -55,7 +55,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `alerts/` — Step 15: alerts computed on read (opening_late/closing_late — Step 23b's split of the
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
   models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
-- `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure), views.py, urls.py
+- `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure; Step U1b-3b-2: wastage_trend's `quantity_by_family` via stock/units.py's `report_group_key`/`display_quantities` — weight/volume share one fungible bucket, everything else its own one-member bucket; used_vs_expected/biggest_gaps display-converted too), views.py, urls.py
 - `ai/` — Step C1/C1b/C1c/C1d/C1e/C2a/C2c: menu reading + recipe suggestions via Anthropic (provider/ —
   fake.py for AI_FAKE with realistic token counts, anthropic_provider.py for real (no `temperature`
   kwarg —

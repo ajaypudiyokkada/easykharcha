@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from config.admin_mixins import ReadOnlyAdminMixin
+from stock.units import display_quantity
 
 from .models import WastageEntry
 
@@ -14,7 +15,7 @@ class WastageEntryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         "id",
         "business",
         "stock_item",
-        "quantity",
+        "quantity_display",
         "reason",
         "recorded_by",
         "recorded_at",
@@ -22,3 +23,8 @@ class WastageEntryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     )
     list_filter = ("reason", "is_deleted")
     search_fields = ("business__name", "stock_item__name")
+
+    @admin.display(description="Quantity")
+    def quantity_display(self, obj: WastageEntry):
+        qty, unit = display_quantity(obj.quantity, obj.stock_item.unit)
+        return f"{qty} {unit}"

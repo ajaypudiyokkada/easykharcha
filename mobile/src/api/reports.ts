@@ -31,14 +31,19 @@ export type UsedVsExpected = {
   total_gap_value: string;
 };
 
+export type QuantityByFamily = Record<
+  string,
+  { base_qty: string; display_qty: string; display_unit: string }
+>;
+
 export type WastageTrendBucket = ReportBucket & {
   value: string;
-  quantity_by_unit: Record<string, string>;
+  quantity_by_family: QuantityByFamily;
 };
 
 export type WastageTrend = {
   buckets: WastageTrendBucket[];
-  total: { value: string; quantity_by_unit: Record<string, string> };
+  total: { value: string; quantity_by_family: QuantityByFamily };
   change_pct: string | null;
 };
 

@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from config.admin_mixins import ReadOnlyAdminMixin, ReadOnlyInlineMixin
+from stock.units import display_quantity
 
 from .models import CountLine, StockCount
 
@@ -8,7 +9,15 @@ from .models import CountLine, StockCount
 class CountLineInline(ReadOnlyInlineMixin, admin.TabularInline):
     model = CountLine
     extra = 0
-    fields = ("stock_item", "counted_qty", "state", "confirmed_unusual")
+    fields = ("stock_item", "counted_qty_display", "state", "confirmed_unusual")
+    readonly_fields = ("stock_item", "counted_qty_display", "state", "confirmed_unusual")
+
+    @admin.display(description="Counted qty")
+    def counted_qty_display(self, obj: CountLine):
+        if obj.counted_qty is None:
+            return None
+        qty, unit = display_quantity(obj.counted_qty, obj.stock_item.unit)
+        return f"{qty} {unit}"
 
 
 @admin.register(StockCount)
