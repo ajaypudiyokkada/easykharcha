@@ -1,7 +1,9 @@
 // EasyKharcha service worker — registered only in production builds (see
-// src/pwa/registerServiceWorker.ts). Bump CACHE_VERSION on every release that should push existing
-// clients onto a fresh cache; the old one is deleted on activate.
-const CACHE_VERSION = 'v1';
+// src/pwa/registerServiceWorker.ts). CACHE_VERSION's placeholder is replaced with the build
+// timestamp by scripts/patch_web_shell.mjs on every `npm run build:web`, so every deploy produces a
+// byte-different sw.js — without that, a browser has no way to notice a new version is available at
+// all, since it only checks for an update by re-fetching sw.js and diffing the bytes.
+const CACHE_VERSION = '__EK_BUILD_VERSION__';
 const CACHE_NAME = `easykharcha-shell-${CACHE_VERSION}`;
 
 // Never cached, regardless of method: the backend API, anything auth-related, and uploaded media

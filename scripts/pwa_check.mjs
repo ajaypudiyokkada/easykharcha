@@ -174,6 +174,36 @@ async function checkManifest(page) {
   console.log('OK — every manifest icon and the favicon/apple-touch-icon files all load.');
 }
 
+async function checkNoCacheHeaders(page) {
+  for (const path of ['/', '/sw.js']) {
+    const cacheControl = await page.evaluate(
+      (p) => fetch(p, { cache: 'no-store' }).then((r) => r.headers.get('cache-control')),
+      path,
+    );
+    if (!cacheControl || !cacheControl.includes('no-cache')) {
+      fail(`"${path}" Cache-Control is ${JSON.stringify(cacheControl)}, expected to include "no-cache".`);
+    }
+  }
+  console.log('OK — "/" and "/sw.js" are served with Cache-Control: no-cache.');
+}
+
+async function checkServiceWorkerVersion(page) {
+  const swSource = await page.evaluate(() =>
+    fetch('/sw.js', { cache: 'no-store' }).then((r) => r.text()),
+  );
+  const match = swSource.match(/CACHE_VERSION = '([^']+)'/);
+  if (!match) fail('sw.js has no CACHE_VERSION constant to check.');
+  const version = match[1];
+  // Proves scripts/patch_web_shell.mjs actually stamped a per-build value in, rather than the raw
+  // placeholder (or a hardcoded constant) surviving untouched from one deploy to the next — which was
+  // the original bug: identical sw.js bytes on every deploy meant a browser never saw anything worth
+  // installing.
+  if (version === '__EK_BUILD_VERSION__') {
+    fail('sw.js CACHE_VERSION is still the unreplaced build-time placeholder.');
+  }
+  console.log(`OK — sw.js CACHE_VERSION ("${version}") is a per-build value, not a hardcoded constant.`);
+}
+
 async function checkServiceWorkerActivated(page) {
   const state = await page.evaluate(async () => {
     if (!('serviceWorker' in navigator)) return null;
@@ -221,6 +251,8 @@ async function main() {
     await waitForText(page, 'Business owner login');
 
     await checkManifest(page);
+    await checkNoCacheHeaders(page);
+    await checkServiceWorkerVersion(page);
     await checkServiceWorkerActivated(page);
 
     // === Check 3: offline + reload still opens the app shell ===
