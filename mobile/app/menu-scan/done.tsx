@@ -1,5 +1,5 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../../src/auth/AuthContext';
@@ -12,11 +12,10 @@ const sdone = strings.menuScan.done;
 
 export default function MenuScanDone() {
   const router = useRouter();
-  const { status, businesses, authedFetch, refreshMe } = useAuth();
+  const { status, businesses } = useAuth();
   const params = useLocalSearchParams<{ businessId?: string; returnTo?: string; count?: string }>();
   const returnTo = params.returnTo === 'settings' ? 'settings' : 'onboarding';
   const count = Number(params.count ?? '0');
-  const [continuing, setContinuing] = useState(false);
 
   const business = businesses.find((b) => String(b.id) === params.businessId) ?? businesses[0];
 
@@ -36,26 +35,15 @@ export default function MenuScanDone() {
 
   const sector = sectorCopyFor(business.business_type);
 
-  async function handleContinue() {
+  function handleContinue() {
     if (returnTo === 'settings') {
       router.replace('/settings/sell');
       return;
     }
-    setContinuing(true);
-    try {
-      await authedFetch(`/businesses/${business.id}/onboarding/4/`, {
-        method: 'PATCH',
-        body: { status: 'done' },
-      });
-      await authedFetch(`/businesses/${business.id}/`, {
-        method: 'PATCH',
-        body: { onboarding_step: 5 },
-      });
-      await refreshMe();
-      router.replace('/setup/5');
-    } finally {
-      setContinuing(false);
-    }
+    // Step O1: the quick path scans dishes before brand (step 2) — onboarding_step is still 2 from
+    // step 1, and step 4 (sell) is marked done by its own Next once actually reached, so nothing
+    // needs saving here.
+    router.replace('/setup/2');
   }
 
   return (
@@ -68,7 +56,7 @@ export default function MenuScanDone() {
           {sdone.title(count, sector.sellNoun, sector.sellNounPlural)}
         </Body>
         <Body style={styles.subtitle}>{sdone.subtitle}</Body>
-        <Button label={sdone.continueLabel} onPress={handleContinue} loading={continuing} />
+        <Button label={sdone.continueLabel} onPress={handleContinue} />
       </View>
     </Screen>
   );

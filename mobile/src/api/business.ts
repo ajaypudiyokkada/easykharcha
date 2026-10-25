@@ -19,6 +19,9 @@ export type Business = {
   timezone: string;
   currency: string;
   onboarding_step: number;
+  /** Step O1: 'quick' or 'diy' once chosen at the "How do you want to set up?" fork (between steps
+   * 1 and 2, menuScanEnabled sectors only) — "" until then. */
+  onboarding_path: 'quick' | 'diy' | '';
   onboarding_completed_at: string | null;
   onboarding: OnboardingStep[];
   skipped_steps: number[];

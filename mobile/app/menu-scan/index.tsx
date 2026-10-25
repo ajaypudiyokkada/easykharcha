@@ -32,7 +32,9 @@ export default function MenuScanSource() {
   const { status, businesses, authedFetch } = useAuth();
   const params = useLocalSearchParams<{ businessId?: string; returnTo?: string }>();
   const returnTo: MenuScanReturnTo = params.returnTo === 'settings' ? 'settings' : 'onboarding';
-  const backPath = returnTo === 'settings' ? '/settings/sell' : '/setup/4';
+  // Step O1: the fork (not step 4, which no longer offers scan/manual) is what launches this flow
+  // from onboarding now, so "Back" here returns there.
+  const backPath = returnTo === 'settings' ? '/settings/sell' : '/setup/fork';
 
   const [images, setImages] = useState<PickedImage[]>([]);
   const [pdf, setPdf] = useState<File | null>(null);
@@ -159,7 +161,9 @@ export default function MenuScanSource() {
     }
   }
 
-  const manualPath = returnTo === 'onboarding' ? `${backPath}?mode=manual` : backPath;
+  // AI unavailable/rate-limited: continue the wizard at brand (step 2) rather than back to the
+  // fork — scanning runs before brand in the quick path, so this just rejoins the normal order.
+  const manualPath = returnTo === 'onboarding' ? '/setup/2' : backPath;
 
   return (
     <Screen>

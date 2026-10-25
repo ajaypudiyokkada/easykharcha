@@ -27,8 +27,10 @@ export default function MenuScanAnalyzing() {
   const { status, businesses, authedFetch } = useAuth();
   const params = useLocalSearchParams<{ businessId?: string; returnTo?: string }>();
   const returnTo = params.returnTo === 'settings' ? 'settings' : 'onboarding';
-  const backPath = returnTo === 'settings' ? '/settings/sell' : '/setup/4';
-  const manualPath = returnTo === 'onboarding' ? `${backPath}?mode=manual` : backPath;
+  const backPath = returnTo === 'settings' ? '/settings/sell' : '/setup/fork';
+  // AI unavailable/stuck/rate-limited: continue the wizard at brand (step 2) rather than back to
+  // the fork — scanning runs before brand in the quick path, so this just rejoins the normal order.
+  const manualPath = returnTo === 'onboarding' ? '/setup/2' : backPath;
 
   const business = businesses.find((b) => String(b.id) === params.businessId) ?? businesses[0];
 

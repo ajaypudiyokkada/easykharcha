@@ -3,11 +3,12 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../../src/api/client';
-import type { StarterPack, StockItem } from '../../src/api/stock';
+import type { SellItem, StarterPack, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { groupItems } from '../../src/forms/groupItems';
 import { itemDraftStorage } from '../../src/forms/itemDraftStorage';
+import { sectorCopyFor } from '../../src/sectorCopy';
 import {
   buildStarterBulkPayload,
   EMPTY_STARTER_PICKER_VALUE,
@@ -37,12 +38,14 @@ export default function SetupStepThree() {
   const [pickerValue, setPickerValue] = useState<StarterPickerValue>(EMPTY_STARTER_PICKER_VALUE);
 
   const [items, setItems] = useState<StockItem[] | null>(null);
+  const [sellItems, setSellItems] = useState<SellItem[] | null>(null);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [skipping, setSkipping] = useState(false);
 
   const draftScope = onboardingBusiness ? `stock-picker.${onboardingBusiness.id}` : null;
+  const isQuickPath = onboardingBusiness?.onboarding_path === 'quick';
 
   useEffect(() => {
     if (!onboardingBusiness) return;
@@ -52,6 +55,12 @@ export default function SetupStepThree() {
     authedFetch<StockItem[]>(`/businesses/${onboardingBusiness.id}/stock-items/`)
       .then(setItems)
       .catch(() => setItems([]));
+    // Step O1: the quick path scans dishes before this step — show how many still need ingredients.
+    if (onboardingBusiness.onboarding_path === 'quick') {
+      authedFetch<SellItem[]>(`/businesses/${onboardingBusiness.id}/sell-items/`)
+        .then(setSellItems)
+        .catch(() => setSellItems([]));
+    }
     // Fetches once for the business this screen is onboarding — business_type doesn't change here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingBusiness?.business_type]);
@@ -96,6 +105,10 @@ export default function SetupStepThree() {
   const allItems = items ?? [];
   const addedGroups = groupItems(allItems);
   const selectedCount = starterPickerCount(pickerValue);
+  const sector = sectorCopyFor(business.business_type);
+  const needsIngredientsCount = (sellItems ?? []).filter(
+    (item) => item.recipe_status !== 'confirmed',
+  ).length;
 
   async function handleRemove(item: StockItem) {
     setItems((current) => (current ?? []).filter((i) => i.id !== item.id));
@@ -208,7 +221,15 @@ export default function SetupStepThree() {
       />
 
       <Body style={styles.title}>{s3.title}</Body>
-      <Small style={styles.subtitle}>{s3.stepIntro}</Small>
+      <Small style={styles.subtitle}>{isQuickPath ? s3.quickStepIntro : s3.stepIntro}</Small>
+      {isQuickPath && needsIngredientsCount > 0 ? (
+        <Small style={styles.subtitle}>
+          {s3.needsIngredientsNote(
+            needsIngredientsCount,
+            needsIngredientsCount === 1 ? sector.sellNoun : sector.sellNounPlural,
+          )}
+        </Small>
+      ) : null}
 
       {submitError ? (
         <View style={styles.formError}>

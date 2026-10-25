@@ -667,6 +667,16 @@ export const strings = {
         generic: 'Something went wrong. Please try again.',
       },
     },
+    fork: {
+      title: 'How do you want to set up?',
+      quickTitle: 'Quick setup from my menu',
+      recommended: 'Recommended',
+      quickSubtitle: (noun: string) =>
+        `Upload your ${noun} (photos or a PDF). We will list what you sell, and suggest what each ` +
+        'item uses. You check it.',
+      diyTitle: "I'll set it up myself",
+      diySubtitle: 'Add what you buy first, then what you sell.',
+    },
     step2: {
       title: 'Your brand',
       logoLabel: 'Logo (optional)',
@@ -687,6 +697,9 @@ export const strings = {
     step3: {
       title: 'What you buy',
       stepIntro: 'Add what you buy first — stock items are what sell items use.',
+      quickStepIntro: 'Add what you buy so your dishes can use it',
+      needsIngredientsNote: (count: number, label: string) =>
+        `${count} ${label} still need${count === 1 ? 's' : ''} ingredients`,
       pickCommon: 'Pick from common items',
       continueLabel: (count: number) => (count > 0 ? `${count} selected — Next` : 'Next'),
       addOwn: 'Add your own',

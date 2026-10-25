@@ -7,6 +7,7 @@ import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getOnboardingBusiness } from '../../src/business/routing';
 import { BrandForm } from '../../src/forms/BrandForm';
+import { sectorCopyFor } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import { bestTextOn } from '../../src/theme/brand';
 import { BottomActionBar, Body, Icon, Muted, Screen, StepHeader } from '../../src/ui';
@@ -119,7 +120,11 @@ export default function SetupStepTwo() {
       <StepHeader
         current={2}
         total={s.totalSteps}
-        onBack={() => router.push('/setup/1')}
+        onBack={() =>
+          router.push(
+            sectorCopyFor(business.business_type).menuScanEnabled ? '/setup/fork' : '/setup/1',
+          )
+        }
         onSaveForLater={handleSaveForLater}
       />
 
