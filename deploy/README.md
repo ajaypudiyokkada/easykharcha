@@ -63,6 +63,12 @@ going; a job stuck in `reading` for more than 10 minutes is recovered the same w
 - **Deploy a change:** `./deploy.sh` — pulls `main`, rebuilds, restarts, waits for the backend's own
   healthcheck, prints `docker compose ps`, prunes old images. Exits non-zero (and prints the backend's
   last 100 log lines) if it never comes up healthy.
+- **Confirm a deploy reached the browser:** open `https://app.easykharcha.com/settings`, scroll to the
+  bottom — the build timestamp shown there in small grey text (stamped into `index.html`/`sw.js` at
+  export time by `scripts/patch_web_shell.mjs`) should match the time `./deploy.sh` just ran. If a
+  browser tab was already open, it only picks up the new version on its own "A new version is ready"
+  banner tap (checked on open and every few minutes) — a plain reload may still hit the old cached
+  shell until the new service worker has activated.
 - **View logs:** `docker compose -f docker-compose.prod.yml logs -f [service]` (`backend`, `worker`,
   `web-app`, `landing`, `caddy`, `db`).
 - **Reset a lost admin password:**

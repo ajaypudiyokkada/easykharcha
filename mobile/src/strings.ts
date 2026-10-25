@@ -954,6 +954,7 @@ export const strings = {
       alertRules: 'Alert rules',
       expiryAlerts: 'Expiry alerts',
       comingSoonChip: 'Coming soon',
+      version: (v: string) => `Version ${v}`,
     },
     business: {
       title: 'Business details',

@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
+import { getBuildVersion } from '../../src/pwa/buildVersion';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
@@ -46,6 +47,7 @@ export default function SettingsHub() {
   const { status, user, businesses } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
+  const buildVersion = getBuildVersion();
 
   if (status === 'bootstrapping') {
     return (
@@ -97,6 +99,8 @@ export default function SettingsHub() {
             ))}
           </View>
         </View>
+
+        {buildVersion ? <Small style={styles.version}>{s.version(buildVersion)}</Small> : null}
       </Screen>
     </AppShell>
   );
@@ -176,5 +180,9 @@ const styles = StyleSheet.create({
   chipText: {
     color: colours.muted,
     fontFamily: fonts.bodyExtraBold,
+  },
+  version: {
+    color: colours.muted,
+    textAlign: 'center',
   },
 });
