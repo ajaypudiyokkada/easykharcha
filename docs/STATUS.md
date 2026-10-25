@@ -436,6 +436,18 @@ not built yet.
   `counts/gap.py`'s own `CountDetailView` output is also still raw base units, untouched), home cards,
   the AI review screens, Settings/team screens. See the branch's own commit for exact scope.
 
+- **Step O1 — Onboarding fork: quick setup from a menu scan, or DIY.** New `setup/fork.tsx`, "How
+  do you want to set up?", shown once right after step 1 for menuScanEnabled sectors only (new
+  `Business.onboarding_path` — `""`/`quick`/`diy` — persists the choice so a reload or "Save and
+  continue later" resumes at the fork). Quick launches `/menu-scan` directly, before brand/buy are
+  visited, then continues brand→buy (now showing how many scanned dishes still need ingredients)→
+  sell (already populated); DIY continues to brand exactly as before. The old scan-vs-manual choice
+  card on `setup/4.tsx` (step 4) is gone — that screen always opens on the list+form now. No other
+  step was reordered or renumbered; existing businesses already past step 2 with no path saved
+  default to DIY silently. `flow.mjs`'s `onboarding-menu`/`onboarding-diy` scenarios (`npm run flow
+  -- --only <name>`) cover both paths; `menu-scan-stuck` is the old Step C2c stuck-scan case, split
+  out since it's unrelated to this fork (kept, still unconfirmed in a live browser as of Step C2c).
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

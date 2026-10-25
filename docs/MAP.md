@@ -6,7 +6,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 - `accounts/` — signup, login, refresh, logout, /me; models.py (User), serializers.py (`SignupSerializer`'s `business_name` — Step F2), otp.py (OTP, unused by UI yet), ratelimit.py (IP/mobile rate limits), validators.py (PIN/password rules), views.py (`SignupView` creates the User and, Step F2, their one Business — name only — in one transaction via `businesses.creation.create_business`), urls.py
 - `audit/` — one audit-log row per write; models.py (AuditLog), log.py (log_action helper), no endpoints
-- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Step F2 made `business_type`/`city` `blank=True` (filled in by the wizard, not at signup); Access, AccessRole), creation.py (Step F2's `create_business` — Owner access, onboarding rows, default settings; shared by `SignupView` and `BusinessCreateView`), views.py (`BusinessUpdateView` — Step 23: a `business_type` change with existing items and no `items_action` raises `ItemsDecisionNeeded`), sector_change.py (Step 23's `remove_items_for_sector_change`, keeping items with history or still used by a sell item), team.py, business_settings.py, permissions.py (the role→permission table — Step 23a: `ALL_PERMISSIONS` registry, Owner computed as all of it), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update; `BusinessUpdateSerializer`'s `items_action`), urls.py
+- `businesses/` — business CRUD, onboarding, team, settings, permissions; models.py (Business — Step 21b added `pincode`/`state`/`country`, kept `city`; Step F2 made `business_type`/`city` `blank=True` (filled in by the wizard, not at signup); Step O1 added `onboarding_path` (`""`/`quick`/`diy`, `OnboardingPath` choices) for the onboarding fork; Access, AccessRole), creation.py (Step F2's `create_business` — Owner access, onboarding rows, default settings; shared by `SignupView` and `BusinessCreateView`), views.py (`BusinessUpdateView` — Step 23: a `business_type` change with existing items and no `items_action` raises `ItemsDecisionNeeded`), sector_change.py (Step 23's `remove_items_for_sector_change`, keeping items with history or still used by a sell item), team.py, business_settings.py, permissions.py (the role→permission table — Step 23a: `ALL_PERMISSIONS` registry, Owner computed as all of it), access.py (access_or_403/owner_access_or_403), colour.py (brand-colour contrast), serializers.py (`validate_pincode_location`, shared by create/update; `BusinessUpdateSerializer`'s `items_action`), urls.py
 - `geo/` — Step 21b: India pincode lookup; models.py (Pincode — pincode/area/district/state/office_type, indexed on pincode), states.py (`INDIA_STATES`), management/commands/load_pincodes.py (idempotent CSV load, `--if-empty` for entrypoint.sh), views.py, exceptions.py (PincodeNotFound), urls.py
 - `config/` — Django project config; settings.py, urls.py (root router), exceptions.py (DRF error-shape handler), views.py (health), wsgi.py
 - `counts/` — blind stock counts, today status, count review, reminders; models.py (StockCount —
@@ -185,12 +185,26 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   (no business, or one with no name yet); a `useLayoutEffect` re-hydrates the draft from `existing`
   once it arrives, fixing a pre-existing mount-time race right after a fresh signup→login redirect;
   Step 22a2: `setup/4.tsx`'s "Add your own" dish opens the same `SellItemSheet`/`DishRecipeForm` as
-  Settings, not a separate ingredients-free form; Step C2a: `setup/4.tsx` opens on a scan-vs-manual
-  choice card (sectorCopy's `menuScanEnabled`, nothing added yet, no `?mode=manual`) before the
-  existing list+form — "Add one by one" (or `?mode=manual`) shows the form unchanged
+  Settings, not a separate ingredients-free form; Step O1: `setup/4.tsx`'s old scan-vs-manual choice
+  card is gone (moved to `setup/fork.tsx`) — it now always opens straight on the list+form
+- `setup/fork.tsx` — Step O1: "How do you want to set up?", shown once right after step 1 for
+  menuScanEnabled sectors only (`Business.onboarding_path` — `""`/`quick`/`diy` — persists the
+  choice so a reload or "Save and continue later" resumes at the fork, not step 2); "Quick setup
+  from my menu" launches `/menu-scan` directly (before brand/buy are visited); "I'll set it up
+  myself" continues to `setup/2` same as a sector with no fork. `setup/1.tsx`'s Next and
+  `business/routing.ts`'s `nextRouteAfterAuth` both route here instead of `/setup/2` when
+  applicable; `setup/2.tsx`'s Back returns here too, so the path can be switched any time (nothing
+  already added is ever deleted). Existing businesses already past step 2 with no path saved
+  default to DIY silently (resume logic only intercepts exactly at step 2)
 - `menu-scan/index.tsx` (source), `menu-scan/analyzing.tsx`, `menu-scan/review.tsx`, `menu-scan/
-  done.tsx` — Step C2a: the menu-scan flow, reached from onboarding's step 4 choice and Settings'
-  "What you sell" (`?businessId=&returnTo=onboarding|settings`); source picks 1-6 photos (camera/
+  done.tsx` — Step C2a: the menu-scan flow, reached from onboarding's fork and Settings'
+  "What you sell" (`?businessId=&returnTo=onboarding|settings`); Step O1: the onboarding "Back"/
+  cancel paths now point at `/setup/fork` (not `/setup/4`, which no longer offers scan/manual), the
+  AI-unavailable "Add one by one" escape hatch continues at `/setup/2` (brand), and `done.tsx`'s
+  Continue goes to `/setup/2` next (brand hasn't been visited yet in the quick path) with no
+  onboarding PATCH of its own — `setup/3.tsx` shows how many scanned dishes still need ingredients
+  (`recipe_status !== 'confirmed'`) and `setup/4.tsx`'s own Next still marks step 4 done as normal;
+  source picks 1-6 photos (camera/
   gallery, client-resized to ~1600px/JPEG~0.8 via `forms/menuFileValidation.ts`'s
   `resizeImageForUpload`, web-only `forms/filePicker.ts`) or one PDF, POSTs `ai/menu-scans/`; the scan
   id is kept in `screens/menuScanDraft.ts` (web localStorage/native SecureStore) so leaving and

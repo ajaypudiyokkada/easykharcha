@@ -1,4 +1,4 @@
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -9,12 +9,10 @@ import { getOnboardingBusiness } from '../../src/business/routing';
 import { groupItems } from '../../src/forms/groupItems';
 import { sellItemLabel } from '../../src/labels';
 import { SellItemSheet } from '../../src/screens/SellItemSheet';
-import { sectorCopyFor } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import {
   BottomActionBar,
   Body,
-  Button,
   Checkbox,
   GroupedList,
   Icon,
@@ -30,7 +28,6 @@ import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
 const s = strings.setup;
 const s4 = strings.setup.step4;
-const sc = strings.menuScan.choice;
 const sd = strings.dishForm;
 
 export default function SetupStepFour() {
@@ -38,9 +35,7 @@ export default function SetupStepFour() {
   const { status, businesses, authedFetch, refreshMe } = useAuth();
   const onboardingBusiness = getOnboardingBusiness(businesses);
   const twoColumns = useMinWidth(BREAKPOINT_DESKTOP);
-  const params = useLocalSearchParams<{ mode?: string }>();
 
-  const [choice, setChoice] = useState<'scan' | 'manual' | null>(null);
   const [starterPack, setStarterPack] = useState<StarterPack | null>(null);
   const [tickedStarter, setTickedStarter] = useState<Record<string, boolean>>({});
   const [starterPrices, setStarterPrices] = useState<Record<string, string>>({});
@@ -96,67 +91,12 @@ export default function SetupStepFour() {
   const label = sellItemLabel(business.business_type);
   const allItems = items ?? [];
   const addedGroups = groupItems(allItems);
-  const sector = sectorCopyFor(business.business_type);
-
-  // The scan/manual choice only matters for sectors with it enabled, a forced-manual deep link
-  // (the menu-scan flow's "Add one by one" fallback), and a business with nothing added yet — once
-  // there's at least one item (from either path), later visits go straight to the normal list+form.
-  const showChoice =
-    items !== null &&
-    choice === null &&
-    sector.menuScanEnabled &&
-    params.mode !== 'manual' &&
-    allItems.length === 0;
 
   if (items === null) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color={colours.primary} />
       </View>
-    );
-  }
-
-  if (showChoice) {
-    return (
-      <Screen maxWidth={WIZARD_CONTENT_WIDTH}>
-        <StepHeader
-          current={4}
-          total={s.totalSteps}
-          onBack={() => router.push('/setup/3')}
-          onSaveForLater={() => router.replace('/home')}
-        />
-        <Body style={styles.title}>{s4.title}</Body>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={sc.scanTitle(sector.menuNoun)}
-          onPress={() => router.push(`/menu-scan?businessId=${business.id}&returnTo=onboarding`)}
-          style={styles.choiceCard}
-        >
-          <Icon name="scan" size={28} colour={colours.primary} />
-          <View style={styles.choiceCopy}>
-            <View style={styles.choiceTitleRow}>
-              <Body style={styles.choiceTitle}>{sc.scanTitle(sector.menuNoun)}</Body>
-              <View style={styles.recommendedBadge}>
-                <Small style={styles.recommendedText}>{sc.recommended}</Small>
-              </View>
-            </View>
-            <Small style={styles.choiceSubtitle}>{sc.scanSubtitle}</Small>
-          </View>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={sc.manualTitle}
-          onPress={() => setChoice('manual')}
-          style={styles.choiceCard}
-        >
-          <Icon name="edit" size={28} colour={colours.primary} />
-          <View style={styles.choiceCopy}>
-            <Body style={styles.choiceTitle}>{sc.manualTitle}</Body>
-            <Small style={styles.choiceSubtitle}>{sc.manualSubtitle}</Small>
-          </View>
-        </Pressable>
-        <Button label={s.skipForNow} variant="link" onPress={handleSkip} loading={skipping} />
-      </Screen>
     );
   }
 
@@ -434,41 +374,6 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontFamily: fonts.bodyExtraBold,
     fontSize: type.md,
-  },
-  choiceCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-    borderWidth: 2,
-    borderColor: colours.mint,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-  },
-  choiceCopy: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  choiceTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  choiceTitle: {
-    fontFamily: fonts.bodyExtraBold,
-    fontSize: type.md,
-  },
-  choiceSubtitle: {
-    color: colours.muted,
-  },
-  recommendedBadge: {
-    backgroundColor: colours.primary,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  recommendedText: {
-    color: colours.card,
-    fontFamily: fonts.bodyExtraBold,
   },
   field: {
     gap: spacing.sm,

@@ -214,9 +214,10 @@ async function checkServiceWorkerActivated(page) {
   console.log('OK — service worker registered and reached the "activated" state.');
 }
 
-async function signup(page, name, mobile, password) {
+async function signup(page, name, mobile, password, businessName) {
   await page.goto(`${APP_URL}/signup`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await typeInto(page, 'Your name', name);
+  await typeInto(page, 'Business name', businessName);
   await typeInto(page, 'Mobile number', mobile);
   await typeInto(page, 'Password', password);
   const consentBox = await findVisible(page, '[role="checkbox"]');
@@ -266,7 +267,7 @@ async function main() {
     const name = 'PWA Check';
     const mobile = randomMobile();
     const password = `Pwa${Math.floor(1000 + Math.random() * 9000)}!`;
-    await signup(page, name, mobile, password);
+    await signup(page, name, mobile, password, 'PWA Check Business');
     await waitForText(page, 'Account created. Log in to set up your business.');
     await typeInto(page, 'Password', password);
 

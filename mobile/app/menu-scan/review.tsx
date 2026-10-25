@@ -151,7 +151,9 @@ export default function MenuScanReview() {
   }
 
   const sector = sectorCopyFor(business.business_type);
-  const backPath = returnTo === 'settings' ? '/settings/sell' : '/setup/4';
+  // Step O1: abandoning the review goes back to the fork now, the screen this flow was launched
+  // from for onboarding (step 4 no longer offers scan/manual).
+  const backPath = returnTo === 'settings' ? '/settings/sell' : '/setup/fork';
 
   function updateDish(sectionId: string, dishId: string, patch: Partial<DishRow>) {
     setSections((current) =>

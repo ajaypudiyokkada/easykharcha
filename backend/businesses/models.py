@@ -7,6 +7,11 @@ hex_colour_validator = RegexValidator(
 )
 
 
+class OnboardingPath(models.TextChoices):
+    QUICK = "quick", "Quick setup from menu"
+    DIY = "diy", "Set up myself"
+
+
 class BusinessType(models.TextChoices):
     RESTAURANT_CAFE = "restaurant_cafe", "Restaurant or cafe"
     CLOUD_KITCHEN = "cloud_kitchen", "Cloud kitchen"
@@ -38,6 +43,12 @@ class Business(models.Model):
     timezone = models.CharField(max_length=64, default="Asia/Kolkata")
     currency = models.CharField(max_length=8, default="INR")
     onboarding_step = models.PositiveSmallIntegerField(default=1)
+    # Step O1: which way the owner chose at the "How do you want to set up?" fork (between steps 1
+    # and 2, shown only for menuScanEnabled sectors) — "" until chosen, so a reload or "Save and
+    # continue later" resumes at the fork itself rather than silently picking a path.
+    onboarding_path = models.CharField(
+        max_length=10, choices=OnboardingPath.choices, blank=True, default=""
+    )
     onboarding_completed_at = models.DateTimeField(null=True, blank=True)
     # The Owner dismissed /home's "Finish setting up" card — recorded here, not on the device, so it
     # stays dismissed on another phone or after a reinstall too.

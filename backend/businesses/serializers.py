@@ -9,6 +9,7 @@ from .models import (
     SKIPPABLE_ONBOARDING_STEPS,
     Business,
     BusinessType,
+    OnboardingPath,
     OnboardingProgress,
     OnboardingStepStatus,
     hex_colour_validator,
@@ -95,6 +96,7 @@ class BusinessUpdateSerializer(serializers.Serializer):
     tagline = serializers.CharField(max_length=160, required=False, allow_blank=True)
     primary_colour = serializers.CharField(required=False, validators=[validate_brand_colour])
     onboarding_step = serializers.IntegerField(required=False, min_value=1, max_value=6)
+    onboarding_path = serializers.ChoiceField(choices=OnboardingPath.choices, required=False)
     # Write-only: true means "set checklist_dismissed_at to now", not a literal model field.
     dismiss_checklist = serializers.BooleanField(required=False, write_only=True)
     # Write-only: bypasses the pincode/city/state cross-check below, never a model field.
@@ -162,6 +164,7 @@ class BusinessSerializer(serializers.ModelSerializer):
             "timezone",
             "currency",
             "onboarding_step",
+            "onboarding_path",
             "onboarding_completed_at",
             "onboarding",
             "skipped_steps",

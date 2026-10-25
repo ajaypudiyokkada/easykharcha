@@ -16,6 +16,7 @@ import {
   ChangeBusinessTypeSheet,
   type ItemsAction,
 } from '../../src/screens/ChangeBusinessTypeSheet';
+import { sectorCopyFor } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import { BottomActionBar, Body, Icon, Screen, Small, StepHeader } from '../../src/ui';
 import { MIN_TOUCH_TARGET, WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
@@ -169,7 +170,14 @@ export default function SetupStepOne() {
   async function handleNext() {
     pendingAfterRef.current = 'next';
     const business = await save();
-    if (business) router.push('/setup/2');
+    if (!business) return;
+    // Step O1: for sectors that offer a menu scan, the "How do you want to set up?" fork sits
+    // right after this step, before anything else is asked — unless a path was already chosen.
+    if (sectorCopyFor(business.business_type).menuScanEnabled && !business.onboarding_path) {
+      router.push('/setup/fork');
+    } else {
+      router.push('/setup/2');
+    }
   }
 
   async function handleSaveForLater() {

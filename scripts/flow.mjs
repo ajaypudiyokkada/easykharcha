@@ -63,6 +63,7 @@ const STEP23B_SCREEN_DIR = 'docs/screens/step23b';
 const STEP23D_SCREEN_DIR = 'docs/screens/step23d';
 const STEP25C2A_SCREEN_DIR = 'docs/screens/step25c2a';
 const STEP25C2A_FIXTURE_IMAGE = resolvePath('docs/images/ek_logo_icon.png');
+const STEPO1_SCREEN_DIR = 'docs/screens/stepo1';
 // Step C2c: a 1-page PDF carrying the AI_FAKE-only FORCE_NEVER_FINISH marker (ai/views.py) — the
 // scan it starts stays queued forever, used below to prove the Analyzing screen's stuck-scan UI.
 // Must be a PDF, not a photo: a photo upload is always resized/re-encoded client-side before it
@@ -224,11 +225,33 @@ async function fillPincodeLocation(page, pincode) {
 
 // Step F2: the business name is already shown (and editable via its own Change link) from the
 // signup value — this step only fills in what signup doesn't ask for.
-async function fillStepOne(page, pincode, typeLabel) {
+// Step O1: `path` resolves the quick/DIY fork shown after Next for menuScanEnabled sectors
+// ('diy', the default, lands on step 2 exactly as every caller already expected before the fork
+// existed; 'quick' launches the scan flow instead). Sectors without the fork ignore `path`.
+async function fillStepOne(page, pincode, typeLabel, path = 'diy', forkScreenshotPath) {
   await fillPincodeLocation(page, pincode);
   await clickAndSettle(await findVisibleByText(page, 'radio', typeLabel));
   await clickButton(page, 'Next');
-  await waitForPath(page, '/setup/2');
+  const landed = await retryUntil(async () => {
+    const p = await page.evaluate(() => location.pathname);
+    return p === '/setup/2' || p === '/setup/fork' ? p : null;
+  });
+  if (landed === '/setup/fork') await passFork(page, path, forkScreenshotPath);
+}
+
+// Step O1: "How do you want to set up?" — shown once, right after step 1, only for sectors with
+// menuScanEnabled. 'quick' opens the scan flow; 'diy' continues to step 2 (brand) same as a
+// sector with no fork at all.
+async function passFork(page, path, screenshotPath) {
+  await waitForText(page, 'How do you want to set up?');
+  if (screenshotPath) await page.screenshot({ path: screenshotPath });
+  if (path === 'quick') {
+    await clickAndSettle(await findVisible(page, '[aria-label="Quick setup from my menu"]'));
+    await waitForPath(page, '/menu-scan');
+  } else {
+    await clickAndSettle(await findVisible(page, "[aria-label=\"I'll set it up myself\"]"));
+    await waitForPath(page, '/setup/2');
+  }
 }
 
 async function waitForPreviewColour(page, businessName, expectedHex) {
@@ -1381,10 +1404,13 @@ async function checkSectorChangeFlow(page) {
   await logoutFromAnywhere(page);
 }
 
-// Step C2a: the menu-scan flow — the onboarding "What you sell" choice screen, uploading a photo
-// (AI_FAKE's canned menu: 3 dishes + 1 addon), the Analyzing screen, the Review screen (untick one,
-// edit a price, add a dish by hand), saving, and the Done screen. restaurant_cafe has the choice
-// enabled (menuScanEnabled); AI_FAKE's default canned menu needs no special marker file.
+// Step C2a/O1: the menu-scan flow — the onboarding fork's "Quick setup from my menu" card,
+// uploading a photo (AI_FAKE's canned menu: 3 dishes + 1 addon), the Analyzing screen, the Review
+// screen (untick one, edit a price, add a dish by hand), saving, and the Done screen, then brand
+// and "What you buy" (showing how many scanned dishes still need ingredients) and "What you sell"
+// (already populated, no choice card — that moved to the fork). restaurant_cafe has the fork
+// enabled (menuScanEnabled); AI_FAKE's default canned menu needs no special marker file. The
+// Step C2c stuck-scan case (Settings' own entry point) is checkMenuScanStuckFlow, kept separate.
 async function checkMenuScanFlow(page) {
   await mkdir(STEP25C2A_SCREEN_DIR, { recursive: true });
   const name = 'Menu Scan Flow';
@@ -1395,20 +1421,16 @@ async function checkMenuScanFlow(page) {
   await login(page, mobile, password);
   await waitForPath(page, '/setup/1');
 
-  await fillStepOne(page, '411001', 'Restaurant or cafe');
-  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
-  await clickButton(page, 'Next');
-  await waitForPath(page, '/setup/3');
-  await clickButton(page, 'Skip for now');
-  await waitForPath(page, '/setup/4');
-  console.log('OK — onboarded a restaurant_cafe business, reached step 4 with nothing added yet.');
-
-  // === Choice screen: "Scan or upload your menu" is offered first, recommended ===
-  await waitForText(page, 'Scan or upload your menu');
-  await waitForText(page, 'Add one by one');
-  await clickAndSettle(await findVisible(page, '[aria-label="Scan or upload your menu"]'));
-  await waitForPath(page, '/menu-scan');
-  console.log('OK — the choice screen opens, and "Scan or upload your menu" goes to the scan flow.');
+  // === Step O1: the fork, right after step 1 — "Quick setup from my menu" opens the scan flow
+  // immediately, before brand/buy are ever visited ===
+  await fillStepOne(
+    page,
+    '411001',
+    'Restaurant or cafe',
+    'quick',
+    `${STEP25C2A_SCREEN_DIR}/fork-390.png`,
+  );
+  console.log('OK — onboarded a restaurant_cafe business and chose the quick-setup fork.');
 
   // === Source screen: choose a photo (a real file-chooser dialog, via Puppeteer's interception) ===
   await waitForText(page, 'Scan your menu');
@@ -1469,13 +1491,45 @@ async function checkMenuScanFlow(page) {
   console.log(`OK — saved Step C2a screenshots at 390px to ${STEP25C2A_SCREEN_DIR}/.`);
 
   await clickButton(page, 'Continue');
-  await waitForPath(page, '/setup/5');
-  console.log('OK — Continue resumes the onboarding wizard at step 5.');
+  // Step O1: the quick path reaches brand (step 2) next, not step 5 — scanning happens before
+  // brand now, so nothing about step 2 itself changes.
+  await waitForPath(page, '/setup/2');
+  console.log('OK — Continue resumes the onboarding wizard at step 2 (brand).');
 
-  // === Step C2c: a scan that never finishes shows the "taking longer than usual" escape hatch ===
-  // (started from the same business via the Settings entry point). The web dev server can be
-  // started with EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS set small to make this fast; against the real
-  // 3-minute default (analyzing.tsx's STUCK_AFTER_MS) this just waits it out instead.
+  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+  await waitForText(page, 'still need ingredients');
+  console.log('OK — Step O1: step 3 names how many scanned dishes still need ingredients.');
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, '/setup/4');
+  await waitForText(page, 'Fake Dish 2');
+  await waitForText(page, 'Mango Kulfi');
+  console.log('OK — Step O1: step 4 already lists the scanned dishes, with no choice card.');
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, '/setup/5');
+
+  await logoutFromAnywhere(page);
+}
+
+// Step C2c: a scan that never finishes shows the "taking longer than usual" escape hatch, from
+// Settings' entry point (a fresh business, signed up and onboarded just far enough — business_type
+// set — to reach /menu-scan?returnTo=settings; the quick-path onboarding scan itself is
+// checkMenuScanFlow's own concern, kept separate here, same split as the rest of this file's
+// scenarios). The web dev server can be started with EXPO_PUBLIC_MENU_SCAN_STUCK_AFTER_MS set small
+// to make this fast; against the real 3-minute default (analyzing.tsx's STUCK_AFTER_MS) this just
+// waits it out instead.
+async function checkMenuScanStuckFlow(page) {
+  await mkdir(STEP25C2A_SCREEN_DIR, { recursive: true });
+  const name = 'Menu Scan Stuck';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password, 'Stuck Scan Diner');
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+  await fillStepOne(page, '411001', 'Restaurant or cafe', 'diy');
+
   await page.goto(`${APP_URL}/menu-scan?returnTo=settings`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Scan your menu');
   const [stuckFileChooser] = await Promise.all([
@@ -1498,6 +1552,49 @@ async function checkMenuScanFlow(page) {
   await clickButton(page, 'Add one by one');
   await waitForPath(page, '/settings/sell');
   console.log('OK — "Add one by one" from the stuck screen returns to Settings.');
+
+  await logoutFromAnywhere(page);
+}
+
+// Step O1: the DIY side of the fork — "I'll set it up myself" on a menuScanEnabled sector
+// (bakery_sweets) lands on brand exactly like a sector with no fork at all, step 3 shows its
+// default (non-quick) copy, and step 4 opens straight on the manual form, never the old
+// scan/manual choice card (that moved to the fork).
+async function checkOnboardingDiyFlow(page) {
+  await mkdir(STEPO1_SCREEN_DIR, { recursive: true });
+  const name = 'Onboarding DIY Flow';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password, 'Mishra Sweets');
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+
+  await fillStepOne(
+    page,
+    '400001',
+    'Bakery or sweets',
+    'diy',
+    `${STEPO1_SCREEN_DIR}/fork-390.png`,
+  );
+  console.log('OK — Step O1: "I\'ll set it up myself" on the fork lands on step 2 (brand).');
+
+  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+  const hasQuickCopy = await page.evaluate(() =>
+    document.body.innerText.includes('still need ingredients'),
+  );
+  if (hasQuickCopy) {
+    fail('onboarding-diy: step 3 shows the quick-path "still need ingredients" copy on the DIY path');
+  }
+  await waitForText(page, 'Add what you buy first');
+  console.log('OK — Step O1: step 3 shows its default copy, not the quick-path one, on the DIY path.');
+
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, '/setup/4');
+  await waitForText(page, 'Add your own');
+  console.log('OK — Step O1: step 4 opens straight on the manual form on the DIY path too.');
 
   await logoutFromAnywhere(page);
 }
@@ -1532,7 +1629,9 @@ const FLOW_SCENARIOS = [
   { name: 'step10-screens', kind: 'solo' },
   { name: 'step12-screens', kind: 'chain' },
   { name: 'step13-screens', kind: 'chain' },
-  { name: 'menu-scan', kind: 'solo' },
+  { name: 'onboarding-menu', kind: 'solo' },
+  { name: 'onboarding-diy', kind: 'solo' },
+  { name: 'menu-scan-stuck', kind: 'solo' },
 ];
 
 function parseFlowArgs() {
@@ -1639,8 +1738,10 @@ async function main() {
     await waitForText(page, 'Change');
     console.log('OK — step 1 shows the signup business name, not an input asking for it again.');
 
-    await fillStepOne(page, '411001', 'Cloud kitchen');
-    console.log('OK — step 1 saved, moved to /setup/2.');
+    // Step O1: cloud_kitchen has the fork (menuScanEnabled) — 'diy' resolves it the same way
+    // every pre-fork caller already expected, landing on step 2 directly.
+    await fillStepOne(page, '411001', 'Cloud kitchen', 'diy');
+    console.log('OK — step 1 saved, chose the DIY fork, moved to /setup/2.');
 
     await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
     await waitForPreviewColour(page, "Anita's Kitchen", '#8E3B6E');
@@ -1697,13 +1798,9 @@ async function main() {
     await page.goto(`${APP_URL}/setup/4`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
     await waitForPath(page, '/setup/4');
 
-    // Step C2a: cloud_kitchen has the menu-scan choice enabled and nothing's been added yet, so
-    // step 4 opens on the scan/manual choice card instead of the form directly — "Add one by one"
-    // is this scenario's unchanged, pre-C2a path.
-    await waitForText(page, 'Add one by one');
-    await clickAndSettle(await findVisible(page, '[aria-label="Add one by one"]'));
-    console.log('OK — Step C2a: "Add one by one" on the choice screen opens the manual form.');
-
+    // Step O1: the scan/manual choice moved to the fork (already resolved to DIY above), so step 4
+    // opens straight on the manual form now, even for a menuScanEnabled sector like cloud_kitchen.
+    //
     // Step 22a2: the wizard's "Add your own" dish form now opens the same DishRecipeForm sheet as
     // Settings' "What you sell" — a dish can't be saved here without at least one real ingredient
     // either. The starter-pack tick below (Veg biryani) is still the no-ingredients path, reused by
@@ -1993,9 +2090,17 @@ async function main() {
       await timed('step13-screens', async () => {
     await captureStep13Screens(page, mobile, password, 'Chef Rahul');
       });
-    if (shouldRun('menu-scan'))
-      await timed('menu-scan', async () => {
+    if (shouldRun('onboarding-menu'))
+      await timed('onboarding-menu', async () => {
     await checkMenuScanFlow(page);
+      });
+    if (shouldRun('onboarding-diy'))
+      await timed('onboarding-diy', async () => {
+    await checkOnboardingDiyFlow(page);
+      });
+    if (shouldRun('menu-scan-stuck'))
+      await timed('menu-scan-stuck', async () => {
+    await checkMenuScanStuckFlow(page);
       });
 
     console.log(only ? `\nOK — scenario "${only}" passed.` : '\nAll flow checks passed.');

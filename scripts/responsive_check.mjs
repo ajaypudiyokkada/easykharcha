@@ -60,7 +60,8 @@ const MAX_CHARS_IN_NARROW_BOX = 6;
 const SCREEN_MANIFEST = {
   none: ['landing', 'login', 'signup', 'not-found', 'offline-login'],
   owner: [
-    'setup-1', 'setup-2', 'setup-3', 'setup-4', 'setup-5', 'setup-6', 'setup-done', 'home-owner',
+    'setup-1', 'setup-fork', 'setup-2', 'setup-3', 'setup-4', 'setup-5', 'setup-6', 'setup-done',
+    'home-owner',
     'buy', 'buy-detail', 'stock', 'stock-detail', 'reports', 'reports-30d', 'sales', 'wastage',
     'alerts', 'alert-detail', 'team', 'team-detail', 'settings', 'settings-business',
     'settings-brand', 'settings-stock', 'settings-sell', 'settings-alerts', 'count', 'counts',
@@ -525,6 +526,10 @@ async function buildOwnerSession(page) {
   await waitForText(page, 'Karnataka');
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Cloud kitchen'));
   await clickButton(page, 'Next');
+  // Step O1: cloud_kitchen has the "How do you want to set up?" fork — "I'll set it up myself"
+  // resolves it the same way this session always continued, landing on step 2 (brand).
+  await waitForText(page, 'How do you want to set up?');
+  await clickAndSettle(await findVisible(page, "[aria-label=\"I'll set it up myself\"]"));
   await waitForPath(page, '/setup/2');
 
   await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
@@ -543,11 +548,9 @@ async function buildOwnerSession(page) {
   await clickButton(page, '2 selected — Next');
   await waitForPath(page, '/setup/4');
 
-  // Step C2a: cloud_kitchen has the menu-scan choice enabled and nothing's been added yet, so step 4
-  // opens on the scan/manual choice card — "Add one by one" is this session's unchanged path.
-  await waitForText(page, 'Add one by one');
-  await clickAndSettle(await findVisible(page, '[aria-label="Add one by one"]'));
-
+  // Step O1: the scan/manual choice moved to the fork (already resolved above), so step 4 opens
+  // straight on the manual form now, even for a menuScanEnabled sector like cloud_kitchen.
+  //
   // Step 22a2: ticking a starter item is still the no-ingredients quick path; "Add menu item" opens
   // the full DishRecipeForm sheet (portion + at least one real ingredient) for a hand-added dish.
   await waitForText(page, 'Add your own');
@@ -1009,6 +1012,7 @@ async function main() {
     ];
     const ownerRoutes = [
       { name: 'setup-1', url: `${APP_URL}/setup/1` },
+      { name: 'setup-fork', url: `${APP_URL}/setup/fork` },
       { name: 'setup-2', url: `${APP_URL}/setup/2` },
       { name: 'setup-3', url: `${APP_URL}/setup/3` },
       { name: 'setup-4', url: `${APP_URL}/setup/4` },
