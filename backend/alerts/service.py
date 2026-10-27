@@ -19,6 +19,7 @@ from counts.business_day import business_date_for, has_any_count
 from counts.gap import lines_with_gap, unit_cost_for
 from counts.models import CountLine, CountLineState, CountType, StockCount
 from purchases.models import PurchaseLine
+from stock.low_stock import avg_daily_expected_usage, effective_threshold, estimated_stock_now
 from stock.units import display_price_per_major_unit, display_quantities, display_quantity
 from wastage.models import WastageEntry
 
@@ -40,6 +41,7 @@ ALERT_TYPES = (
     "wastage_high",
     "gap_flagged",
     "expiry_soon",
+    "low_stock",
 )
 
 # Danger alerts (price_rise, gap_flagged) sort ahead of warnings (count_late, wastage_high); within
@@ -433,6 +435,58 @@ def _expiry_soon_alerts(business: Business) -> list[dict]:
     return alerts
 
 
+def _low_stock_alerts(business: Business) -> list[dict]:
+    """Step 41b1b3a: one alert per active stock item whose estimated stock now is below its
+    effective threshold — the alert text deliberately carries no money (see
+    docs/BASES_PLAN.md sec 8.3); the shopping list / low-stock read path is the only place a
+    shortfall's ₹ value is shown, and only to a caller who can already see money elsewhere."""
+    today = _business_today(business)
+    alerts = []
+    for item in business.stock_items.filter(active=True):
+        estimate_info = estimated_stock_now(business, item)
+        if estimate_info is None:
+            continue
+        avg_daily_usage = avg_daily_expected_usage(business, item, today)
+        threshold = effective_threshold(item, avg_daily_usage)
+        if threshold is None:
+            continue
+        estimate = estimate_info["estimate"]
+        if estimate >= threshold:
+            continue
+
+        severity = "danger" if estimate <= ZERO else "warning"
+        display, display_unit = display_quantities(
+            {"estimate": estimate, "threshold": threshold}, item.unit
+        )
+        coverage_pct = estimate_info["coverage_pct"]
+        alerts.append(
+            {
+                "key": f"low_stock:{item.id}:{today.isoformat()}",
+                "type": "low_stock",
+                "title": f"{item.name} is running low",
+                "detail": (
+                    f"About {display['estimate']} {display_unit} left, below the "
+                    f"{display['threshold']} {display_unit} threshold."
+                ),
+                "severity": severity,
+                "numbers": {
+                    "estimated_qty": str(display["estimate"]),
+                    "threshold_qty": str(display["threshold"]),
+                    "unit": display_unit,
+                    "is_estimate": True,
+                    "coverage_pct": (
+                        str(coverage_pct.quantize(Decimal("0.01")))
+                        if coverage_pct is not None
+                        else None
+                    ),
+                },
+                "next_action": {"label": f"Open {item.name}", "route": f"/stock/{item.id}"},
+                "value": ZERO,
+            }
+        )
+    return alerts
+
+
 def compute_alerts(business: Business, role: str | None = None) -> list[dict]:
     """Every currently-true alert for `business`, sorted by severity then rupee value — regardless
     of whether it's already been checked (see `open_alerts` for that)."""
@@ -442,6 +496,7 @@ def compute_alerts(business: Business, role: str | None = None) -> list[dict]:
         *_wastage_high_alerts(business),
         *_gap_flagged_alerts(business),
         *_expiry_soon_alerts(business),
+        *_low_stock_alerts(business),
     ]
     alerts.sort(key=lambda alert: (SEVERITY_RANK.get(alert["severity"], 1), -alert["value"]))
     for alert in alerts:

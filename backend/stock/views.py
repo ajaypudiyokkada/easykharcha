@@ -13,14 +13,17 @@ from audit.log import jsonable, log_action
 from businesses.access import owner_access_or_403
 from businesses.models import Business
 from businesses.permissions import access_or_403, permissions_for, require_permission
+from counts.gap import unit_cost_for
 from counts.models import CountLine, CountLineState
 from purchases.models import Purchase, PurchaseLine
 from purchases.serializers import PurchaseSerializer
 from wastage.models import WastageEntry
 
 from .exceptions import BulkValidationError, StockItemInUse, StockItemUnitLocked, TooManyRows
+from .low_stock import default_category_for, low_stock_rows
 from .models import RecipeStatus, SellItem, SellItemIngredient, StockItem
 from .serializers import (
+    LOW_STOCK_THRESHOLD_FIELDS,
     SellItemCreateSerializer,
     SellItemRowSerializer,
     SellItemSerializer,
@@ -29,7 +32,12 @@ from .serializers import (
     StockItemSerializer,
     StockItemUpdateSerializer,
 )
-from .units import UnitEntryError, convert_entry_quantity, display_price_per_major_unit
+from .units import (
+    UnitEntryError,
+    convert_entry_quantity,
+    display_price_per_major_unit,
+    display_quantities,
+)
 
 PRICE_HISTORY_POINTS = 12
 RECENT_PURCHASES = 5
@@ -164,7 +172,8 @@ class StockItemDetailView(APIView):
 
     def patch(self, request, business_id, item_id):
         business = get_object_or_404(Business, id=business_id)
-        require_permission(business, request.user, "stockitems.manage")
+        access = access_or_403(business, request.user)
+        perms = permissions_for(access.role)
         item = get_object_or_404(
             _with_last_count_info(_with_last_purchase_info(business.stock_items)), id=item_id
         )
@@ -172,6 +181,19 @@ class StockItemDetailView(APIView):
         serializer = StockItemUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+
+        # Step 41b1b3a: the three threshold fields are gated on a narrower permission (Manager has
+        # it, the rest of this endpoint's fields it doesn't) — a request touching either group
+        # without the matching permission is refused outright, same "all or nothing" shape as any
+        # other permission check here.
+        requested_fields = set(data.keys())
+        if (
+            requested_fields & LOW_STOCK_THRESHOLD_FIELDS
+            and "stockitems.thresholds_manage" not in perms
+        ):
+            raise PermissionDenied()
+        if requested_fields - LOW_STOCK_THRESHOLD_FIELDS and "stockitems.manage" not in perms:
+            raise PermissionDenied()
 
         if "name" in data:
             clash = business.stock_items.exclude(id=item.id).filter(name__iexact=data["name"])
@@ -268,6 +290,7 @@ class StockItemBulkCreateView(APIView):
                 continue
             seen_in_call.add(key)
             data["group"] = _canonical_group(seen_groups, data["group"])
+            data["low_stock_category"] = default_category_for(data["goes_off"])
             cleaned.append(data)
 
         if row_errors:
@@ -498,3 +521,53 @@ class SellItemDetailView(APIView):
         )
         item = _with_ingredients(business.sell_items).get(id=item.id)
         return Response(SellItemSerializer(item).data)
+
+
+class LowStockListView(APIView):
+    """Step 41b1b3a: every active stock item below its effective low-stock threshold, doubling as
+    the shopping list (`suggested_order_qty` per row), grouped by stock group. `stock.low_stock_view`
+    (Head chef, in addition to Owner/Manager) sees quantities/thresholds only; a caller who can also
+    manage thresholds or view alerts additionally sees each row's shortfall value in ₹."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = get_object_or_404(Business, id=business_id)
+        access = access_or_403(business, request.user)
+        perms = permissions_for(access.role)
+        can_see_money = "stockitems.thresholds_manage" in perms or "alerts.view" in perms
+        if not (can_see_money or "stock.low_stock_view" in perms):
+            raise PermissionDenied()
+
+        grouped: dict[str, list] = {}
+        results = []
+        for row in low_stock_rows(business):
+            item = row["stock_item"]
+            display, display_unit = display_quantities(
+                {
+                    "estimated_stock_now": row["estimate"],
+                    "threshold": row["threshold"],
+                    "suggested_order_qty": row["suggested_order_qty"],
+                },
+                item.unit,
+            )
+            entry = {
+                "stock_item": item.id,
+                "name": item.name,
+                "group": item.group,
+                "unit": display_unit,
+                "estimated_stock_now": display["estimated_stock_now"],
+                "threshold": display["threshold"],
+                "suggested_order_qty": display["suggested_order_qty"],
+                "is_estimate": row["is_estimate"],
+                "coverage_pct": row["coverage_pct"],
+            }
+            if can_see_money:
+                unit_cost = unit_cost_for(item)
+                entry["shortfall_value"] = (
+                    (row["suggested_order_qty"] * unit_cost) if unit_cost is not None else None
+                )
+            results.append(entry)
+            grouped.setdefault(item.group or "Ungrouped", []).append(entry)
+
+        return Response({"results": results, "grouped": grouped})

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    LowStockListView,
     SellItemBulkCreateView,
     SellItemDetailView,
     SellItemListView,
@@ -24,6 +25,11 @@ urlpatterns = [
         "businesses/<int:business_id>/stock-items/<int:item_id>/",
         StockItemDetailView.as_view(),
         name="stock-item-detail",
+    ),
+    path(
+        "businesses/<int:business_id>/stock/low-stock/",
+        LowStockListView.as_view(),
+        name="low-stock-list",
     ),
     path(
         "businesses/<int:business_id>/sell-items/",

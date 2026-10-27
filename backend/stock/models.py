@@ -40,6 +40,20 @@ class Unit(models.TextChoices):
     BOTTLE = "bottle", "bottle"
 
 
+class LowStockCategory(models.TextChoices):
+    """Step 41b1b3a (docs/BASES_PLAN.md sec 8.3): the default days-of-cover a stock item's low-stock
+    threshold rests on when no per-item override is set — see stock/low_stock.py's
+    LOW_STOCK_CATEGORY_DEFAULT_DAYS. New rows default from `goes_off` (True -> PERISHABLE, False ->
+    DRY_STAPLES, the same binary split the base-unit/goes_off migrations already use) — FRESH_SEMI
+    and PACKAGING_CLEANING only ever come from an explicit Owner/Manager choice via the thresholds
+    endpoint."""
+
+    PERISHABLE = "perishable", "Perishable"
+    FRESH_SEMI = "fresh_semi", "Fresh / semi-perishable"
+    DRY_STAPLES = "dry_staples", "Dry staples"
+    PACKAGING_CLEANING = "packaging_cleaning", "Packaging and cleaning"
+
+
 class StockItem(models.Model):
     """Something a business buys. No recipes, quantities or costing here yet — just what it is."""
 
@@ -73,6 +87,19 @@ class StockItem(models.Model):
     # business's other stock-item groups in the view (see stock/views.py's _canonical_group), the
     # same split as name-uniqueness: format-only here, anything needing a query lives in the view.
     group = models.CharField(max_length=40, blank=True, default="")
+    # Step 41b1b3a: low-stock threshold inputs — see stock/low_stock.py for how they combine into
+    # an effective threshold. `low_stock_category` picks the default days of cover
+    # (LOW_STOCK_CATEGORY_DEFAULT_DAYS); `low_stock_days_override` replaces that default for this
+    # one item; `low_stock_fixed_qty` (base units) is an absolute floor, used instead of the
+    # days-of-cover figure whenever it's larger (or whenever there's no usage data yet to compute
+    # days-of-cover from at all).
+    low_stock_category = models.CharField(
+        max_length=20, choices=LowStockCategory.choices, default=LowStockCategory.DRY_STAPLES
+    )
+    low_stock_days_override = models.PositiveIntegerField(null=True, blank=True)
+    low_stock_fixed_qty = models.DecimalField(
+        max_digits=10, decimal_places=3, null=True, blank=True
+    )
     active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="stock_items_created"
