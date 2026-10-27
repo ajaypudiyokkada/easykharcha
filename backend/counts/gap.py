@@ -11,7 +11,8 @@ from django.utils import timezone
 from businesses.models import Business
 from purchases.models import PurchaseLine
 from sales.models import Sale
-from stock.models import RecipeStatus, SellItemIngredient
+from stock.base_expansion import quantity_per_portion_by_sell_item
+from stock.models import RecipeStatus
 from stock.units import display_quantities
 from wastage.models import WastageEntry
 
@@ -96,26 +97,30 @@ def gap_for_line(
     if prev_count is None or used_since_last_count is None:
         return {**empty, "gap_reason": {"code": "no_previous_count"}}
 
-    ingredient_rows = list(
-        SellItemIngredient.objects.filter(
-            stock_item=stock_item, sell_item__business=business, sell_item__active=True
-        ).select_related("sell_item")
-    )
-    if not ingredient_rows:
+    # U2b1b2 (docs/BASES_PLAN.md secs 1-2, 8.2): per sell item, how much of this stock item one
+    # portion uses — already folding in both a dish's own direct ingredient line and, one level
+    # down, every base it uses that contains this stock item. The rest of this function (sales
+    # lookup, confirmed/unconfirmed split, expected_used sum) doesn't care which path it came from.
+    quantity_by_sell_item = quantity_per_portion_by_sell_item(business, stock_item)
+    if not quantity_by_sell_item:
         return {**empty, "gap_reason": {"code": "not_sold"}}
 
     # U2b1b1 (docs/BASES_PLAN.md secs 1-2): a dish whose recipe isn't confirmed (a future AI
     # estimate still awaiting review) no longer blocks this stock item outright — its expected
     # usage counts toward the coverage split below instead, same "at least one real line" spirit
     # as before but graduated instead of all-or-nothing. A NONE-status dish never reaches here at
-    # all: it has no ingredient rows by construction (RecipeStatus's own docstring), so it never
-    # contributes to either sum.
-    confirmed_rows = [
-        row for row in ingredient_rows if row.sell_item.recipe_status == RecipeStatus.CONFIRMED
-    ]
-    unconfirmed_rows = [
-        row for row in ingredient_rows if row.sell_item.recipe_status == RecipeStatus.UNCONFIRMED
-    ]
+    # all: it has no ingredient/base rows by construction (RecipeStatus's own docstring), so it
+    # never contributes to either sum.
+    confirmed_items = {
+        sell_item: qty
+        for sell_item, qty in quantity_by_sell_item.items()
+        if sell_item.recipe_status == RecipeStatus.CONFIRMED
+    }
+    unconfirmed_items = {
+        sell_item: qty
+        for sell_item, qty in quantity_by_sell_item.items()
+        if sell_item.recipe_status == RecipeStatus.UNCONFIRMED
+    }
 
     window_start, window_end = gap_window(business, prev_count, count)
     window_dates = []
@@ -143,24 +148,24 @@ def gap_for_line(
                 },
             }
 
-    def _expected(rows) -> Decimal:
+    def _expected(items: dict) -> Decimal:
         total = ZERO
-        for row in rows:
+        for sell_item, qty_per_portion in items.items():
             units_sold = (
                 Sale.objects.filter(
                     business=business,
-                    sell_item=row.sell_item,
+                    sell_item=sell_item,
                     is_deleted=False,
                     business_date__gte=window_start,
                     business_date__lte=window_end,
                 ).aggregate(total=Sum("quantity"))["total"]
                 or ZERO
             )
-            total += units_sold * row.quantity
+            total += units_sold * qty_per_portion
         return total
 
-    confirmed_expected = _expected(confirmed_rows)
-    unconfirmed_expected = _expected(unconfirmed_rows)
+    confirmed_expected = _expected(confirmed_items)
+    unconfirmed_expected = _expected(unconfirmed_items)
     denominator = confirmed_expected + unconfirmed_expected
     if denominator == ZERO:
         return {**empty, "gap_reason": {"code": "low_recipe_coverage", "coverage_pct": None}}
