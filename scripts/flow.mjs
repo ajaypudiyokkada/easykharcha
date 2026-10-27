@@ -65,6 +65,7 @@ const STEP25C2A_SCREEN_DIR = 'docs/screens/step25c2a';
 const STEP25C2A_FIXTURE_IMAGE = resolvePath('docs/images/ek_logo_icon.png');
 const STEPO1_SCREEN_DIR = 'docs/screens/stepo1';
 const STEP44V1_SCREEN_DIR = 'docs/screens/step44v1';
+const STEP45B1C2B_SCREEN_DIR = 'docs/screens/step45b1c2b';
 // Step C2c: a 1-page PDF carrying the AI_FAKE-only FORCE_NEVER_FINISH marker (ai/views.py) — the
 // scan it starts stays queued forever, used below to prove the Analyzing screen's stuck-scan UI.
 // Must be a PDF, not a photo: a photo upload is always resized/re-encoded client-side before it
@@ -1633,6 +1634,7 @@ async function checkOnboardingDiyFlow(page) {
 // step (add a Delete button + confirm dialog + 409-unlink handling to BaseSheet), not a fix here.
 async function checkBasesFlow(page) {
   await mkdir(STEP44V1_SCREEN_DIR, { recursive: true });
+  await mkdir(STEP45B1C2B_SCREEN_DIR, { recursive: true });
   const name = 'Bases Owner';
   const mobile = randomMobile();
   const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
@@ -1743,12 +1745,66 @@ async function checkBasesFlow(page) {
   await waitForText(page, 'Edit dish');
   await waitForText(page, 'Paneer');
   await waitForText(page, 'Onion-tomato masala');
+  await waitForText(
+    page,
+    'This dish uses about 90 g Onion, 80 g Tomato, 18 g Cooking oil, 8 g Cashew, 4 g Garam masala through the base.',
+  );
   console.log(
-    'OK — reopened the dish; both lines are there (the direct Paneer ingredient and the batch recipe).',
+    'OK — reopened the dish; both lines are there (the direct Paneer ingredient and the batch recipe), with the raw-equivalent note.',
   );
   await (await findVisible(page, '[aria-label="Close"]')).click();
 
-  console.log(`OK — saved Step 44v1 bases screenshots to ${STEP44V1_SCREEN_DIR}/.`);
+  // === Step 45b1c2b: record a sale of Paneer Masala, see Home's revenue-weighted coverage banner,
+  // follow it to the needs-ingredients dish list ===
+  await page.goto(`${APP_URL}/sales`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Sales');
+  await clickButton(page, 'Record sales');
+  await waitForText(page, 'What did you sell?');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Paneer Masala'));
+  await typeInto(page, 'How many', '1');
+  await clickButton(page, 'Save sales');
+  await waitForText(page, 'Sales saved');
+  console.log('OK — recorded a sale of Paneer Masala (a confirmed recipe).');
+
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Recipes cover 100.0% of your sales');
+  await page.setViewport({ width: 390, height: 2400 });
+  await page.screenshot({ path: `${STEP45B1C2B_SCREEN_DIR}/home-coverage-banner-390.png` });
+  await clickAndSettle(
+    await findVisible(page, '[aria-label="Recipes cover 100.0% of your sales"]'),
+  );
+  await waitForText(page, 'Needs ingredients');
+  console.log('OK — tapping the coverage banner opens the needs-ingredients dish list.');
+
+  // === Base "Used in" screen: open from the base sheet, edit the dish's grams, save ===
+  await page.goto(`${APP_URL}/settings/bases`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Onion-tomato masala');
+  await (await findVisible(page, '[aria-label="Onion-tomato masala"]')).click();
+  await waitForText(page, 'Edit batch recipe');
+  await clickButton(page, 'Used in 1 dish · See which dishes use this');
+  await waitForText(page, 'Dishes that use Onion-tomato masala');
+  await waitForText(page, 'Paneer Masala');
+  await page.screenshot({ path: `${STEP45B1C2B_SCREEN_DIR}/base-used-in-390.png` });
+  await typeInto(page, 'Amount per portion (g)', '250', { last: true });
+  await clickButton(page, 'Save');
+  await waitForText(page, 'Updated which dishes use this batch recipe');
+  console.log(
+    "OK — opened the base's own Used-in screen, edited Paneer Masala's amount to 250g, saved.",
+  );
+
+  // === Delete the base while it's in use ===
+  await page.goto(`${APP_URL}/settings/bases`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Onion-tomato masala');
+  await (await findVisible(page, '[aria-label="Onion-tomato masala"]')).click();
+  await waitForText(page, 'Edit batch recipe');
+  await clickButton(page, 'Delete');
+  await waitForText(page, 'Used in 1 dish. Deleting removes it from them.');
+  await page.screenshot({ path: `${STEP45B1C2B_SCREEN_DIR}/base-delete-confirm-390.png` });
+  await clickButton(page, 'Delete', { last: true });
+  await waitForText(page, 'Batch recipe deleted');
+  console.log('OK — deleted the in-use batch recipe after confirming; it is gone from the list.');
+
+  console.log(`OK — saved Step 44v1/45b1c2b bases screenshots.`);
   await logoutFromAnywhere(page);
 }
 

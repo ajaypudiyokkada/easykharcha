@@ -236,7 +236,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   done shows the count and continues onboarding or returns to Settings
 - `setup/done.tsx` — wizard summary, "still to do" list
 - `home.tsx` — Home: OwnerHome (Owner/Manager) or TodayHome (Head chef/Helper), role-branched; Step
-  23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`
+  23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`; Step
+  45b1c2b's "Recipes cover X% of your sales" banner (`reports.view`, reuses `reports/summary/
+  ?period=30d`'s `recipe_coverage_pct` — no new endpoint), tapping it opens `/settings/sell?
+  filter=needs_ingredients`
 - `buy/index.tsx` — Purchases list + today/7-day summary
 - `buy/[id].tsx` — Purchase detail, edit, delete
 - `stock/index.tsx` — Stock list; Step 43b1c2a added a "Low stock & shopping list" link
@@ -277,8 +280,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   and `?edit=<id>` query params drive it from Home's nudge and a count-gap reason link; Step
   42b1c1's `DishRecipeForm` "use a batch recipe" section is wired in here (fetches `bases/`); `setup/
   4.tsx`'s own dish form doesn't pass `bases` yet, so that picker stays hidden there; `settings/
-  bases.tsx` — Step 42b1c1: "Things you make in batches" list + add/edit sheet (`BaseSheet`/
-  `BaseRecipeForm`), Owner-only; `settings/alerts.tsx` — the 6 alert settings (Step 18 added
+  bases/index.tsx` — Step 42b1c1: "Things you make in batches" list + add/edit sheet (`BaseSheet`/
+  `BaseRecipeForm`), Owner-only; Step 45b1c2b: `BaseSheet` gained Delete (in-use or not, same
+  confirm-unlink DELETE endpoint) and a link to `settings/bases/[id].tsx` — the base's own "Used
+  in" screen (search/add a dish, edit grams, remove a dish, full-replace `PUT .../used-in/`);
+  `settings/alerts.tsx` — the 6 alert settings (Step 18 added
   expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing

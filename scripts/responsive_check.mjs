@@ -62,14 +62,16 @@ const SCREEN_MANIFEST = {
   owner: [
     'setup-1', 'setup-fork', 'setup-2', 'setup-3', 'setup-4', 'setup-5', 'setup-6', 'setup-done',
     'home-owner',
-    'buy', 'buy-detail', 'stock', 'stock-detail', 'reports', 'reports-30d', 'sales', 'wastage',
+    'buy', 'buy-detail', 'stock', 'stock-detail', 'stock-low-stock', 'reports', 'reports-30d',
+    'sales', 'wastage',
     'alerts', 'alert-detail', 'team', 'team-detail', 'settings', 'settings-business',
-    'settings-brand', 'settings-stock', 'settings-sell', 'settings-alerts', 'count', 'counts',
+    'settings-brand', 'settings-stock', 'settings-sell', 'settings-bases', 'base-used-in',
+    'settings-alerts', 'count', 'counts',
     'counts-detail',
     'sheet-profile', 'sheet-record-purchase', 'sheet-record-purchase-edit', 'sheet-record-wastage',
     'dialog-delete-purchase', 'dialog-delete-wastage', 'sheet-more-menu', 'sheet-prepare-reminder',
-    'sheet-edit-stock-item', 'sheet-edit-sell-item', 'sheet-add-team-member', 'sheet-reset-pin',
-    'dialog-remove-member', 'sheet-record-sales', 'dialog-delete-sales',
+    'sheet-edit-stock-item', 'sheet-edit-sell-item', 'sheet-edit-base', 'sheet-add-team-member',
+    'sheet-reset-pin', 'dialog-remove-member', 'sheet-record-sales', 'dialog-delete-sales',
   ],
   helper: ['home-helper', 'wastage-helper', 'sheet-profile-helper', 'sheet-record-wastage-helper'],
   headchef: ['home-headchef'],
@@ -657,6 +659,53 @@ async function buildOwnerSession(page) {
   await waitForText(page, 'Team member');
   const teamMemberPath = await page.evaluate(() => location.pathname);
 
+  // Step 45b1c2b: a batch recipe ("base") linked to Paneer Tikka (reusing Rice/Fresh Paneer, both
+  // already on this business, rather than adding more stock items) — so settings/bases, the base's
+  // own Used-in screen and the dish form's base picker all have real data to check.
+  await page.goto(`${APP_URL}/settings/bases`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Things you make in batches');
+  await clickButton(page, 'Add a batch recipe');
+  await waitForText(page, 'What goes into one batch');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await typeInto(page, 'Name', 'Onion-tomato masala', { last: true });
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, 'Rice');
+  await typeInto(page, 'Amount (g)', '600', { last: true });
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, 'Fresh Paneer');
+  await typeInto(page, 'Amount (g)', '400', { last: true });
+  await clickButton(page, 'Save batch recipe');
+  await waitForText(page, 'Batch recipe added');
+
+  await (await findVisible(page, '[aria-label="Onion-tomato masala"]')).click();
+  await waitForText(page, 'Edit batch recipe');
+  await clickButton(page, 'Used in 0 dishes · See which dishes use this');
+  await waitForText(page, 'Dishes that use Onion-tomato masala');
+  const baseUsedInPath = await page.evaluate(() => location.pathname);
+
+  await clickButton(page, '+ Add a dish');
+  await waitForText(page, 'Choose a dish');
+  await clickButton(page, 'Paneer Tikka');
+  await typeInto(page, 'Amount per portion (g)', '150', { last: true });
+  await clickButton(page, 'Save');
+  await waitForText(page, 'Updated which dishes use this batch recipe');
+
+  // Fresh Paneer: a fixed low-stock threshold above its 5 kg opening count, so /stock/low-stock has
+  // a real row too.
+  await page.goto(`${APP_URL}/settings/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'What you buy');
+  await (await findVisible(page, '[aria-label="Fresh Paneer"]')).click();
+  await waitForText(page, 'Edit stock item');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Dry staples'));
+  // Leaves the fixed-amount's own unit chip at its default ("g") — Fresh Paneer's unit itself is
+  // locked (it already has count history), so the only other "kg"-labelled radio on this sheet is
+  // the disabled one in the locked Unit section, not a second, pickable one worth targeting here.
+  await typeInto(page, 'Or always alert below a fixed amount (optional)', '10000');
+  await clickButton(page, 'Save item');
+  await waitForText(page, 'Stock item saved');
+
   const tokens = await page.evaluate(() => ({
     access: localStorage.getItem('easykharcha.access'),
     refresh: localStorage.getItem('easykharcha.refresh'),
@@ -672,6 +721,7 @@ async function buildOwnerSession(page) {
     stockItemPath,
     countDetailPath,
     teamMemberPath,
+    baseUsedInPath,
   };
 }
 
@@ -964,6 +1014,7 @@ async function main() {
   try {
     let ownerTokens, ownerName, helperMobile, helperPin, headChefMobile, headChefPin;
     let purchasePath = '', stockItemPath = '', countDetailPath = '', teamMemberPath = '';
+    let baseUsedInPath = '';
     let helperTokens = null, headChefTokens = null;
     let alertDetailPath = '';
 
@@ -985,6 +1036,7 @@ async function main() {
         stockItemPath,
         countDetailPath,
         teamMemberPath,
+        baseUsedInPath,
       } = await buildOwnerSession(setupPage));
       await setupPage.close();
     }
@@ -1025,6 +1077,8 @@ async function main() {
       { name: 'buy-detail', url: `${APP_URL}${purchasePath}` },
       { name: 'stock', url: `${APP_URL}/stock` },
       { name: 'stock-detail', url: `${APP_URL}${stockItemPath}` },
+      // Step 45b1c2b
+      { name: 'stock-low-stock', url: `${APP_URL}/stock/low-stock` },
       // Step 16
       { name: 'reports', url: `${APP_URL}/reports` },
       { name: 'reports-30d', url: `${APP_URL}/reports?period=30d` },
@@ -1040,6 +1094,9 @@ async function main() {
       { name: 'settings-brand', url: `${APP_URL}/settings/brand` },
       { name: 'settings-stock', url: `${APP_URL}/settings/stock` },
       { name: 'settings-sell', url: `${APP_URL}/settings/sell` },
+      // Step 45b1c2b
+      { name: 'settings-bases', url: `${APP_URL}/settings/bases` },
+      { name: 'base-used-in', url: `${APP_URL}${baseUsedInPath}` },
       { name: 'settings-alerts', url: `${APP_URL}/settings/alerts` },
       // Step 10
       { name: 'count', url: `${APP_URL}/count` },
@@ -1181,6 +1238,16 @@ async function main() {
           await waitForText(page, 'What you sell');
           await (await findVisible(page, '[aria-label="Paneer Tikka"]')).click();
           await waitForText(page, 'Edit dish');
+        },
+      },
+      // Step 45b1c2b
+      {
+        name: 'sheet-edit-base',
+        url: `${APP_URL}/settings/bases`,
+        open: async (page) => {
+          await waitForText(page, 'Things you make in batches');
+          await (await findVisible(page, '[aria-label="Onion-tomato masala"]')).click();
+          await waitForText(page, 'Edit batch recipe');
         },
       },
       // Step 13
