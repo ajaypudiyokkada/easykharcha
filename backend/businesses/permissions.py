@@ -25,6 +25,8 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         "purchases.delete",
         "stock.view",
         "stockitems.manage",
+        "stockitems.thresholds_manage",
+        "stock.low_stock_view",
         "sellitems.manage",
         "business.manage",
         "settings.manage",
@@ -53,6 +55,7 @@ _LOWER_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "purchases.view",
             "purchases.create",
             "stock.view",
+            "stockitems.thresholds_manage",
             "counts.review",
             "wastage.view_all",
             "wastage.view_value",
@@ -70,6 +73,7 @@ _LOWER_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "counts.status",
             "wastage.create",
             "wastage.view_all",
+            "stock.low_stock_view",
         }
     ),
     AccessRole.HELPER: frozenset(

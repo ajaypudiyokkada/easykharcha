@@ -49,11 +49,15 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   reverse-precision gap: a tonne-origin item, none exist in dev data today, would reverse as if
   kg-scale); `management/commands/verify_u1b1_base_units.py` proves the Milk and kg-bought/
   gram-used regression cases against real seed data (rolled back, nothing persisted).
+  Step 41b1b3a: `low_stock.py` (`estimated_stock_now`, `effective_threshold`, `low_stock_rows` —
+  shared by alerts/service.py's new `low_stock` type and `LowStockListView`); `StockItem` gained
+  `low_stock_category`/`low_stock_days_override`/`low_stock_fixed_qty` (migrations 0009-0010).
 - `wastage/` — wastage entries; models.py (WastageEntry — Step U1b-1 widened `unit_cost_at_entry`
   to 4dp/12 digits, matching `usual_price`), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
 - `alerts/` — Step 15: alerts computed on read (opening_late/closing_late — Step 23b's split of the
-  old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon), never scheduled;
+  old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon, Step 41b1b3a's
+  low_stock — daily-keyed, text carries no money), never scheduled;
   models.py (AlertCheck), service.py (compute_alerts/open_alerts), views.py, serializers.py, urls.py
 - `reports/` — Step 16: the six Reports blocks computed on read, no models; service.py (summary_for — reuses counts/gap.py's lines_with_gap/unit_cost_for for every gap figure; Step U1b-3b-2: wastage_trend's `quantity_by_family` via stock/units.py's `report_group_key`/`display_quantities` — weight/volume share one fungible bucket, everything else its own one-member bucket; used_vs_expected/biggest_gaps display-converted too), views.py, urls.py
 - `ai/` — Step C1/C1b/C1c/C1d/C1e/C2a/C2c: menu reading + recipe suggestions via Anthropic (provider/ —
@@ -130,7 +134,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   names instead of erroring — what the starter-stock picker's Continue sends
 - `GET/PATCH businesses/<id>/stock-items/<item_id>/` — StockItemDetailView — + price history, last
   purchase; PATCH refuses a unit change once purchased/counted, refuses deactivating while an active
-  sell item uses it
+  sell item uses it; Step 41b1b3a's three threshold fields need `stockitems.thresholds_manage`,
+  every other field still needs `stockitems.manage`
+- `GET businesses/<id>/stock/low-stock/` — LowStockListView — Step 41b1b3a: items below threshold +
+  shopping-list `suggested_order_qty`, grouped by stock group; `stock.low_stock_view` sees qty only,
+  a caller who can also see money (thresholds_manage/alerts.view) gets `shortfall_value` too
 - `GET businesses/<id>/sell-items/` — SellItemListView — Owner (`sellitems.manage`, `?include_inactive=1`
   for Settings) or Owner/Manager (`sales.view`/`sales.create`, active items only, for Record sales)
 - `POST businesses/<id>/sell-items/bulk/` — SellItemBulkCreateView
@@ -421,9 +429,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 
 | Role | Permissions |
 |---|---|
-| Owner | all 25 — `ALL_PERMISSIONS` computed, not hand-listed (Step 23a); see `docs/STATUS.md`'s permission table |
-| Manager | purchases.view/create, stock.view, counts.review, wastage.view_all/view_value, team.view, sales.view/create, alerts.view/check, reports.view |
-| Head chef | counts.create, counts.status, wastage.create/view_all |
+| Owner | all 27 — `ALL_PERMISSIONS` computed, not hand-listed (Step 23a); see `docs/STATUS.md`'s permission table |
+| Manager | purchases.view/create, stock.view, stockitems.thresholds_manage, counts.review, wastage.view_all/view_value, team.view, sales.view/create, alerts.view/check, reports.view |
+| Head chef | counts.create, counts.status, wastage.create/view_all, stock.low_stock_view |
 | Helper | counts.create, wastage.create/view_own |
 
 | Business setting | Default | Range |

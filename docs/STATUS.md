@@ -458,6 +458,19 @@ not built yet.
   stock item is reached both ways. Wired into `gap.py`'s coverage split in place of the old direct-
   only query. No API/CRUD or screens yet — a base can only be created via the ORM/admin shell so
   far; next is Step 3 (low-stock thresholds/alerts) per the plan's sub-step split.
+- **Step 41b1b3a — Low-stock thresholds, estimate, alert and shopping list (backend only, no
+  screens, docs/BASES_PLAN.md sec 8.3).** `StockItem` gained `low_stock_category` (perishable=1/
+  fresh_semi=3/dry_staples=7/packaging_cleaning=14 days of cover, new rows default from `goes_off`),
+  `low_stock_days_override`, `low_stock_fixed_qty` (migrations 0009-0010, additive + a `goes_off`
+  backfill). New `stock/low_stock.py`: `estimated_stock_now` (last count + bought − wasted −
+  confirmed-recipe expected usage since, `None` if never counted), `effective_threshold` (fixed
+  qty vs days-of-cover × 14-day average usage), `low_stock_rows` (shared by the alert and the list).
+  New `low_stock` alert type (daily-keyed, no money in its text) and `GET businesses/<id>/stock/
+  low-stock/` (shopping list, `suggested_order_qty`, grouped by stock group; shortfall ₹ shown only
+  to a caller who can already see money). New permissions `stockitems.thresholds_manage` (Owner/
+  Manager) and `stock.low_stock_view` (+ Head chef); the existing stock-item PATCH now checks
+  threshold fields against the former, every other field against `stockitems.manage` as before.
+  New `check_low_stock_flow` (areas `stock`/`alerts`).
 
 ## Permission table
 
@@ -478,6 +491,8 @@ chef/Helper are still a draft, a decision for the product owner to review, not d
 | `team.view` | yes | yes | no | no |
 | `settings.manage` | yes | no | no | no |
 | `stockitems.manage` | yes | no | no | no |
+| `stockitems.thresholds_manage` | yes | yes | no | no |
+| `stock.low_stock_view` | yes | yes | yes | no |
 | `sellitems.manage` | yes | no | no | no |
 | `business.manage` | yes | no | no | no |
 | `counts.create` | yes | no | yes | yes |

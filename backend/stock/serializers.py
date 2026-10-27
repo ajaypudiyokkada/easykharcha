@@ -6,7 +6,7 @@ from counts.models import CountLine
 from purchases.models import PurchaseLine
 from wastage.models import WastageEntry
 
-from .models import SellItem, SellItemIngredient, StockItem, Unit
+from .models import LowStockCategory, SellItem, SellItemIngredient, StockItem, Unit
 from .units import base_unit_for, display_price_per_major_unit, display_quantity
 from .units import unit_family as _unit_family_for
 
@@ -103,6 +103,15 @@ class StockItemUpdateSerializer(serializers.Serializer):
     shelf_life_days = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     group = serializers.CharField(max_length=40, required=False, allow_blank=True)
     active = serializers.BooleanField(required=False)
+    # Step 41b1b3a: low-stock threshold inputs — gated on "stockitems.thresholds_manage" in the
+    # view, separately from the rest of this serializer's fields ("stockitems.manage"), so a
+    # Manager (who has the former but not the latter) can PATCH these without also being able to
+    # rename/deactivate the item.
+    low_stock_category = serializers.ChoiceField(choices=LowStockCategory.choices, required=False)
+    low_stock_days_override = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    low_stock_fixed_qty = serializers.DecimalField(
+        max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=ZERO
+    )
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -168,6 +177,9 @@ class StockItemSerializer(serializers.ModelSerializer):
             "goes_off",
             "shelf_life_days",
             "group",
+            "low_stock_category",
+            "low_stock_days_override",
+            "low_stock_fixed_qty",
             "active",
             "created_at",
             "last_unit_price",
@@ -317,6 +329,14 @@ class SellItemUpdateSerializer(serializers.Serializer):
 
     def validate_ingredients(self, value: list[dict]) -> list[dict]:
         return _validate_ingredient_rows(value)
+
+
+# Step 41b1b3a: the fields of StockItemUpdateSerializer gated on "stockitems.thresholds_manage"
+# rather than "stockitems.manage" — shared with stock/views.py's StockItemDetailView.patch so the
+# two never drift apart.
+LOW_STOCK_THRESHOLD_FIELDS = frozenset(
+    {"low_stock_category", "low_stock_days_override", "low_stock_fixed_qty"}
+)
 
 
 class SellItemIngredientSerializer(serializers.ModelSerializer):

@@ -1245,6 +1245,190 @@ def check_starter_pack_flow() -> None:
     )
 
 
+def check_low_stock_flow() -> None:
+    """Step 41b1b3a (docs/BASES_PLAN.md sec 8.3): a high-turnover perishable item (category default
+    1 day of cover) flags low_stock while a low-turnover dry-staples item (7 days) at the same
+    counted quantity does not; checking the alert once hides it, a repeat check on the same day is
+    rejected (no duplicate); a Manager can set thresholds but not rename the item on the same PATCH,
+    a Helper can't reach the item at all, and a Head chef sees the alert and the low-stock list
+    (quantities only, no money) but can't set thresholds."""
+    owner_mobile, owner_access, _ = signup_and_login("Low Stock Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Low Stock Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"low stock flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Low Stock Manager", "manager")
+    _, head_chef_access, _ = _add_team_member(business_id, owner_access, "Low Stock Head Chef", "head_chef")
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "Low Stock Helper", "helper")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Milk", "unit": "L", "goes_off": True, "shelf_life_days": 2, "usual_price": "10"},
+                {"name": "Rice", "unit": "kg"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"low stock flow: stock bulk create expected 201, got {status} ({body})")
+    milk_id = next(i["id"] for i in body if i["name"] == "Milk")
+    rice_id = next(i["id"] for i in body if i["name"] == "Rice")
+    if next(i["low_stock_category"] for i in body if i["name"] == "Milk") != "perishable":
+        fail("low stock flow: expected Milk (goes_off) to default to the perishable category")
+    if next(i["low_stock_category"] for i in body if i["name"] == "Rice") != "dry_staples":
+        fail("low stock flow: expected Rice (not goes_off) to default to the dry_staples category")
+    print("OK — a goes_off item defaults to the perishable low-stock category, a plain one to dry_staples.")
+
+    # high daily usage relative to its count (perishable, 1 day of cover)
+    tea_id, _ = _create_dish(business_id, owner_access, "Tea", "20.00", [(milk_id, "1.000")])
+    # low daily usage relative to its count (dry staples, 7 days of cover)
+    rice_bowl_id, _ = _create_dish(business_id, owner_access, "Rice Bowl", "60.00", [(rice_id, "0.005")])
+
+    today = _now_iso()[:10]
+    for sell_item_id, qty in ((tea_id, 14), (rice_bowl_id, 14)):
+        status, body, _ = request(
+            "POST",
+            f"/businesses/{business_id}/sales/",
+            {"business_date": today, "lines": [{"sell_item": sell_item_id, "quantity": qty}]},
+            token=owner_access,
+        )
+        if status != 201:
+            fail(f"low stock flow: sale for sell item {sell_item_id} expected 201, got {status} ({body})")
+
+    # same counted quantity for both items — Milk's much higher usage-per-portion makes it the one
+    # that's actually running low; Rice's tiny usage-per-portion keeps it comfortably covered even
+    # at its smaller (7-day) category default.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [
+                {"stock_item": milk_id, "state": "counted", "counted_qty": "0.500"},
+                {"stock_item": rice_id, "state": "counted", "counted_qty": "0.500"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"low stock flow: opening count expected 201, got {status} ({body})")
+
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    if status != 200:
+        fail(f"low stock flow: alerts list expected 200, got {status} ({body})")
+    low_stock_alerts = [a for a in body["results"] if a["type"] == "low_stock"]
+    if len(low_stock_alerts) != 1 or "Milk" not in low_stock_alerts[0]["title"]:
+        fail(f"low stock flow: expected exactly one low_stock alert, for Milk, got {low_stock_alerts}")
+    if "₹" in low_stock_alerts[0]["detail"] or "value" in low_stock_alerts[0]["numbers"]:
+        fail(f"low stock flow: the alert text must carry no money, got {low_stock_alerts[0]}")
+    milk_key = low_stock_alerts[0]["key"]
+    print("OK — the high-turnover perishable item alone trips low_stock; the alert carries no money.")
+
+    # checking it once hides it; checking the same (already-checked) key again is rejected — no
+    # duplicate alert appears on a second GET either.
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/alerts/check/", {"key": milk_key}, token=owner_access
+    )
+    if status != 204:
+        fail(f"low stock flow: alert check expected 204, got {status} ({body})")
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/alerts/check/", {"key": milk_key}, token=owner_access
+    )
+    if status not in (400, 422):
+        fail(f"low stock flow: re-checking the same key expected a rejection, got {status} ({body})")
+    status, body, _ = request("GET", f"/businesses/{business_id}/alerts/", token=owner_access)
+    if any(a["type"] == "low_stock" for a in body["results"]):
+        fail("low stock flow: a checked low_stock alert should no longer be open")
+    print("OK — checking the alert hides it, and re-checking the same day's key is rejected.")
+
+    # Manager can set thresholds (a narrower permission than stockitems.manage) ...
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{rice_id}/",
+        {"low_stock_fixed_qty": "2.000"},
+        token=manager_access,
+    )
+    if status != 200 or str(body.get("low_stock_fixed_qty")) != "2.000":
+        fail(f"low stock flow: manager setting a threshold expected 200, got {status} ({body})")
+    # ... but not rename the item in the same request, or any request at all.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{rice_id}/",
+        {"name": "Renamed Rice"},
+        token=manager_access,
+    )
+    if status not in (403, 404):
+        fail(f"low stock flow: manager renaming an item expected 403/404, got {status} ({body})")
+    print("OK — a Manager can set thresholds but can't rename the item.")
+
+    # a Helper can't reach the stock item at all (no stock.view), so no threshold field either way.
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock-items/{rice_id}/", token=helper_access
+    )
+    if status not in (403, 404):
+        fail(f"low stock flow: helper read expected 403/404, got {status} ({body})")
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{rice_id}/",
+        {"low_stock_fixed_qty": "9.000"},
+        token=helper_access,
+    )
+    if status not in (403, 404):
+        fail(f"low stock flow: helper setting a threshold expected 403/404, got {status} ({body})")
+    print("OK — a Helper can't see or set thresholds.")
+
+    # a Head chef sees alerts (stock.low_stock_view's sibling, alerts.view is not needed — the
+    # count_late check above already proves Head chef reaches alerts via its own permission) but
+    # can't set thresholds.
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{rice_id}/",
+        {"low_stock_fixed_qty": "9.000"},
+        token=head_chef_access,
+    )
+    if status not in (403, 404):
+        fail(f"low stock flow: head chef setting a threshold expected 403/404, got {status} ({body})")
+    print("OK — a Head chef sees alerts but can't set thresholds.")
+
+    # low-stock/shopping-list: Owner (money) and Head chef (no money) read the same computed rows.
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock/low-stock/", token=owner_access
+    )
+    if status != 200:
+        fail(f"low stock flow: low-stock list (owner) expected 200, got {status} ({body})")
+    owner_rice_row = next(r for r in body["results"] if r["stock_item"] == rice_id)
+    if "shortfall_value" not in owner_rice_row:
+        fail(f"low stock flow: owner's low-stock row should carry shortfall_value, got {owner_rice_row}")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock/low-stock/", token=head_chef_access
+    )
+    if status != 200:
+        fail(f"low stock flow: low-stock list (head chef) expected 200, got {status} ({body})")
+    head_chef_rice_row = next(r for r in body["results"] if r["stock_item"] == rice_id)
+    if "shortfall_value" in head_chef_rice_row:
+        fail(f"low stock flow: head chef's low-stock row must carry no money, got {head_chef_rice_row}")
+    if not any(row["name"] == "Rice" for row in body.get("grouped", {}).get("Ungrouped", [])):
+        fail(f"low stock flow: expected Rice grouped under 'Ungrouped', got {body.get('grouped')}")
+    print("OK — the low-stock/shopping-list endpoint hides shortfall_value from a Head chef.")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock/low-stock/", token=helper_access
+    )
+    if status not in (403, 404):
+        fail(f"low stock flow: helper low-stock list expected 403/404, got {status} ({body})")
+    print("OK — a Helper can't reach the low-stock list either.")
+
+
 def check_sector_units_flow() -> None:
     """Sector-aware copy/units step: a non-food business type can save a stock item in one of the
     new unit choices (not just kg/g/L/ml/piece/pack), and the starter pack for a non-food type
@@ -2209,6 +2393,8 @@ def check_purchase_flow() -> None:
         "purchases.delete",
         "stock.view",
         "stockitems.manage",
+        "stockitems.thresholds_manage",
+        "stock.low_stock_view",
         "sellitems.manage",
         "business.manage",
         "settings.manage",
@@ -2240,6 +2426,7 @@ def check_purchase_flow() -> None:
         "purchases.view",
         "purchases.create",
         "stock.view",
+        "stockitems.thresholds_manage",
         "counts.review",
         "wastage.view_all",
         "wastage.view_value",
@@ -5634,6 +5821,7 @@ ALL_CHECKS = [
     check_sector_change_flow,
     check_stock_flow,
     check_item_setup_flow,
+    check_low_stock_flow,
     check_starter_pack_flow,
     check_sector_units_flow,
     check_team_flow,
@@ -5666,6 +5854,7 @@ AREA_CHECKS: dict[str, list] = {
     "stock": [
         check_stock_flow,
         check_item_setup_flow,
+        check_low_stock_flow,
         check_starter_pack_flow,
         check_sector_units_flow,
         check_purchase_flow,
@@ -5673,7 +5862,7 @@ AREA_CHECKS: dict[str, list] = {
         check_sector_change_flow,
     ],
     "sales": [check_sales_and_gap_flow],
-    "alerts": [check_alerts_flow, check_expiry_alerts_flow],
+    "alerts": [check_alerts_flow, check_expiry_alerts_flow, check_low_stock_flow],
     "wastage": [check_count_and_wastage_flow],
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
     "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
