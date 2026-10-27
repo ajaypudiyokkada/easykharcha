@@ -456,6 +456,27 @@ def _sales_vs_cost(business, buckets, window_start_date, window_end_date):
     }
 
 
+def _recipe_coverage_pct(business: Business, window_start_date, window_end_date) -> str | None:
+    """U2b1b1 (docs/BASES_PLAN.md sec 2, Decision 5): Home's "Recipes cover X% of your sales" —
+    revenue-weighted (`Sale.amount`), business-level, and deliberately a separate code path from
+    both the per-ingredient `coverage_pct` gap tolerance uses (counts/gap.py, gram-weighted) and
+    `_sales_vs_cost`'s `coverage_pct` above (which also requires every ingredient's cost to be
+    known; this one only cares whether the recipe itself is confirmed, so a NONE-status dish's
+    sales count against it same as an UNCONFIRMED one's would)."""
+    sales = Sale.objects.filter(
+        business=business,
+        is_deleted=False,
+        business_date__gte=window_start_date,
+        business_date__lte=window_end_date,
+    ).select_related("sell_item")
+    total_amount = confirmed_amount = ZERO
+    for sale in sales:
+        total_amount += sale.amount
+        if sale.sell_item.recipe_status == RecipeStatus.CONFIRMED:
+            confirmed_amount += sale.amount
+    return _pct(confirmed_amount, total_amount)
+
+
 def summary_for(business: Business, period: str, item_id: int | None) -> dict:
     tz = ZoneInfo(business.timezone)
     window_start_date, window_end_date, bucket_days = _window(business, period)
@@ -489,4 +510,5 @@ def summary_for(business: Business, period: str, item_id: int | None) -> dict:
         "price_trend": _price_trend(business, window_start_dt, window_end_dt, item_id),
         "sales_vs_cost": _sales_vs_cost(business, buckets, window_start_date, window_end_date),
         "biggest_gaps": _biggest_gaps(per_item),
+        "recipe_coverage_pct": _recipe_coverage_pct(business, window_start_date, window_end_date),
     }

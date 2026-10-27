@@ -18,6 +18,13 @@ from wastage.models import WastageEntry
 from .models import CountLine, CountLineState, CountType, StockCount
 
 ZERO = Decimal("0")
+HUNDRED = Decimal("100")
+# U2b1b1 (docs/BASES_PLAN.md secs 1-2): below this, the recipe picture is too thin to trust at
+# all — same "not compared" shape the old all-or-nothing not_confirmed check used.
+COVERAGE_NOT_COMPARABLE_PCT = Decimal("40")
+# At/above this, a line is "real" (alert-eligible, tolerance widened by how far under 100% it
+# is); between the two it's shown but never alerted on.
+COVERAGE_REAL_GAP_PCT = Decimal("70")
 
 
 def unit_cost_for(stock_item) -> Decimal | None:
@@ -83,6 +90,8 @@ def gap_for_line(
         "gap_status": "not_comparable",
         "gap_reason": None,
         "flagged": False,
+        "coverage_pct": None,
+        "gap_tolerance_pct": None,
     }
     if prev_count is None or used_since_last_count is None:
         return {**empty, "gap_reason": {"code": "no_previous_count"}}
@@ -95,27 +104,18 @@ def gap_for_line(
     if not ingredient_rows:
         return {**empty, "gap_reason": {"code": "not_sold"}}
 
-    # Step 22a: a dish whose recipe isn't confirmed (none — e.g. the no-ingredients bulk endpoint —
-    # or a future AI estimate still awaiting review) can't be trusted for gap maths even if it
-    # happens to carry an ingredient row, so it blocks this stock item's whole computation the same
-    # way a missing uses_qty used to (replaces the old uses_not_set reason).
-    not_confirmed = [
-        row.sell_item
-        for row in ingredient_rows
-        if row.sell_item.recipe_status != RecipeStatus.CONFIRMED
+    # U2b1b1 (docs/BASES_PLAN.md secs 1-2): a dish whose recipe isn't confirmed (a future AI
+    # estimate still awaiting review) no longer blocks this stock item outright — its expected
+    # usage counts toward the coverage split below instead, same "at least one real line" spirit
+    # as before but graduated instead of all-or-nothing. A NONE-status dish never reaches here at
+    # all: it has no ingredient rows by construction (RecipeStatus's own docstring), so it never
+    # contributes to either sum.
+    confirmed_rows = [
+        row for row in ingredient_rows if row.sell_item.recipe_status == RecipeStatus.CONFIRMED
     ]
-    if not_confirmed:
-        return {
-            **empty,
-            "gap_reason": {
-                "code": "recipe_not_confirmed",
-                "count": len(not_confirmed),
-                "sell_items": [{"id": item.id, "name": item.name} for item in not_confirmed],
-            },
-        }
-
-    sell_items = [row.sell_item for row in ingredient_rows]
-    quantity_by_sell_item_id = {row.sell_item_id: row.quantity for row in ingredient_rows}
+    unconfirmed_rows = [
+        row for row in ingredient_rows if row.sell_item.recipe_status == RecipeStatus.UNCONFIRMED
+    ]
 
     window_start, window_end = gap_window(business, prev_count, count)
     window_dates = []
@@ -143,33 +143,66 @@ def gap_for_line(
                 },
             }
 
-    expected_used = ZERO
-    for item in sell_items:
-        units_sold = (
-            Sale.objects.filter(
-                business=business,
-                sell_item=item,
-                is_deleted=False,
-                business_date__gte=window_start,
-                business_date__lte=window_end,
-            ).aggregate(total=Sum("quantity"))["total"]
-            or ZERO
-        )
-        expected_used += units_sold * quantity_by_sell_item_id[item.id]
+    def _expected(rows) -> Decimal:
+        total = ZERO
+        for row in rows:
+            units_sold = (
+                Sale.objects.filter(
+                    business=business,
+                    sell_item=row.sell_item,
+                    is_deleted=False,
+                    business_date__gte=window_start,
+                    business_date__lte=window_end,
+                ).aggregate(total=Sum("quantity"))["total"]
+                or ZERO
+            )
+            total += units_sold * row.quantity
+        return total
 
+    confirmed_expected = _expected(confirmed_rows)
+    unconfirmed_expected = _expected(unconfirmed_rows)
+    denominator = confirmed_expected + unconfirmed_expected
+    if denominator == ZERO:
+        return {**empty, "gap_reason": {"code": "low_recipe_coverage", "coverage_pct": None}}
+
+    coverage_pct = (confirmed_expected / denominator) * HUNDRED
+    if coverage_pct < COVERAGE_NOT_COMPARABLE_PCT:
+        return {
+            **empty,
+            "gap_reason": {"code": "low_recipe_coverage", "coverage_pct": coverage_pct},
+        }
+
+    # Below COVERAGE_REAL_GAP_PCT the figure is shown (indicative) but never alerted on, so the
+    # gap/tolerance numbers are still computed against confirmed_expected only — unconfirmed
+    # recipes only ever widen the coverage denominator, never the expected-usage target itself.
+    expected_used = confirmed_expected
     gap_qty = used_since_last_count - expected_used
     unit_cost = unit_cost_for(stock_item)
     gap_value = gap_qty * unit_cost if unit_cost is not None else None
-    threshold = (gap_alert_pct / Decimal("100")) * expected_used
-    flagged = abs(gap_qty) > threshold
+
+    if coverage_pct >= COVERAGE_REAL_GAP_PCT:
+        gap_tolerance_pct = gap_alert_pct * (HUNDRED / coverage_pct)
+        threshold = (gap_tolerance_pct / HUNDRED) * expected_used
+        return {
+            "expected_used": expected_used,
+            "gap_qty": gap_qty,
+            "gap_value": gap_value,
+            "gap_status": "ok",
+            "gap_reason": None,
+            "flagged": abs(gap_qty) > threshold,
+            "coverage_pct": coverage_pct,
+            "gap_tolerance_pct": gap_tolerance_pct,
+        }
 
     return {
         "expected_used": expected_used,
         "gap_qty": gap_qty,
         "gap_value": gap_value,
-        "gap_status": "ok",
+        "gap_status": "indicative",
         "gap_reason": None,
-        "flagged": flagged,
+        "flagged": False,
+        "coverage_pct": coverage_pct,
+        "gap_tolerance_pct": None,
     }
 
 
