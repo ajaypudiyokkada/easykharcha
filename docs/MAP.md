@@ -428,7 +428,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   file-chooser (Puppeteer's `waitForFileChooser`) against `docs/images/ek_logo_icon.png`, then Step
   C2c appends a second scan (via `docs/images/menu_scan_force_never_finish.pdf`, whose AI_FAKE-only
   marker leaves it queued forever) proving the stuck-scan "taking longer than usual" UI; the `wizard`
-  chain scenario now clicks "Add one by one" on step 4's new choice card first
+  chain scenario now clicks "Add one by one" on step 4's new choice card first; Step 44v1 added
+  `bases` (solo) and `low-stock` (solo, + Manager/Head chef/Helper permissions) — a shared dev IP
+  running these (and other signup-heavy scenarios) repeatedly may need `RATE_LIMIT_SIGNUP_PER_IP`
+  set high when starting the backend (default stays 32/hour)
 - `npm run responsive` → `scripts/responsive_check.mjs` — every route + sheet/dialog at 7 widths; Step
   23e's `--screen <name>` (`--list` to see names) builds only the session tier that screen needs
   (Step C2a also fixed `buildOwnerSession`'s stale pre-22a2 "Add your own" steps — it still assumed

@@ -56,6 +56,7 @@ _LOWER_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "purchases.create",
             "stock.view",
             "stockitems.thresholds_manage",
+            "stock.low_stock_view",
             "counts.review",
             "wastage.view_all",
             "wastage.view_value",
