@@ -160,3 +160,79 @@ class SellItemIngredient(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sell_item.name} uses {self.quantity} {self.stock_item.unit} {self.stock_item.name}"
+
+
+# Step U2b1b2 (docs/BASES_PLAN.md secs 1-2): a Base is always defined per 1,000 g or 1,000 ml of
+# finished batch, never per-piece — so its own unit_family is restricted to the two convertible
+# families, unlike StockItem.unit_family which also allows count.
+BASE_UNIT_FAMILY_CHOICES = [
+    (UnitFamily.WEIGHT, "Weight"),
+    (UnitFamily.VOLUME, "Volume"),
+]
+
+
+class Base(models.Model):
+    """A prep item batched ahead of time (e.g. "onion-tomato masala") — its raw formula lives in
+    BaseIngredient, how much of it a dish uses per portion lives in SellItemBase. See
+    docs/BASES_PLAN.md secs 1-2."""
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="bases")
+    name = models.CharField(max_length=120)
+    unit_family = models.CharField(max_length=10, choices=BASE_UNIT_FAMILY_CHOICES)
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="bases_created"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = [
+            models.UniqueConstraint(Lower("name"), "business", name="unique_base_name_per_business")
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class BaseIngredient(models.Model):
+    """One raw line of a base's batch formula: how much of `stock_item`, in grams/ml, goes into
+    1,000 g/ml of finished `base`. `stock_item` can never be another Base — this FK only ever
+    points at StockItem — so a base's formula is structurally one level deep, never nested. Same
+    non-shared rule as SellItemIngredient (enforced where bases are created/edited, not here)."""
+
+    base = models.ForeignKey(Base, on_delete=models.CASCADE, related_name="ingredients")
+    stock_item = models.ForeignKey(
+        StockItem, on_delete=models.PROTECT, related_name="used_in_bases"
+    )
+    quantity_per_1000 = models.DecimalField(max_digits=10, decimal_places=3)
+
+    class Meta:
+        ordering = ("id",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["base", "stock_item"], name="unique_ingredient_per_base"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.base.name} uses {self.quantity_per_1000}/1000 {self.stock_item.name}"
+
+
+class SellItemBase(models.Model):
+    """The dish-to-base link, parallel to SellItemIngredient: how much of `base` (grams/ml, in the
+    base's own batch unit) one portion of `sell_item` uses. A dish's full recipe is its
+    `ingredients` (direct raw) plus its `bases` (formula raw) together."""
+
+    sell_item = models.ForeignKey(SellItem, on_delete=models.CASCADE, related_name="bases")
+    base = models.ForeignKey(Base, on_delete=models.PROTECT, related_name="used_in")
+    quantity = models.DecimalField(max_digits=10, decimal_places=3)
+
+    class Meta:
+        ordering = ("id",)
+        constraints = [
+            models.UniqueConstraint(fields=["sell_item", "base"], name="unique_base_per_dish")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.sell_item.name} uses {self.quantity} of base {self.base.name}"

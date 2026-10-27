@@ -447,6 +447,17 @@ not built yet.
   default to DIY silently. `flow.mjs`'s `onboarding-menu`/`onboarding-diy` scenarios (`npm run flow
   -- --only <name>`) cover both paths; `menu-scan-stuck` is the old Step C2c stuck-scan case, split
   out since it's unrelated to this fork (kept, still unconfirmed in a live browser as of Step C2c).
+- **Step U2b1b1/b2 — Bases engine (docs/BASES_PLAN.md).** b1: `gap.py`'s all-or-nothing
+  `not_confirmed` check replaced by a coverage split (confirmed vs unconfirmed expected usage;
+  `>=70%` real/alert-eligible with widened tolerance, `40-70%` indicative, `<40%`
+  `low_recipe_coverage`); Home's `recipe_coverage_pct` added (revenue-weighted, separate from the
+  per-ingredient figure). b2: new `stock.Base`/`BaseIngredient`/`SellItemBase` models (migration
+  0008, additive, no backfill) and `stock/base_expansion.py`'s one-level expansion — a dish's
+  per-portion stock usage now folds in both its direct `SellItemIngredient` rows and, via any base
+  it uses, that base's `BaseIngredient` formula scaled by `SellItemBase.quantity`; both sum if a
+  stock item is reached both ways. Wired into `gap.py`'s coverage split in place of the old direct-
+  only query. No API/CRUD or screens yet — a base can only be created via the ORM/admin shell so
+  far; next is Step 3 (low-stock thresholds/alerts) per the plan's sub-step split.
 
 ## Permission table
 
