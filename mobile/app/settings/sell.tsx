@@ -2,6 +2,7 @@ import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
+import type { Base } from '../../src/api/bases';
 import type { SellItem, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
@@ -42,6 +43,7 @@ export default function SellItemsSettings() {
 
   const [items, setItems] = useState<SellItem[] | null>(null);
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null);
+  const [bases, setBases] = useState<Base[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [search, setSearch] = useState('');
@@ -64,6 +66,9 @@ export default function SellItemsSettings() {
     authedFetch<StockItem[]>(`/businesses/${business.id}/stock-items/`)
       .then((stock) => setStockItems(stock.filter((item) => !item.shared)))
       .catch(() => setStockItems([]));
+    authedFetch<Base[]>(`/businesses/${business.id}/bases/`)
+      .then(setBases)
+      .catch(() => setBases([]));
   }, [business, authedFetch]);
 
   useEffect(() => {
@@ -217,6 +222,7 @@ export default function SellItemsSettings() {
         editingItem={editingItem}
         existingItems={all}
         stockItems={stockItems}
+        bases={bases}
         onStockItemAdded={(item) => setStockItems((current) => [item, ...(current ?? [])])}
         onClose={() => setSheetVisible(false)}
         onSaved={(message) => {

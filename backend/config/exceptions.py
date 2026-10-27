@@ -29,6 +29,9 @@ def exception_handler(exc, context):
     items_summary = getattr(exc, "items_summary", None)
     if items_summary is not None:
         body["items_summary"] = items_summary
+    used_in_names = getattr(exc, "used_in_names", None)
+    if used_in_names is not None:
+        body["used_in_names"] = used_in_names
 
     return Response(body, status=response.status_code)
 

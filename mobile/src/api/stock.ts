@@ -53,6 +53,17 @@ export type SellItemIngredient = {
   display_unit: string;
 };
 
+/** Step 42b1c1: one base a dish uses, grams/ml per portion — see src/api/bases.ts's `Base`. */
+export type SellItemBaseLink = {
+  id: number;
+  base: number;
+  base_name: string;
+  unit: string;
+  quantity: string;
+  display_quantity: string;
+  display_unit: string;
+};
+
 export type SellItem = {
   id: number;
   name: string;
@@ -60,10 +71,12 @@ export type SellItem = {
   /** Short free text, e.g. "1 plate" or "6 pieces" — purely descriptive. */
   portion_label: string;
   /** `none` (no ingredients yet), `unconfirmed` (a future AI/scan estimate awaiting review — nothing
-   * creates this yet) or `confirmed` (the manual dish form saved it with >=1 ingredient). Gap maths,
-   * Count review, Alerts and Reports only trust `confirmed` dishes. */
+   * creates this yet) or `confirmed` (the manual dish form saved it with >=1 ingredient or base).
+   * Gap maths, Count review, Alerts and Reports only trust `confirmed` dishes. */
   recipe_status: RecipeStatus;
   ingredients: SellItemIngredient[];
+  /** Step 42b1c1: batch recipes ("bases") this dish uses, alongside its raw ingredients. */
+  bases: SellItemBaseLink[];
   /** Its own namespace, not shared with stock-item groups. */
   group: string;
   active: boolean;

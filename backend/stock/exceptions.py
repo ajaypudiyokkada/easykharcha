@@ -44,3 +44,21 @@ class StockItemInUse(APIException):
             detail=f"Can't deactivate — still used as an ingredient in: {names}. "
             "Deactivate those first."
         )
+
+
+class BaseInUse(APIException):
+    """Step 42b1c1: a base can't be deleted outright while a dish still uses it — the caller must
+    resend the delete with `confirm_unlink: true` to delete it anyway, unlinking it from every dish
+    that used it (same 409-then-resubmit-with-a-flag shape as businesses.exceptions.
+    ItemsDecisionNeeded), rather than being stuck forever behind SellItemBase's PROTECT."""
+
+    status_code = 409
+    default_code = "base_in_use"
+
+    def __init__(self, sell_item_names: list[str]):
+        self.used_in_names = sell_item_names
+        names = ", ".join(sell_item_names)
+        super().__init__(
+            detail=f"Used by: {names}. Deleting it will remove it from their recipes too — "
+            "send confirm_unlink to delete anyway."
+        )

@@ -1429,6 +1429,268 @@ def check_low_stock_flow() -> None:
     print("OK — a Helper can't reach the low-stock list either.")
 
 
+def check_bases_flow() -> None:
+    """Step 42b1c1 (docs/BASES_PLAN.md secs 1-2, 5, 8.4): base CRUD, linking a base to a dish
+    alongside a direct ingredient, and the Chicken Curry example end to end through a real count —
+    proves stock/base_expansion.py's one-level expansion through the real API, not just gap.py's
+    own unit tests. Also: a base used by 3 dishes at different grams each, deleting an in-use base
+    is refused then succeeds with confirm_unlink (unlinking it everywhere), and a Manager/Helper
+    get 403 on every bases endpoint (Owner-only, same as sellitems.manage)."""
+    owner_mobile, owner_access, _ = signup_and_login("Bases Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Bases Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Bases Manager", "manager")
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "Bases Helper", "helper")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Chicken", "unit": "kg"},
+                {"name": "Onion", "unit": "kg"},
+                {"name": "Tomato", "unit": "kg"},
+                {"name": "Oil", "unit": "L"},
+                {"name": "Cashew", "unit": "kg"},
+                {"name": "Spices", "unit": "kg"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: stock bulk create expected 201, got {status} ({body})")
+    ids = {i["name"]: i["id"] for i in body}
+    for name in ("Chicken", "Onion", "Tomato", "Cashew", "Spices"):
+        if next(i["unit"] for i in body if i["name"] == name) != "g":
+            fail(f"bases flow: expected {name} (entered in kg) to store its base unit g")
+    if next(i["unit"] for i in body if i["name"] == "Oil") != "ml":
+        fail("bases flow: expected Oil (entered in L) to store its base unit ml")
+    print("OK — stock items entered in kg/L store their base units (g/ml).")
+
+    # a Helper/Manager can't reach any bases endpoint (Owner-only, same as sellitems.manage)
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/bases/",
+        {"name": "x", "unit_family": "weight", "ingredients": [{"stock_item": ids["Onion"], "quantity": "1"}]},
+        token=manager_access,
+    )
+    if status not in (403, 404):
+        fail(f"bases flow: manager create base expected 403/404, got {status} ({body})")
+    status, body, _ = request("GET", f"/businesses/{business_id}/bases/", token=helper_access)
+    if status not in (403, 404):
+        fail(f"bases flow: helper list bases expected 403/404, got {status} ({body})")
+    print("OK — a Manager/Helper can't reach the bases endpoints (Owner-only).")
+
+    # the Chicken Curry base: 1,000 g batch (default yield) — onion 450, tomato 400, oil 90 ml,
+    # cashew 40, spices 20
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/bases/",
+        {
+            "name": "Onion-tomato masala",
+            "unit_family": "weight",
+            "ingredients": [
+                {"stock_item": ids["Onion"], "quantity": "450"},
+                {"stock_item": ids["Tomato"], "quantity": "400"},
+                {"stock_item": ids["Oil"], "quantity": "90"},
+                {"stock_item": ids["Cashew"], "quantity": "40"},
+                {"stock_item": ids["Spices"], "quantity": "20"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: create base expected 201, got {status} ({body})")
+    base_id = body["id"]
+    if body["batch_yield_qty"] != "1000.000" or body["unit"] != "g" or len(body["ingredients"]) != 5:
+        fail(f"bases flow: unexpected base shape, got {body}")
+    print("OK — the Chicken Curry base (1,000 g batch, 5 ingredients) is created.")
+
+    # duplicate name rejected, case-insensitive
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/bases/",
+        {
+            "name": "onion-tomato masala",
+            "unit_family": "weight",
+            "ingredients": [{"stock_item": ids["Onion"], "quantity": "1"}],
+        },
+        token=owner_access,
+    )
+    if status not in (400, 422):
+        fail(f"bases flow: duplicate base name expected rejection, got {status} ({body})")
+    print("OK — a duplicate base name (case-insensitive) is rejected.")
+
+    # Chicken Curry dish: chicken 180 g direct + 200 g of the base, per portion
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/",
+        {
+            "name": "Chicken Curry",
+            "selling_price": "220.00",
+            "ingredients": [{"stock_item": ids["Chicken"], "quantity": "180"}],
+            "bases": [{"base": base_id, "quantity": "200"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: create dish with a base expected 201, got {status} ({body})")
+    curry_id = body["id"]
+    if body["recipe_status"] != "confirmed" or len(body["bases"]) != 1 or body["bases"][0]["base"] != base_id:
+        fail(f"bases flow: unexpected dish shape, got {body}")
+    print("OK — a dish can mix a direct ingredient with a base, and lands confirmed.")
+
+    # a dish with only a base (no direct ingredients) is also valid — "at least one line" rule
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/",
+        {
+            "name": "Masala Rice",
+            "selling_price": "120.00",
+            "bases": [{"base": base_id, "quantity": "100"}],
+        },
+        token=owner_access,
+    )
+    if status != 201 or body["recipe_status"] != "confirmed":
+        fail(f"bases flow: dish with only a base expected 201/confirmed, got {status} ({body})")
+    masala_rice_id = body["id"]
+    print("OK — a dish with only a base (no direct ingredients) is still valid.")
+
+    # a third dish uses the same base at a different gram amount
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/",
+        {
+            "name": "Masala Wrap",
+            "selling_price": "80.00",
+            "bases": [{"base": base_id, "quantity": "50"}],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: third dish using the base expected 201, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/bases/{base_id}/", token=owner_access
+    )
+    if status != 200 or len(body["used_in"]) != 3:
+        fail(f"bases flow: expected the base used by 3 dishes, got {status} ({body})")
+    grams_used = sorted(Decimal(link["quantity"]) for link in body["used_in"])
+    if grams_used != [Decimal("50.000"), Decimal("100.000"), Decimal("200.000")]:
+        fail(f"bases flow: expected 3 different gram amounts, got {grams_used}")
+    print("OK — a base used by 3 dishes at 3 different gram amounts shows all 3 in 'used_in'.")
+
+    # end to end: 10 Chicken Curry portions sold -> onion 900 g, tomato 800 g, oil 180 ml,
+    # cashew 80 g, spices 40 g expected (the one-level base expansion), proven via a real count.
+    # Masala Rice/Wrap need no stock items of their own (base-only dishes) — only Onion's gap is
+    # checked below, so the other 5 stock items are simply skipped in both counts.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "opening",
+            "lines": [
+                {"stock_item": ids["Onion"], "state": "counted", "counted_qty": "1000"},
+                {"stock_item": ids["Chicken"], "state": "skipped"},
+                {"stock_item": ids["Tomato"], "state": "skipped"},
+                {"stock_item": ids["Oil"], "state": "skipped"},
+                {"stock_item": ids["Cashew"], "state": "skipped"},
+                {"stock_item": ids["Spices"], "state": "skipped"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: opening count expected 201, got {status} ({body})")
+    business_date = body["business_date"]
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": business_date, "lines": [{"sell_item": curry_id, "quantity": 10}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: 10 Chicken Curry sale expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "closing",
+            "lines": [
+                {"stock_item": ids["Onion"], "state": "counted", "counted_qty": "100"},
+                {"stock_item": ids["Chicken"], "state": "skipped"},
+                {"stock_item": ids["Tomato"], "state": "skipped"},
+                {"stock_item": ids["Oil"], "state": "skipped"},
+                {"stock_item": ids["Cashew"], "state": "skipped"},
+                {"stock_item": ids["Spices"], "state": "skipped"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"bases flow: closing count expected 201, got {status} ({body})")
+    closing_id = body["id"]
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/counts/{closing_id}/", token=owner_access
+    )
+    if status != 200:
+        fail(f"bases flow: count detail expected 200, got {status} ({body})")
+    onion_line = next(line for line in body["lines"] if line["stock_item"] == ids["Onion"])
+    if Decimal(onion_line["expected_used"]) != Decimal("900.000"):
+        fail(
+            f"bases flow: expected Onion's expected_used via the base to be 900 g "
+            f"(10 curries x 200 g base x 450/1000), got {onion_line['expected_used']}"
+        )
+    if onion_line["gap_status"] != "ok" or onion_line["flagged"]:
+        fail(f"bases flow: expected Onion's gap to match exactly (not flagged), got {onion_line}")
+    print(
+        "OK — 10 Chicken Curry sales expand through the base to Onion's expected 900 g used, "
+        "gap matches exactly."
+    )
+
+    # editing a dish's bases via PATCH (full replace, like ingredients)
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{masala_rice_id}/",
+        {"bases": [{"base": base_id, "quantity": "150"}]},
+        token=owner_access,
+    )
+    if status != 200 or body["bases"][0]["quantity"] != "150.000":
+        fail(f"bases flow: editing a dish's bases expected 200 with 150.000, got {status} ({body})")
+    print("OK — editing a dish's bases (PATCH) fully replaces the row, like ingredients.")
+
+    # deleting a base in use is refused, naming the dishes, then succeeds with confirm_unlink
+    status, body, _ = request(
+        "DELETE", f"/businesses/{business_id}/bases/{base_id}/", token=owner_access
+    )
+    if status != 409 or "Chicken Curry" not in ", ".join(body.get("used_in_names", [])):
+        fail(f"bases flow: deleting an in-use base expected 409 naming dishes, got {status} ({body})")
+    status, body, _ = request(
+        "DELETE",
+        f"/businesses/{business_id}/bases/{base_id}/",
+        {"confirm_unlink": True},
+        token=owner_access,
+    )
+    if status != 204:
+        fail(f"bases flow: deleting with confirm_unlink expected 204, got {status} ({body})")
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/sell-items/?include_inactive=1", token=owner_access
+    )
+    masala_rice = next(i for i in body if i["id"] == masala_rice_id)
+    if masala_rice["bases"]:
+        fail(f"bases flow: expected Masala Rice unlinked from the deleted base, got {masala_rice}")
+    print("OK — deleting an in-use base is refused, then unlinks it from every dish with confirm_unlink.")
+
+
 def check_sector_units_flow() -> None:
     """Sector-aware copy/units step: a non-food business type can save a stock item in one of the
     new unit choices (not just kg/g/L/ml/piece/pack), and the starter pack for a non-food type
@@ -5822,6 +6084,7 @@ ALL_CHECKS = [
     check_stock_flow,
     check_item_setup_flow,
     check_low_stock_flow,
+    check_bases_flow,
     check_starter_pack_flow,
     check_sector_units_flow,
     check_team_flow,
@@ -5855,6 +6118,7 @@ AREA_CHECKS: dict[str, list] = {
         check_stock_flow,
         check_item_setup_flow,
         check_low_stock_flow,
+        check_bases_flow,
         check_starter_pack_flow,
         check_sector_units_flow,
         check_purchase_flow,

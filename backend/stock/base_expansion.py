@@ -12,8 +12,6 @@ from businesses.models import Business
 
 from .models import BaseIngredient, SellItem, SellItemIngredient, StockItem
 
-ONE_THOUSAND = Decimal("1000")
-
 
 def quantity_per_portion_by_sell_item(
     business: Business, stock_item: StockItem
@@ -41,7 +39,7 @@ def quantity_per_portion_by_sell_item(
         ).select_related("sell_item")
         for sell_item_base in sell_item_base_rows:
             contribution = sell_item_base.quantity * (
-                base_ingredient.quantity_per_1000 / ONE_THOUSAND
+                base_ingredient.quantity_per_1000 / base_ingredient.base.batch_yield_qty
             )
             totals[sell_item_base.sell_item] = (
                 totals.get(sell_item_base.sell_item, Decimal("0")) + contribution

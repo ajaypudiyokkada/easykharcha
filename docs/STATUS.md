@@ -471,6 +471,24 @@ not built yet.
   Manager) and `stock.low_stock_view` (+ Head chef); the existing stock-item PATCH now checks
   threshold fields against the former, every other field against `stockitems.manage` as before.
   New `check_low_stock_flow` (areas `stock`/`alerts`).
+- **Step 42b1c1 — Bases API and screens: manual create, edit, map to dishes (docs/BASES_PLAN.md
+  secs 1-2, 5, 8.4).** `Base` gained `batch_yield_qty` (default 1,000; migration 0011) — every
+  ingredient quantity is defined against this batch size, not a hardcoded 1,000 (`base_expansion.py`
+  now divides by it). New `GET/POST businesses/<id>/bases/`, `GET/PATCH/DELETE .../bases/<id>/`
+  (full-replace ingredients on edit, like a dish's own), `PUT .../bases/<id>/used-in/` (a base's own
+  full-replace dish-link list) — all Owner-only (`sellitems.manage`). Deleting an in-use base is
+  refused (409, naming the dishes) unless `confirm_unlink: true`, which unlinks it from every dish
+  first. `SellItemCreateSerializer`/`UpdateSerializer` gained an optional `bases: [{base, quantity}]`
+  array alongside `ingredients` — a dish needs at least one real line between the two now, not
+  ingredients alone. New Settings screen "Things you make in batches" (list + add/edit sheet,
+  `BaseRecipeForm`/`BaseSheet`) and a "use a batch recipe" section in `DishRecipeForm` (wired into
+  Settings' "What you sell" only — `setup/4.tsx`'s onboarding dish form doesn't pass `bases` yet,
+  so its picker stays hidden there). New `check_bases_flow` (area `stock`) proves the Chicken Curry
+  example (1,000 g batch, 200 g/portion, 10 sold → 900 g onion expected) through a real count.
+  **Still owed**: the base's own "Used in" picker screen (API exists, no UI yet — dish-side linking
+  covers the core flow), the dish view's raw-equivalent note ("uses about 90 g onion through the
+  base"), recipe-card base-line styling beyond the edit form, `setup/4.tsx` wiring, and the
+  `verify:ui` browser flow (no `flow.mjs` scenario was added this step — ran out of time).
 
 ## Permission table
 

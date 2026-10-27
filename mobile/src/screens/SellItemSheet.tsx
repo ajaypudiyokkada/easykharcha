@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import type { Base } from '../api/bases';
 import { ApiError } from '../api/client';
 import type { Business } from '../api/business';
 import type { SellItem, StockItem } from '../api/stock';
 import { useAuth } from '../auth/AuthContext';
 import {
+  basesPayload,
   DishRecipeForm,
   dishToDraft,
   EMPTY_DISH_DRAFT,
@@ -30,6 +32,9 @@ type Props = {
   onSaved: (message: string) => void;
   /** Linkable (non-shared, active) stock items for the ingredient picker — null while loading. */
   stockItems: StockItem[] | null;
+  /** Step 42b1c1: this business's batch recipes, for the "use a batch recipe" picker — undefined
+   * hides that section entirely. */
+  bases?: Base[] | null;
   /** New stock items added inline via the picker's "+ Add a new item" land here too, so the
    * picker's own list (and Settings' "What you buy", once reopened) sees them. */
   onStockItemAdded: (item: StockItem) => void;
@@ -51,6 +56,7 @@ export function SellItemSheet({
   onClose,
   onSaved,
   stockItems,
+  bases,
   onStockItemAdded,
   editingItem,
   existingItems,
@@ -132,6 +138,7 @@ export function SellItemSheet({
       portion_label: draft.portionLabel.trim(),
       group: draft.group.trim(),
       ingredients: ingredientsPayload(draft, stockItemsById),
+      bases: basesPayload(draft),
       ...(editingItem ? { active: draft.active } : {}),
     };
 
@@ -166,6 +173,7 @@ export function SellItemSheet({
           errors={errors}
           businessType={business?.business_type ?? ''}
           stockItems={stockItems}
+          bases={bases}
           onAddStockItem={handleAddStockItem}
           existingGroups={existingGroups}
           showActive={Boolean(editingItem)}
