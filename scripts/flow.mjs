@@ -64,6 +64,7 @@ const STEP23D_SCREEN_DIR = 'docs/screens/step23d';
 const STEP25C2A_SCREEN_DIR = 'docs/screens/step25c2a';
 const STEP25C2A_FIXTURE_IMAGE = resolvePath('docs/images/ek_logo_icon.png');
 const STEPO1_SCREEN_DIR = 'docs/screens/stepo1';
+const STEP44V1_SCREEN_DIR = 'docs/screens/step44v1';
 // Step C2c: a 1-page PDF carrying the AI_FAKE-only FORCE_NEVER_FINISH marker (ai/views.py) — the
 // scan it starts stays queued forever, used below to prove the Analyzing screen's stuck-scan UI.
 // Must be a PDF, not a photo: a photo upload is always resized/re-encoded client-side before it
@@ -159,6 +160,26 @@ async function findVisibleByText(page, role, text, { last = false } = {}) {
     for (const handle of handles) {
       const ok = await handle.evaluate((el, expected) => {
         if (el.textContent?.trim() !== expected) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }, text);
+      if (ok) visible.push(handle);
+    }
+    return visible.length > 0 ? visible : null;
+  });
+  return last ? matches[matches.length - 1] : matches[0];
+}
+
+// Same as findVisibleByText, but matches a role element whose text CONTAINS `text` rather than
+// equalling it exactly — for a Pressable whose accessible text is more than one line (e.g. a card
+// with a title and a body line concatenated), where there's no separate aria-label to target.
+async function findVisibleContaining(page, role, text, { last = false } = {}) {
+  const matches = await retryUntil(async () => {
+    const handles = await page.$$(`[role="${role}"]`);
+    const visible = [];
+    for (const handle of handles) {
+      const ok = await handle.evaluate((el, expected) => {
+        if (!el.textContent?.includes(expected)) return false;
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       }, text);
@@ -1599,6 +1620,314 @@ async function checkOnboardingDiyFlow(page) {
   await logoutFromAnywhere(page);
 }
 
+// Step 44v1: Owner creates a batch recipe ("Onion-tomato masala": onion 450g, tomato 400g, oil 90g,
+// cashew 40g, spices 20g), reopens it to confirm the ingredients persisted, uses it in a dish at
+// 200g per portion alongside one direct ingredient (Paneer), then reopens the dish to confirm both
+// lines (the direct ingredient and the batch-recipe line) are there. Owner-only (bases.tsx needs
+// sellitems.manage) — no team required, runs as its own fresh business.
+//
+// NOT covered here: deleting a base while it's in use. bases.tsx/BaseSheet.tsx have no Delete
+// control at all — the backend's 409-with-confirm_unlink refusal (stock/views.py's BaseDetailView)
+// and the deleteButton/deleteConfirmTitle/deleteInUseMessage/deleteConfirmButton copy in
+// strings.ts's bases block exist, but nothing in the UI calls DELETE on a base. This needs its own
+// step (add a Delete button + confirm dialog + 409-unlink handling to BaseSheet), not a fix here.
+async function checkBasesFlow(page) {
+  await mkdir(STEP44V1_SCREEN_DIR, { recursive: true });
+  const name = 'Bases Owner';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password, 'Bases Kitchen');
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+  await fillStepOne(page, '411001', 'Cloud kitchen');
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+
+  // Onion, Tomato, Paneer, Garam masala and Cooking oil are already on the cloud_kitchen starter
+  // catalogue (kg/kg/kg/kg/L) — tick those rather than re-adding them as custom items (which the
+  // duplicate-name check correctly refuses). Only Cashew needs "Add your own".
+  await clickAndSettle(await findVisible(page, '[aria-label^="Vegetables ("]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Onion. kg"]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Tomato. kg"]'));
+  await clickAndSettle(await findVisible(page, '[aria-label^="Dairy ("]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Paneer. kg"]'));
+  await clickAndSettle(await findVisible(page, '[aria-label^="Spices & masalas ("]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Garam masala. kg"]'));
+  await clickAndSettle(await findVisible(page, '[aria-label^="Oils & sauces ("]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Cooking oil. L"]'));
+
+  await typeInto(page, 'Name', 'Cashew');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'kg'));
+  await clickButton(page, 'Add to list');
+  await waitForText(page, 'Cashew');
+  console.log('OK — ticked Onion/Tomato/Paneer/Garam masala/Cooking oil and added Cashew as a custom item.');
+  await clickButton(page, '6 selected — Next');
+  await waitForPath(page, '/setup/4');
+  await skipStep(page, 4, '/setup/5');
+  await skipStep(page, 5, '/setup/6');
+  await clickButton(page, 'Use recommended settings');
+  await waitForPath(page, '/setup/done');
+  await clickButton(page, 'Go to Home');
+  await waitForPath(page, '/home');
+
+  // === Create the batch recipe ===
+  await page.goto(`${APP_URL}/settings/bases`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Things you make in batches');
+  await page.screenshot({ path: `${STEP44V1_SCREEN_DIR}/bases-list-empty-390.png` });
+
+  await clickButton(page, 'Add a batch recipe');
+  await waitForText(page, 'What goes into one batch');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP44V1_SCREEN_DIR}/base-sheet-390.png` });
+
+  await typeInto(page, 'Name', 'Onion-tomato masala', { last: true });
+
+  // Every weight/volume stock item is stored in its base unit (g/ml) since the Unit Redesign
+  // (docs/UNIT_REDESIGN.md) regardless of which entry unit (kg/L) was picked when it was created —
+  // the ingredient amount field here is always in that base unit.
+  const baseIngredients = [
+    ['Onion', '450', 'g'],
+    ['Tomato', '400', 'g'],
+    ['Cooking oil', '90', 'ml'],
+    ['Cashew', '40', 'g'],
+    ['Garam masala', '20', 'g'],
+  ];
+  const seenPerUnit = {};
+  for (const [itemName, amount, unit] of baseIngredients) {
+    await clickButton(page, '+ Add ingredient');
+    await waitForText(page, 'Choose an item');
+    await clickButton(page, itemName);
+    seenPerUnit[unit] = (seenPerUnit[unit] ?? 0) + 1;
+    await typeInto(page, `Amount (${unit})`, amount, { last: true, minCount: seenPerUnit[unit] });
+  }
+  console.log('OK — filled the batch recipe: onion 450g, tomato 400g, oil 90ml, cashew 40g, spices 20g.');
+
+  await clickButton(page, 'Save batch recipe');
+  await waitForText(page, 'Batch recipe added');
+  console.log('OK — created the "Onion-tomato masala" batch recipe (1,000g default batch yield).');
+
+  // Reopen it — every ingredient persisted.
+  await (await findVisible(page, '[aria-label="Onion-tomato masala"]')).click();
+  await waitForText(page, 'Edit batch recipe');
+  for (const [itemName] of baseIngredients) await waitForText(page, itemName);
+  console.log('OK — reopened the batch recipe; all 5 ingredients are there.');
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+
+  // === Use it in a dish at 200g/portion, alongside one direct ingredient ===
+  await page.goto(`${APP_URL}/settings/sell`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'What you sell');
+  await clickButton(page, 'Add menu item');
+  await waitForText(page, 'Add a dish');
+  await typeInto(page, 'Name', 'Paneer Masala', { last: true });
+  await typeInto(page, 'Selling price', '220', { last: true });
+
+  await clickButton(page, '+ Add ingredient');
+  await waitForText(page, 'Choose an item');
+  await clickButton(page, 'Paneer');
+  await typeInto(page, 'Amount', '0.150');
+  console.log('OK — added Paneer as a direct ingredient.');
+
+  await clickButton(page, '+ Add a batch recipe');
+  await waitForText(page, 'Choose a batch recipe');
+  await clickButton(page, 'Onion-tomato masala');
+  await typeInto(page, 'Amount per portion (g)', '200', { last: true });
+  console.log('OK — used the Onion-tomato masala batch recipe at 200g per portion.');
+
+  await page.screenshot({ path: `${STEP44V1_SCREEN_DIR}/dish-form-base-picker-390.png` });
+
+  await clickButton(page, 'Save dish');
+  await waitForText(page, 'Dish added');
+
+  await (await findVisible(page, '[aria-label="Paneer Masala"]')).click();
+  await waitForText(page, 'Edit dish');
+  await waitForText(page, 'Paneer');
+  await waitForText(page, 'Onion-tomato masala');
+  console.log(
+    'OK — reopened the dish; both lines are there (the direct Paneer ingredient and the batch recipe).',
+  );
+  await (await findVisible(page, '[aria-label="Close"]')).click();
+
+  console.log(`OK — saved Step 44v1 bases screenshots to ${STEP44V1_SCREEN_DIR}/.`);
+  await logoutFromAnywhere(page);
+}
+
+// Step 44v1: low stock — Owner sets a fixed minimum on an item (and a days-of-cover override, to
+// prove both fields save even though the fixed amount is what actually governs while it's set),
+// records a count at a quantity already below it, sees the low_stock alert with the right wording,
+// and opens the shopping list from both Stock and Home. Then the same business's Manager (can set
+// thresholds, sees the list), Head chef (sees the list via Home only, no money, can't set
+// thresholds) and Helper (no entry point at all) each confirm their own view.
+async function checkLowStockFlow(page) {
+  await mkdir(STEP44V1_SCREEN_DIR, { recursive: true });
+  const name = 'Low Stock Owner';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password, 'Low Stock Kitchen');
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+  await fillStepOne(page, '411001', 'Cloud kitchen');
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/3');
+
+  // Rice is already on the cloud_kitchen starter catalogue — tick it rather than re-adding it.
+  await clickAndSettle(await findVisible(page, '[aria-label^="Groceries & dry goods ("]'));
+  await clickAndSettle(await findVisible(page, '[aria-label="Rice. kg"]'));
+  await clickButton(page, '1 selected — Next');
+  await waitForPath(page, '/setup/4');
+  await skipStep(page, 4, '/setup/5');
+
+  const helperMobile = randomMobile();
+  const helperPin = '5261';
+  await typeInto(page, 'Name', 'LS Helper');
+  await typeInto(page, 'Mobile number', helperMobile);
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Helper'));
+  await typeInto(page, 'PIN', helperPin);
+  await clickButton(page, 'Add person');
+  await waitForText(page, 'LS Helper');
+
+  const headChefMobile = randomMobile();
+  const headChefPin = '6372';
+  await typeInto(page, 'Name', 'LS Head Chef', { last: true });
+  await typeInto(page, 'Mobile number', headChefMobile, { last: true });
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Head cook'));
+  await typeInto(page, 'PIN', headChefPin, { last: true });
+  await clickButton(page, 'Add person');
+  await waitForText(page, 'LS Head Chef');
+
+  const managerMobile = randomMobile();
+  const managerPassword = 'LsManager1234!';
+  await typeInto(page, 'Name', 'LS Manager', { last: true });
+  await typeInto(page, 'Mobile number', managerMobile, { last: true });
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Manager'));
+  await typeInto(page, 'Temporary password', managerPassword);
+  await clickButton(page, 'Add person');
+  await waitForText(page, 'LS Manager');
+  console.log('OK — added a Helper, Head chef and Manager for the permissions checks below.');
+
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/6');
+  await clickButton(page, 'Use recommended settings');
+  await waitForPath(page, '/setup/done');
+  await clickButton(page, 'Go to Home');
+  await waitForPath(page, '/home');
+  await keepOpeningCountNotLate(page);
+
+  // === Owner sets a fixed minimum + a days-of-cover override on Rice ===
+  await page.goto(`${APP_URL}/settings/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'What you buy');
+  await (await findVisible(page, '[aria-label="Rice"]')).click();
+  await waitForText(page, 'Edit stock item');
+  await waitForText(page, 'Low-stock alert');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP44V1_SCREEN_DIR}/threshold-section-390.png` });
+
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'Dry staples'));
+  await typeInto(page, 'Override: alert after this many days of cover (optional)', '3');
+  await typeInto(page, 'Or always alert below a fixed amount (optional)', '5');
+  await clickAndSettle(await findVisibleByText(page, 'radio', 'kg', { last: true }));
+  await waitForText(page, 'Alert when less than 5 kg is left.');
+  console.log(
+    'OK — set a days-of-cover override (3 days) and a fixed minimum (5 kg); the fixed one governs.',
+  );
+  await clickButton(page, 'Save item');
+  await waitForText(page, 'Stock item saved');
+
+  // === Record an opening count below the 5 kg threshold ===
+  await page.goto(`${APP_URL}/count`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Starting stock');
+  await typeInto(page, 'Rice quantity', '3');
+  await clickButton(page, 'Save count');
+  await waitForText(page, 'Count saved. Thank you.');
+  await clickButton(page, 'Back to Today');
+  await waitForPath(page, '/home');
+  console.log('OK — counted 3 kg of Rice, below the 5 kg fixed minimum.');
+
+  // === The low_stock alert, with the right wording ===
+  await page.goto(`${APP_URL}/alerts`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Rice');
+  const alertsText = await page.evaluate(() => document.body.innerText);
+  if (!alertsText.toLowerCase().includes('low stock') && !alertsText.toLowerCase().includes('low-stock')) {
+    fail('alerts: expected a low-stock alert mentioning Rice');
+  }
+  console.log('OK — the Alerts list shows a low-stock alert for Rice.');
+
+  // === Shopping list from Stock ===
+  await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await clickAndSettle(await findVisible(page, '[aria-label="Low stock & shopping list"]'));
+  await waitForPath(page, '/stock/low-stock');
+  await waitForText(page, 'Rice');
+  await waitForText(page, 'Alert below 5 kg');
+  await page.screenshot({ path: `${STEP44V1_SCREEN_DIR}/low-stock-screen-390.png` });
+  console.log('OK — opened the shopping list from Stock; Rice is listed with its threshold.');
+
+  // === Shopping list from the Home nudge ===
+  await page.goto(`${APP_URL}/home`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'running low');
+  await clickAndSettle(await findVisibleContaining(page, 'button', 'See the shopping list.'));
+  await waitForPath(page, '/stock/low-stock');
+  console.log('OK — opened the shopping list from the Home nudge card too.');
+  await logoutFromAnywhere(page);
+
+  // === Manager: can set thresholds, sees the list (with money) ===
+  await login(page, managerMobile, managerPassword);
+  await waitForPath(page, '/home');
+  await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await clickAndSettle(await findVisible(page, '[aria-label="Low stock & shopping list"]'));
+  await waitForPath(page, '/stock/low-stock');
+  await waitForText(page, 'Rice');
+  console.log('OK — the Manager sees the low-stock/shopping list from Stock.');
+
+  await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await (await findVisible(page, '[aria-label="Rice"]')).click();
+  await waitForText(page, 'Low-stock alert');
+  const managerDetailText = await page.evaluate(() => document.body.innerText);
+  if (managerDetailText.includes('Edit item')) {
+    fail('a Manager should not see the full "Edit item" button on stock item detail');
+  }
+  await clickButton(page, 'Low-stock alert');
+  await waitForText(page, 'Low-stock alert for Rice');
+  await typeInto(page, 'Override: alert after this many days of cover (optional)', '4');
+  await clickButton(page, 'Save low-stock alert');
+  await waitForText(page, 'Low-stock alert saved');
+  console.log('OK — the Manager opens the narrow "Low-stock alert" sheet and saves a threshold change.');
+  await logoutFromAnywhere(page);
+
+  // === Head chef: sees the list via Home only (no money, no stock.view, can't set thresholds) ===
+  await login(page, headChefMobile, headChefPin);
+  await waitForPath(page, '/home');
+  const headChefHomeText = await page.evaluate(() => document.body.innerText);
+  if (!headChefHomeText.includes('running low')) {
+    fail('the Head chef should see the low-stock nudge on Home (stock.low_stock_view)');
+  }
+  await clickAndSettle(await findVisibleContaining(page, 'button', 'See the shopping list.'));
+  await waitForPath(page, '/stock/low-stock');
+  await waitForText(page, 'Rice');
+  const headChefListText = await page.evaluate(() => document.body.innerText);
+  if (headChefListText.includes('to restock')) {
+    fail('the Head chef should not see the shortfall rupee value on the low-stock list');
+  }
+  console.log('OK — the Head chef reaches the low-stock list via the Home nudge, with no money shown.');
+  await page.goto(`${APP_URL}/stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, "You don't have access to this.");
+  console.log('OK — the Head chef has no other low-stock entry point (/stock shows NoAccess).');
+  await logoutFromAnywhere(page);
+
+  // === Helper: no entry point at all ===
+  await login(page, helperMobile, helperPin);
+  await waitForPath(page, '/home');
+  const helperHomeText = await page.evaluate(() => document.body.innerText);
+  if (helperHomeText.includes('running low')) {
+    fail('a Helper has no stock.low_stock_view — Home should not show the low-stock nudge');
+  }
+  await page.goto(`${APP_URL}/stock/low-stock`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, "You don't have access to this.");
+  console.log('OK — the Helper has no low-stock entry point anywhere, and the URL itself shows NoAccess.');
+
+  console.log(`OK — saved Step 44v1 low-stock screenshots to ${STEP44V1_SCREEN_DIR}/.`);
+}
+
 // ---------- scenario tiering (--only <name>, --list) ----------
 
 /** Every scenario in the order main() runs them. "chain" scenarios share one Owner business/
@@ -1632,6 +1961,8 @@ const FLOW_SCENARIOS = [
   { name: 'onboarding-menu', kind: 'solo' },
   { name: 'onboarding-diy', kind: 'solo' },
   { name: 'menu-scan-stuck', kind: 'solo' },
+  { name: 'bases', kind: 'solo' },
+  { name: 'low-stock', kind: 'solo' },
 ];
 
 function parseFlowArgs() {
@@ -1859,8 +2190,8 @@ async function main() {
     await waitForPath(page, '/setup/5');
     console.log('OK — step 4 saved, moved to /setup/5.');
 
-    const helperMobile = randomMobile();
-    const helperPin = '7392';
+    helperMobile = randomMobile();
+    helperPin = '7392';
     await typeInto(page, 'Name', 'Helper One');
     await typeInto(page, 'Mobile number', helperMobile);
     await clickAndSettle(await findVisibleByText(page, 'radio', 'Helper'));
@@ -1870,8 +2201,8 @@ async function main() {
     console.log('OK — added a Helper with a PIN.');
 
     // Step 10: also add a Head chef, for the counts.status Today-screen scenario below.
-    const headChefMobile = randomMobile();
-    const headChefPin = '8417';
+    headChefMobile = randomMobile();
+    headChefPin = '8417';
     await typeInto(page, 'Name', 'Chef Rahul', { last: true });
     await typeInto(page, 'Mobile number', headChefMobile, { last: true });
     // This business is "Cloud kitchen" — sectorCopy.json's roleLabels shows the Head chef role as
@@ -1883,8 +2214,8 @@ async function main() {
     console.log('OK — added a Head chef with a PIN.');
 
     // Step 11: a Manager too, for the "no Start stock count button" scenario below.
-    const managerMobile = randomMobile();
-    const managerPassword = 'Manager1234!';
+    managerMobile = randomMobile();
+    managerPassword = 'Manager1234!';
     await typeInto(page, 'Name', 'Manoj Manager', { last: true });
     await typeInto(page, 'Mobile number', managerMobile, { last: true });
     await clickAndSettle(await findVisibleByText(page, 'radio', 'Manager'));
@@ -2101,6 +2432,14 @@ async function main() {
     if (shouldRun('menu-scan-stuck'))
       await timed('menu-scan-stuck', async () => {
     await checkMenuScanStuckFlow(page);
+      });
+    if (shouldRun('bases'))
+      await timed('bases', async () => {
+    await checkBasesFlow(page);
+      });
+    if (shouldRun('low-stock'))
+      await timed('low-stock', async () => {
+    await checkLowStockFlow(page);
       });
 
     console.log(only ? `\nOK — scenario "${only}" passed.` : '\nAll flow checks passed.');

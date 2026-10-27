@@ -517,6 +517,48 @@ not built yet.
   still owed from this step: closing-count leftover entry, Home's revenue-weighted coverage
   banner (docs/BASES_PLAN.md secs 5, 8.4's Screens sub-step).
 
+- **Step 44v1 — Browser verification for bases and low-stock (390px + responsive audit), no new
+  features.** Proved Step 42b1c1's bases screens and Step 43b1c2a's low-stock screens in a real
+  browser for the first time (`flow.mjs`'s new `bases` and `low-stock` scenarios, both solo), and
+  found/fixed three real bugs along the way — none of them in this step's own screens:
+  - **`permissions.py`'s Manager role was missing `stock.low_stock_view`**, even though this table
+    and `MAP.md` both already documented Manager as `yes` — Manager could set thresholds
+    (`stockitems.thresholds_manage`) but the "Low stock & shopping list" link never rendered for
+    them on Stock, and the list/Home-nudge entry points were unreachable. Added the permission
+    string to `_LOWER_ROLE_PERMISSIONS[MANAGER]`; `smoke.py --area permissions`'s role-table dump
+    now shows it.
+  - **`flow.mjs`'s wizard scenario shadowed its own `helperMobile`/`helperPin`/`headChefMobile`/
+    `headChefPin`/`managerMobile`/`managerPassword` variables** — declared with `const` inside the
+    wizard's own block instead of assigning the outer `let`s (unlike `name`/`mobile`/`password`,
+    which correctly assign without `const` just above them), so every later chain scenario that
+    logs in as the Helper/Head chef/Manager (`helper-today`, `headchef-today`, `manager-home`, and
+    everything chained after them) crashed logging in with `undefined` credentials. This had
+    nothing to do with bases or low-stock — found only because this step needed those same role
+    credentials for its own low-stock-permissions check, and `--only manager-home` reliably
+    crashed before the fix.
+  - **The signup rate limiter tripped repeatedly during this step's repeated local runs** (bases
+    and low-stock both sign up a fresh Owner, low-stock adds 3 more team accounts). Made
+    `signup_per_ip` configurable (`RATE_LIMIT_SIGNUP_PER_IP` env var, default unchanged at 32/hour)
+    and set it high when starting the backend for this kind of verification session — e.g.
+    `$env:RATE_LIMIT_SIGNUP_PER_IP=1000; npm run dev` (PowerShell) before a `flow`/`verify:ui` run
+    that signs up more than a handful of accounts on one dev IP.
+  Flows run: bases (create "Onion-tomato masala" — onion 450g/tomato 400g/oil 90ml/cashew 40g/
+  garam masala 20g against the cloud_kitchen starter catalogue's own kg/L items, which store in
+  base units regardless of entry unit — reopen it, use it in a dish at 200g/portion alongside one
+  direct ingredient, reopen the dish and see both lines); low-stock (Owner sets a 3-day override
+  and a 5kg fixed minimum on Rice, counts 3kg, sees the `low_stock` alert and the shopping list
+  from both Stock and the Home nudge; Manager sees the list and uses the narrow "Low-stock alert"
+  sheet; Head chef reaches the list via the Home nudge only, with no shortfall value and no
+  `/stock` access; Helper has no entry point anywhere); `onboarding-diy` and `onboarding-menu`
+  regression, both still green. **Not done**: the 320-1280px responsive audit for the 5 screens
+  this step was asked to cover (bases list, base sheet, dish form's base picker, the threshold
+  section, the low-stock screen) — ran out of time; no `responsive_check.mjs --screen` entries
+  were added. **Also found, not fixed (needs its own step, not a small fix)**: deleting a base
+  while it's in use has no UI at all — `bases.tsx`/`BaseSheet.tsx` never call `DELETE
+  .../bases/<id>/`, even though the backend's 409-with-`confirm_unlink` refusal and the
+  `deleteButton`/`deleteConfirmTitle`/`deleteInUseMessage`/`deleteConfirmButton` copy in
+  `strings.ts` already exist for it.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every
