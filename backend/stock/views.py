@@ -624,6 +624,7 @@ class LowStockListView(APIView):
                 "suggested_order_qty": display["suggested_order_qty"],
                 "is_estimate": row["is_estimate"],
                 "coverage_pct": row["coverage_pct"],
+                "partly_unconfirmed": row["partly_unconfirmed"],
             }
             if can_see_money:
                 unit_cost = unit_cost_for(item)

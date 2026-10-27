@@ -180,6 +180,8 @@ export const strings = {
     needsIngredientsBody: "So we can compare what's sold with what's used.",
     firstCountTitle: 'Count your starting stock (about 2 minutes)',
     firstCountBody: 'Count what you can — the rest can wait.',
+    lowStockTitle: (n: number) => `${n} ${n === 1 ? 'item is' : 'items are'} running low`,
+    lowStockBody: 'See the shopping list.',
   },
   buy: {
     title: 'Purchases',
@@ -265,10 +267,29 @@ export const strings = {
       recentPurchases: 'Last 5 purchases',
       recordPurchase: 'Record purchase',
       editItem: 'Edit item',
+      lowStockAlert: 'Low-stock alert',
       noPurchasesYet: "This item hasn't been bought yet.",
     },
     lastCounted: (qty: string) => `Last counted ${qty}`,
     neverCounted: 'Not counted yet',
+    /** Step 43b1c2a (docs/BASES_PLAN.md secs 3, 5, 8.3-8.4): the low-stock/shopping-list screen,
+     * reachable from Home and the Stock tab (Owner/Manager) or from Home alone (Head chef, who has
+     * `stock.low_stock_view` without `stock.view`). */
+    lowStock: {
+      title: 'Low stock',
+      subtitle: 'Items below their alert threshold, grouped, with a suggested order amount.',
+      viewLink: 'Low stock & shopping list',
+      empty: 'Nothing is running low right now.',
+      estimateLabel: (qty: string, unit: string) => `~${qty} ${unit} estimated`,
+      partlyUnconfirmedNote: 'Based partly on suggested (unconfirmed) recipes',
+      thresholdLabel: (qty: string, unit: string) => `Alert below ${qty} ${unit}`,
+      suggestedOrderLabel: (qty: string, unit: string) => `Suggested order: ${qty} ${unit}`,
+      shortfallValueLabel: (value: string) => `~${value} to restock`,
+      errors: {
+        network: "Can't reach EasyKharcha. Check your internet and try again.",
+        generic: 'Something went wrong. Please try again.',
+      },
+    },
   },
   today: {
     greeting: (name: string) => `Good evening, ${name}`,
@@ -485,6 +506,7 @@ export const strings = {
       wastage_high: 'Wastage',
       gap_flagged: 'Gaps',
       expiry_soon: 'Expiry',
+      low_stock: 'Low stock',
     } as Record<string, string | ((n: number) => string)>,
     empty: {
       message: 'Nothing needs attention',
@@ -521,6 +543,8 @@ export const strings = {
       expiry_date: 'Estimated expiry',
       days_left: 'Days left',
       value_at_risk: 'Value at risk',
+      estimated_qty: 'Estimated stock now',
+      threshold_qty: 'Alert threshold',
     } as Record<string, string>,
     errors: {
       network: "Can't reach EasyKharcha. Check your internet and try again.",
@@ -1029,6 +1053,22 @@ export const strings = {
         shelfLifeRequired: 'Enter a shelf life in days, or turn that off.',
         network: "Can't reach EasyKharcha. Check your internet and try again.",
         generic: 'Something went wrong. Please try again.',
+      },
+      /** Step 43b1c2a (docs/BASES_PLAN.md secs 3-5, 8.3): the low-stock threshold section, shown
+       * in the stock item form only with stockitems.thresholds_manage. */
+      lowStock: {
+        title: 'Low-stock alert',
+        categoryLabel: 'What kind of item is this?',
+        overrideLabel: 'Override: alert after this many days of cover (optional)',
+        overridePlaceholder: 'Leave blank to use the category default',
+        fixedQtyLabel: 'Or always alert below a fixed amount (optional)',
+        effectiveDays: (days: number) =>
+          `Alert when less than about ${days} day${days === 1 ? '' : 's'} of use is left.`,
+        effectiveFixed: (qty: string, unit: string) =>
+          `Alert when less than ${qty} ${unit} is left.`,
+        sheetTitle: (name: string) => `Low-stock alert for ${name}`,
+        save: 'Save low-stock alert',
+        savedToast: 'Low-stock alert saved',
       },
     },
     sell: {

@@ -13,6 +13,7 @@ import {
   Body,
   EmptyState,
   Heading,
+  Icon,
   NoAccess,
   ReadError,
   Screen,
@@ -81,6 +82,18 @@ export default function Stock() {
           <Heading level={1}>{s.title}</Heading>
           <Body style={styles.subtitle}>{s.subtitle}</Body>
         </View>
+
+        {can(permissions, 'stock.low_stock_view') ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={s.lowStock.viewLink}
+            onPress={() => router.push('/stock/low-stock')}
+            style={styles.lowStockLink}
+          >
+            <Icon name="alert" size={18} colour={colours.primary} />
+            <Small style={styles.lowStockLinkText}>{s.lowStock.viewLink}</Small>
+          </Pressable>
+        ) : null}
 
         <TextField
           label={s.searchPlaceholder}
@@ -156,6 +169,16 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: colours.muted,
+  },
+  lowStockLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 44,
+  },
+  lowStockLinkText: {
+    color: colours.primary,
+    fontFamily: fonts.bodyExtraBold,
   },
   list: {
     gap: spacing.sm,

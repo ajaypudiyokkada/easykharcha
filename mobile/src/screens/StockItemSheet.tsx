@@ -6,6 +6,7 @@ import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import {
   EMPTY_STOCK_ITEM_DRAFT,
+  lowStockFixedQtyToBaseUnit,
   StockItemForm,
   stockItemToDraft,
   type StockItemDraft,
@@ -16,6 +17,7 @@ import { Banner, Button, Sheet } from '../ui';
 import { spacing } from '../theme/tokens';
 
 const ss = strings.settings.stock;
+const sl = strings.settings.stock.lowStock;
 
 type Props = {
   visible: boolean;
@@ -25,6 +27,10 @@ type Props = {
   editingItem: StockItem;
   /** This business's other stock items — for the "you already have X" check and group chips. */
   existingItems: StockItem[];
+  /** Step 43b1c2a: 'thresholds' renders only the low-stock threshold section and PATCHes only
+   * those fields — for a Manager, who has `stockitems.thresholds_manage` but not
+   * `stockitems.manage` and so can't reach the rest of this form. Defaults to the full edit. */
+  mode?: 'full' | 'thresholds';
 };
 
 /**
@@ -33,9 +39,17 @@ type Props = {
  * component rather than needing to track a dirty subset. *Adding* a new item (Step 19) is inline
  * on the list screen itself now, not a sheet — see settings/stock.tsx and setup/3.tsx.
  */
-export function StockItemSheet({ visible, onClose, onSaved, editingItem, existingItems }: Props) {
+export function StockItemSheet({
+  visible,
+  onClose,
+  onSaved,
+  editingItem,
+  existingItems,
+  mode = 'full',
+}: Props) {
   const { authedFetch, businesses } = useAuth();
   const business = businesses[0];
+  const thresholdsOnly = mode === 'thresholds';
 
   const [draft, setDraft] = useState<StockItemDraft>(EMPTY_STOCK_ITEM_DRAFT);
   const [errors, setErrors] = useState<ReturnType<typeof validateStockItemDraft>>({});
@@ -67,32 +81,49 @@ export function StockItemSheet({ visible, onClose, onSaved, editingItem, existin
 
   async function handleSave() {
     setFormError(null);
-    const nextErrors = validateStockItemDraft(
+    const allErrors = validateStockItemDraft(
       draft,
       existingItems.filter((item) => item.id !== editingItem.id),
     );
+    const nextErrors: typeof allErrors = thresholdsOnly
+      ? {
+          lowStockDaysOverride: allErrors.lowStockDaysOverride,
+          lowStockFixedQty: allErrors.lowStockFixedQty,
+        }
+      : allErrors;
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0 || !business) return;
+    if (Object.values(nextErrors).some((message) => message) || !business) return;
+
+    const thresholdFields = {
+      low_stock_category: draft.lowStockCategory,
+      low_stock_days_override: draft.lowStockDaysOverride.trim()
+        ? Number(draft.lowStockDaysOverride.trim())
+        : null,
+      low_stock_fixed_qty: lowStockFixedQtyToBaseUnit(draft, editingItem),
+    };
 
     setSaving(true);
     try {
       await authedFetch(`/businesses/${business.id}/stock-items/${editingItem.id}/`, {
         method: 'PATCH',
-        body: {
-          name: draft.name.trim(),
-          unit: draft.unit,
-          pack_size_base_qty: draft.packSizeBaseQty.trim() || null,
-          usual_price: draft.usualPrice.trim() || null,
-          supplier: draft.supplier.trim(),
-          shared: draft.shared,
-          goes_off: draft.goesOff,
-          shelf_life_days:
-            draft.goesOff && draft.shelfLifeDays.trim() ? Number(draft.shelfLifeDays) : null,
-          group: draft.group.trim(),
-          active: draft.active,
-        },
+        body: thresholdsOnly
+          ? thresholdFields
+          : {
+              name: draft.name.trim(),
+              unit: draft.unit,
+              pack_size_base_qty: draft.packSizeBaseQty.trim() || null,
+              usual_price: draft.usualPrice.trim() || null,
+              supplier: draft.supplier.trim(),
+              shared: draft.shared,
+              goes_off: draft.goesOff,
+              shelf_life_days:
+                draft.goesOff && draft.shelfLifeDays.trim() ? Number(draft.shelfLifeDays) : null,
+              group: draft.group.trim(),
+              active: draft.active,
+              ...thresholdFields,
+            },
       });
-      onSaved(ss.savedToast);
+      onSaved(thresholdsOnly ? sl.savedToast : ss.savedToast);
     } catch (err) {
       mapError(err);
     } finally {
@@ -101,7 +132,11 @@ export function StockItemSheet({ visible, onClose, onSaved, editingItem, existin
   }
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={ss.editSheetTitle}>
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title={thresholdsOnly ? sl.sheetTitle(editingItem.name) : ss.editSheetTitle}
+    >
       {formError ? (
         <View style={styles.banner}>
           <Banner kind="error">{formError}</Banner>
@@ -115,10 +150,17 @@ export function StockItemSheet({ visible, onClose, onSaved, editingItem, existin
           businessType={business?.business_type ?? ''}
           existingGroups={existingGroups}
           unitLocked={editingItem.unit_locked}
-          showActive
+          showActive={!thresholdsOnly}
+          canManageThresholds={!thresholdsOnly}
+          thresholdsOnly={thresholdsOnly}
         />
       </View>
-      <Button label={ss.save} variant="primary" onPress={handleSave} loading={saving} />
+      <Button
+        label={thresholdsOnly ? sl.save : ss.save}
+        variant="primary"
+        onPress={handleSave}
+        loading={saving}
+      />
     </Sheet>
   );
 }

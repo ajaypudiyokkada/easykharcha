@@ -6,7 +6,7 @@ import type { Alert, AlertListResponse } from '../src/api/alerts';
 import type { PurchaseListResponse } from '../src/api/purchases';
 import type { TodayStatus } from '../src/api/counts';
 import type { SaleListResponse } from '../src/api/sales';
-import type { SellItem } from '../src/api/stock';
+import type { LowStockListResponse, SellItem } from '../src/api/stock';
 import type { WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
 import { can, isLimitedRole } from '../src/auth/permissions';
@@ -128,10 +128,12 @@ function TodayHome() {
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
   const canRecordWastage = can(permissions, 'wastage.create');
+  const canSeeLowStock = can(permissions, 'stock.low_stock_view');
   const timezone = business?.timezone ?? 'Asia/Kolkata';
 
   const [today, setToday] = useState<TodayStatus | null>(null);
   const [wastage, setWastage] = useState<WastageListResponse | null>(null);
+  const [lowStockCount, setLowStockCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [wasteSheetVisible, setWasteSheetVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -149,7 +151,13 @@ function TodayHome() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [business, authedFetch]);
+    if (canSeeLowStock) {
+      authedFetch<LowStockListResponse>(`/businesses/${business.id}/stock/low-stock/`)
+        .then((response) => setLowStockCount(response.results.length))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [business, authedFetch, canSeeLowStock]);
 
   useEffect(() => {
     load();
@@ -202,6 +210,23 @@ function TodayHome() {
             <Small style={styles.deadlineSub}>{t.bothDoneTitle}</Small>
           )}
         </Card>
+
+        {canSeeLowStock && lowStockCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.setupCard}
+            onPress={() => router.push('/stock/low-stock')}
+          >
+            <View style={styles.setupIcon}>
+              <Icon name="alert" size={20} colour={colours.card} />
+            </View>
+            <View style={styles.entryMain}>
+              <Body style={styles.attentionTitle}>{s.lowStockTitle(lowStockCount)}</Body>
+              <Small style={styles.entryMeta}>{s.lowStockBody}</Small>
+            </View>
+            <Icon name="chevronRight" size={20} colour={colours.muted} />
+          </Pressable>
+        ) : null}
 
         {canRecordWastage ? (
           <View style={styles.bigActionsGrid}>
@@ -282,6 +307,7 @@ function OwnerHome() {
   );
   const [salesSummary, setSalesSummary] = useState<SaleListResponse['summary'] | null>(null);
   const [needsIngredientsCount, setNeedsIngredientsCount] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
   const [today, setToday] = useState<TodayStatus | null>(null);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [purchaseSheetVisible, setPurchaseSheetVisible] = useState(false);
@@ -297,6 +323,7 @@ function OwnerHome() {
   const canSeeSales = can(permissions, 'sales.view');
   const canRecordSales = can(permissions, 'sales.create');
   const canSeeAlerts = can(permissions, 'alerts.view');
+  const canSeeLowStock = can(permissions, 'stock.low_stock_view');
   const timezone = business.timezone;
   const isOwner = business.role === 'owner';
 
@@ -328,11 +355,16 @@ function OwnerHome() {
         .then((response) => setAlerts(response.results))
         .catch(() => {});
     }
+    if (canSeeLowStock) {
+      authedFetch<LowStockListResponse>(`/businesses/${business.id}/stock/low-stock/`)
+        .then((response) => setLowStockCount(response.results.length))
+        .catch(() => {});
+    }
     authedFetch<TodayStatus>(`/businesses/${business.id}/today/`)
       .then(setToday)
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business.id, canSeePurchases, canSeeSales, canSeeAlerts, isOwner, timezone]);
+  }, [business.id, canSeePurchases, canSeeSales, canSeeAlerts, canSeeLowStock, isOwner, timezone]);
 
   useEffect(() => {
     loadToday();
@@ -480,6 +512,23 @@ function OwnerHome() {
                 {s.needsIngredientsTitle(needsIngredientsCount)}
               </Body>
               <Small style={styles.entryMeta}>{s.needsIngredientsBody}</Small>
+            </View>
+            <Icon name="chevronRight" size={20} colour={colours.muted} />
+          </Pressable>
+        ) : null}
+
+        {canSeeLowStock && lowStockCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.setupCard}
+            onPress={() => router.push('/stock/low-stock')}
+          >
+            <View style={styles.setupIcon}>
+              <Icon name="alert" size={20} colour={colours.card} />
+            </View>
+            <View style={styles.entryMain}>
+              <Body style={styles.attentionTitle}>{s.lowStockTitle(lowStockCount)}</Body>
+              <Small style={styles.entryMeta}>{s.lowStockBody}</Small>
             </View>
             <Icon name="chevronRight" size={20} colour={colours.muted} />
           </Pressable>

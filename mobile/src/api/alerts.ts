@@ -1,5 +1,11 @@
 export type AlertType =
-  'opening_late' | 'closing_late' | 'price_rise' | 'wastage_high' | 'gap_flagged' | 'expiry_soon';
+  | 'opening_late'
+  | 'closing_late'
+  | 'price_rise'
+  | 'wastage_high'
+  | 'gap_flagged'
+  | 'expiry_soon'
+  | 'low_stock';
 export type AlertSeverity = 'warning' | 'danger';
 
 export type AlertNextAction = {

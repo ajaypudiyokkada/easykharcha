@@ -11,6 +11,8 @@ export type StockItemFieldErrors = {
   usualPrice?: string;
   packSizeBaseQty?: string;
   shelfLifeDays?: string;
+  lowStockDaysOverride?: string;
+  lowStockFixedQty?: string;
 };
 
 /** Shared by setup/3's inline add form and Settings' StockItemSheet — the same rules in exactly
@@ -57,6 +59,22 @@ export function validateStockItemDraft(
       }
     }
   }
+
+  if (draft.lowStockDaysOverride.trim()) {
+    const overrideCheck = validateRequiredNumber(draft.lowStockDaysOverride);
+    if (overrideCheck === 'negative') errors.lowStockDaysOverride = s3.errors.negativeNumber;
+    else if (
+      overrideCheck === 'invalid' ||
+      !Number.isInteger(Number(draft.lowStockDaysOverride.trim())) ||
+      Number(draft.lowStockDaysOverride.trim()) < 1
+    ) {
+      errors.lowStockDaysOverride = s3.errors.shelfLifeInvalid;
+    }
+  }
+
+  const fixedQtyCheck = validateOptionalNumber(draft.lowStockFixedQty);
+  if (fixedQtyCheck === 'invalid') errors.lowStockFixedQty = s3.errors.invalidNumber;
+  else if (fixedQtyCheck === 'negative') errors.lowStockFixedQty = s3.errors.negativeNumber;
 
   return errors;
 }

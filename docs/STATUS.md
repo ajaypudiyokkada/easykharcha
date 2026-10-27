@@ -489,6 +489,33 @@ not built yet.
   covers the core flow), the dish view's raw-equivalent note ("uses about 90 g onion through the
   base"), recipe-card base-line styling beyond the edit form, `setup/4.tsx` wiring, and the
   `verify:ui` browser flow (no `flow.mjs` scenario was added this step — ran out of time).
+- **Step 43b1c2a — Low-stock screens, the estimate fix, bases' own `verify:ui` flow still owed
+  (docs/BASES_PLAN.md secs 3-5, 8.3).** `stock/low_stock.py`'s `estimated_stock_now` now subtracts
+  ALL recipes' expected usage (confirmed and unconfirmed/suggested), not confirmed-only — ignoring
+  an unreviewed recipe's usage overstated available stock, the unsafe direction; a new
+  `partly_unconfirmed` flag (not hidden) says when some of that subtraction rests on an unconfirmed
+  recipe, threaded through `low_stock_rows`, `LowStockListView` and the `low_stock` alert's `detail`/
+  `numbers`. Loss-alert coverage rules (`counts/gap.py`) are unchanged — only the stock estimate
+  itself. New smoke case (`check_low_stock_flow`) proves it with a direct-SQL `recipe_status`
+  flip (same pattern `_ai_sql_write` already uses — no API path to `unconfirmed` exists yet).
+  New mobile: `StockItemForm`'s low-stock threshold section (category chips, optional override
+  days, optional fixed minimum via `QuantityInput`, an "Alert when..." plain-words summary),
+  visible only with `canManageThresholds`; `StockItemSheet` gained a `mode: 'thresholds'` that
+  renders the section alone and PATCHes only those three fields — a Manager's own entry point
+  (`stock/[id].tsx`'s new "Low-stock alert" button), separate from the Owner's full "Edit item"
+  sheet (which now folds the section in too). New `GET stock/low-stock/` screen
+  (`app/stock/low-stock.tsx`, grouped list, estimate/threshold/suggested order, shortfall ₹ only
+  when the row carries it, "based on suggested recipes" note when `partly_unconfirmed`) reachable
+  from the Stock list (Owner/Manager) and a Home nudge card (Owner/Manager via `OwnerHome`, Head
+  chef via `TodayHome` — Helper has no `stock.low_stock_view` so sees neither). `low_stock` was
+  missing from the mobile `AlertType` union and the Alerts screen's filter chips/icon/number-row
+  mapping entirely (Step 41b1b3a only built the backend half) — added. **Still owed**: the
+  `verify:ui` browser flow for both this step's screens and Step 42b1c1's bases screens (bases
+  list, base sheet, dish form's base picker) — no `flow.mjs` scenario or `responsive_check.mjs`
+  screen entries exist for either yet; ran out of time. Also still owed from Step 42b1c1: the
+  base's own "Used in" screen, the dish raw-equivalent note, `setup/4.tsx`'s bases wiring. Also
+  still owed from this step: closing-count leftover entry, Home's revenue-weighted coverage
+  banner (docs/BASES_PLAN.md secs 5, 8.4's Screens sub-step).
 
 ## Permission table
 

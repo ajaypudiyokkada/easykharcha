@@ -67,6 +67,11 @@ function numberRows(alert: Alert): { label: string; value: string }[] {
         { label: labels.days_left, value: String(n.days_left) },
         { label: labels.value_at_risk, value: formatRupees(String(n.value_at_risk)) },
       ];
+    case 'low_stock':
+      return [
+        { label: labels.estimated_qty, value: `${n.estimated_qty} ${n.unit}` },
+        { label: labels.threshold_qty, value: `${n.threshold_qty} ${n.unit}` },
+      ];
     default:
       return [];
   }

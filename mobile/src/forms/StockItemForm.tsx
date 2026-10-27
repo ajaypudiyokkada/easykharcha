@@ -3,15 +3,22 @@ import { Pressable, StyleSheet, View, type TextInput } from 'react-native';
 
 import type { StockItem } from '../api/stock';
 import { UNITS, type UnitValue } from '../constants/units';
+import {
+  LOW_STOCK_CATEGORIES,
+  LOW_STOCK_CATEGORY_DEFAULT_DAYS,
+  type LowStockCategoryValue,
+} from '../constants/lowStockCategories';
 import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
-import { baseUnitFor, unitFamily } from '../units';
+import { baseUnitFor, convertEntryQuantity, displayQuantity, unitFamily } from '../units';
+import { QuantityInput } from './QuantityInput';
 import { Banner, Small, TextField, Toggle } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
 
 const s3 = strings.setup.step3;
 const ss = strings.settings.stock;
+const sl = strings.settings.stock.lowStock;
 
 export type StockItemDraft = {
   name: string;
@@ -25,6 +32,11 @@ export type StockItemDraft = {
   shelfLifeDays: string;
   group: string;
   active: boolean;
+  lowStockCategory: LowStockCategoryValue;
+  lowStockDaysOverride: string;
+  lowStockFixedQty: string;
+  /** null means "the item's own base unit" — same convention as every other QuantityInput field. */
+  lowStockFixedQtyEntryUnit: string | null;
 };
 
 export const EMPTY_STOCK_ITEM_DRAFT: StockItemDraft = {
@@ -38,9 +50,17 @@ export const EMPTY_STOCK_ITEM_DRAFT: StockItemDraft = {
   shelfLifeDays: '',
   group: '',
   active: true,
+  lowStockCategory: 'dry_staples',
+  lowStockDaysOverride: '',
+  lowStockFixedQty: '',
+  lowStockFixedQtyEntryUnit: null,
 };
 
 export function stockItemToDraft(item: StockItem): StockItemDraft {
+  const [fixedQtyValue, fixedQtyUnit] =
+    item.low_stock_fixed_qty != null
+      ? displayQuantity(Number(item.low_stock_fixed_qty), item.unit)
+      : [null, null];
   return {
     name: item.name,
     unit: item.unit as UnitValue,
@@ -52,7 +72,24 @@ export function stockItemToDraft(item: StockItem): StockItemDraft {
     shelfLifeDays: item.shelf_life_days != null ? String(item.shelf_life_days) : '',
     group: item.group,
     active: item.active,
+    lowStockCategory: (item.low_stock_category || 'dry_staples') as LowStockCategoryValue,
+    lowStockDaysOverride:
+      item.low_stock_days_override != null ? String(item.low_stock_days_override) : '',
+    lowStockFixedQty: fixedQtyValue != null ? String(fixedQtyValue) : '',
+    lowStockFixedQtyEntryUnit: fixedQtyUnit,
   };
+}
+
+/** `low_stock_fixed_qty` converted from the draft's chosen entry unit down to the item's base
+ * unit — the field the backend stores and expects (no `entry_unit` companion field there, unlike
+ * purchases/counts/wastage/ingredients). null if left blank. */
+export function lowStockFixedQtyToBaseUnit(
+  draft: StockItemDraft,
+  stockItem: { unit: string; unit_family: string; pack_size_base_qty: string | number | null },
+): number | null {
+  const trimmed = draft.lowStockFixedQty.trim();
+  if (!trimmed) return null;
+  return convertEntryQuantity(Number(trimmed), draft.lowStockFixedQtyEntryUnit, stockItem);
 }
 
 /** A fresh draft pre-filled with this business type's default unit — used everywhere a brand-new
@@ -70,6 +107,8 @@ type Props = {
     usualPrice?: string;
     packSizeBaseQty?: string;
     shelfLifeDays?: string;
+    lowStockDaysOverride?: string;
+    lowStockFixedQty?: string;
   };
   /** Drives every sector-varying placeholder, unit list and toggle wording — see sectorCopy.ts. */
   businessType: string;
@@ -90,6 +129,13 @@ type Props = {
    * has no price/supplier/shared/perishable guess worth asking for up front, so those stay editable
    * later from Stock instead. */
   minimal?: boolean;
+  /** Step 43b1c2a: shows the low-stock threshold section — only with `stockitems.thresholds_manage`
+   * (Owner always has it; Manager has it without `stockitems.manage`, so sees this section alone,
+   * via `thresholdsOnly` below, not the rest of this form). */
+  canManageThresholds?: boolean;
+  /** Renders ONLY the threshold section, nothing else — the Manager's "Low-stock alert" sheet,
+   * which can set thresholds but not rename/re-price/deactivate the item. */
+  thresholdsOnly?: boolean;
 };
 
 /** The stock-item fields shared by setup/3's "add your own" and Settings' "What you buy" add/edit
@@ -106,6 +152,8 @@ export function StockItemForm({
   existingGroups,
   nameFieldRef,
   minimal,
+  canManageThresholds,
+  thresholdsOnly,
 }: Props) {
   const cfg = sectorCopyFor(businessType);
   const [showMoreUnits, setShowMoreUnits] = useState(
@@ -164,6 +212,69 @@ export function StockItemForm({
     !!value.unit && (unitFamily(value.unit) !== 'count' || value.unit === 'bottle');
   const packSizeUnit =
     value.unit && unitFamily(value.unit) !== 'count' ? baseUnitFor(value.unit) : 'ml';
+
+  const thresholdStockItem = {
+    unit: value.unit || 'g',
+    unit_family: value.unit ? unitFamily(value.unit) : 'weight',
+    pack_size_base_qty: value.packSizeBaseQty || null,
+  };
+  const effectiveDays = value.lowStockDaysOverride.trim()
+    ? Number(value.lowStockDaysOverride.trim())
+    : LOW_STOCK_CATEGORY_DEFAULT_DAYS[value.lowStockCategory];
+  const fixedQtyTrimmed = value.lowStockFixedQty.trim();
+  const effectiveThresholdText = fixedQtyTrimmed
+    ? sl.effectiveFixed(fixedQtyTrimmed, value.lowStockFixedQtyEntryUnit || value.unit || '')
+    : sl.effectiveDays(effectiveDays);
+
+  const lowStockSection =
+    canManageThresholds || thresholdsOnly ? (
+      <View style={styles.field}>
+        <Small style={styles.unitLabel}>{sl.title}</Small>
+        <View style={styles.field}>
+          <Small style={styles.unitFamilyLabel}>{sl.categoryLabel}</Small>
+          <View style={styles.unitRow}>
+            {LOW_STOCK_CATEGORIES.map((cat) => {
+              const selected = value.lowStockCategory === cat.value;
+              return (
+                <Pressable
+                  key={cat.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  onPress={() => onChange({ lowStockCategory: cat.value })}
+                  style={[styles.unitChip, selected ? styles.unitChipSelected : null]}
+                >
+                  <Small style={selected ? styles.unitChipTextSelected : styles.unitChipText}>
+                    {cat.label}
+                  </Small>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <TextField
+          label={sl.overrideLabel}
+          value={value.lowStockDaysOverride}
+          onChangeText={(lowStockDaysOverride) => onChange({ lowStockDaysOverride })}
+          placeholder={sl.overridePlaceholder}
+          keyboardType="number-pad"
+          error={errors?.lowStockDaysOverride}
+        />
+        <QuantityInput
+          label={sl.fixedQtyLabel}
+          quantity={value.lowStockFixedQty}
+          onQuantityChange={(lowStockFixedQty) => onChange({ lowStockFixedQty })}
+          entryUnit={value.lowStockFixedQtyEntryUnit}
+          onEntryUnitChange={(lowStockFixedQtyEntryUnit) => onChange({ lowStockFixedQtyEntryUnit })}
+          stockItem={thresholdStockItem}
+          error={errors?.lowStockFixedQty}
+        />
+        <Banner kind="info">{effectiveThresholdText}</Banner>
+      </View>
+    ) : null;
+
+  if (thresholdsOnly) {
+    return <View style={styles.field}>{lowStockSection}</View>;
+  }
 
   return (
     <View style={styles.field}>
@@ -314,6 +425,8 @@ export function StockItemForm({
           onChange={(active) => onChange({ active })}
         />
       ) : null}
+
+      {lowStockSection}
     </View>
   );
 }

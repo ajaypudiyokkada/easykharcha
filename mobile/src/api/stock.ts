@@ -22,6 +22,11 @@ export type StockItem = {
   group: string;
   active: boolean;
   created_at: string;
+  /** Step 43b1c2a: low-stock threshold inputs — see src/constants/lowStockCategories.ts. Editable
+   * only with `stockitems.thresholds_manage`. */
+  low_stock_category: string;
+  low_stock_days_override: number | null;
+  low_stock_fixed_qty: string | null;
   /** From this item's purchase history — null until it's been bought at least once. */
   last_unit_price: string | null;
   /** `last_unit_price` rolled up per kg/L (per piece/pack for a count item) — see src/units.ts. */
@@ -94,4 +99,29 @@ export type StarterPackStockItem = {
 export type StarterPack = {
   stock_items: StarterPackStockItem[];
   sell_items: { name: string }[];
+};
+
+/** Step 43b1c2a: one row of `GET stock/low-stock/` — the low-stock/shopping-list read. Quantities
+ * are already display-converted (kg/L once >=1,000 g/ml) server-side. `shortfall_value` is present
+ * only for a caller who can also see money (`stockitems.thresholds_manage` or `alerts.view`) — a
+ * Head chef's rows never carry it. */
+export type LowStockRow = {
+  stock_item: number;
+  name: string;
+  group: string;
+  unit: string;
+  estimated_stock_now: string;
+  threshold: string;
+  suggested_order_qty: string;
+  is_estimate: boolean;
+  coverage_pct: string | null;
+  /** Some of `estimated_stock_now`'s usage subtraction rests on an unconfirmed (suggested, not
+   * yet reviewed) recipe — flagged, not hidden, per docs/BASES_PLAN.md sec 8.3's estimate fix. */
+  partly_unconfirmed: boolean;
+  shortfall_value?: string | number | null;
+};
+
+export type LowStockListResponse = {
+  results: LowStockRow[];
+  grouped: Record<string, LowStockRow[]>;
 };
