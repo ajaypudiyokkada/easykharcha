@@ -52,6 +52,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   Step 41b1b3a: `low_stock.py` (`estimated_stock_now`, `effective_threshold`, `low_stock_rows` —
   shared by alerts/service.py's new `low_stock` type and `LowStockListView`); `StockItem` gained
   `low_stock_category`/`low_stock_days_override`/`low_stock_fixed_qty` (migrations 0009-0010).
+  Step 43b1c2a: `estimated_stock_now`'s usage subtraction now covers unconfirmed recipes too (not
+  confirmed-only), flagging `partly_unconfirmed` rather than hiding it — threaded through
+  `low_stock_rows`/`LowStockListView`/the `low_stock` alert.
 - `wastage/` — wastage entries; models.py (WastageEntry — Step U1b-1 widened `unit_cost_at_entry`
   to 4dp/12 digits, matching `usual_price`), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
@@ -236,8 +239,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`
 - `buy/index.tsx` — Purchases list + today/7-day summary
 - `buy/[id].tsx` — Purchase detail, edit, delete
-- `stock/index.tsx` — Stock list
-- `stock/[id].tsx` — Stock item detail + price chart + recent purchases
+- `stock/index.tsx` — Stock list; Step 43b1c2a added a "Low stock & shopping list" link
+  (`stock.low_stock_view`)
+- `stock/[id].tsx` — Stock item detail + price chart + recent purchases; Step 43b1c2a's "Low-stock
+  alert" button (Manager, `stockitems.thresholds_manage` without `stockitems.manage`) opens
+  `StockItemSheet` in its new `mode="thresholds"`
+- `stock/low-stock.tsx` — Step 43b1c2a: the low-stock/shopping-list screen (`GET
+  stock/low-stock/`), grouped by stock group, reachable from Stock (Owner/Manager) and a Home
+  nudge card (+ Head chef via Home only, who has `stock.low_stock_view` without `stock.view`)
 - `wastage.tsx` — Wastage list, record, delete
 - `count.tsx` — Blind stock count form (opening or closing); Step 23d: a business's first-ever count
   is framed "Starting stock" with an intro card, Save enables at 1+ item counted (untouched items
@@ -374,7 +383,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   (+ `validateDish.ts`) is the full dish form with ingredients, used only via `SellItemSheet` — Step
   22a2 deleted the old ingredients-free `SellItemForm.tsx`/`validateSellItem.ts`, now unused
   everywhere. Step U1b-3b-1: ingredient rows use the shared `forms/QuantityInput.tsx` + `entry_unit`
-  (same as counts/wastage/purchases), not the old ingredient-only conversion
+  (same as counts/wastage/purchases), not the old ingredient-only conversion. Step 43b1c2a:
+  `StockItemForm` gained the low-stock threshold section (`canManageThresholds`/`thresholdsOnly`
+  props — category chips from `constants/lowStockCategories.ts`, optional override days, optional
+  fixed qty via `QuantityInput`, a plain-words effective-threshold line); `StockItemSheet` gained
+  `mode: 'thresholds'` for a Manager's narrower PATCH (thresholds only, not the rest of the item)
 - `forms/PincodeLocationField.tsx` — Step 21b: Country (fixed) + Pincode lookup -> State (read-only) +
   City (the pincode's district(s), first preselected) + optional searchable Area; "Enter city
   yourself" falls back to free-text City + a State picker (sets `manual_location`) when a pincode

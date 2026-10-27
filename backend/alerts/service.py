@@ -459,21 +459,26 @@ def _low_stock_alerts(business: Business) -> list[dict]:
             {"estimate": estimate, "threshold": threshold}, item.unit
         )
         coverage_pct = estimate_info["coverage_pct"]
+        partly_unconfirmed = estimate_info["partly_unconfirmed"]
+        detail = (
+            f"About {display['estimate']} {display_unit} left, below the "
+            f"{display['threshold']} {display_unit} threshold."
+        )
+        if partly_unconfirmed:
+            detail += " Based partly on suggested (unconfirmed) recipes."
         alerts.append(
             {
                 "key": f"low_stock:{item.id}:{today.isoformat()}",
                 "type": "low_stock",
                 "title": f"{item.name} is running low",
-                "detail": (
-                    f"About {display['estimate']} {display_unit} left, below the "
-                    f"{display['threshold']} {display_unit} threshold."
-                ),
+                "detail": detail,
                 "severity": severity,
                 "numbers": {
                     "estimated_qty": str(display["estimate"]),
                     "threshold_qty": str(display["threshold"]),
                     "unit": display_unit,
                     "is_estimate": True,
+                    "partly_unconfirmed": partly_unconfirmed,
                     "coverage_pct": (
                         str(coverage_pct.quantize(Decimal("0.01")))
                         if coverage_pct is not None

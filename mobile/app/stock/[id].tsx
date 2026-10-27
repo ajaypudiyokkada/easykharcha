@@ -62,6 +62,7 @@ export default function StockItemDetailScreen() {
   const [failed, setFailed] = useState(false);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editSheetVisible, setEditSheetVisible] = useState(false);
+  const [thresholdSheetVisible, setThresholdSheetVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -101,6 +102,10 @@ export default function StockItemDetailScreen() {
   const timezone = business?.timezone ?? 'Asia/Kolkata';
   const canRecord = can(permissions, 'purchases.create');
   const canEdit = can(permissions, 'stockitems.manage');
+  // Step 43b1c2a: a Manager has `stockitems.thresholds_manage` without `stockitems.manage`, so
+  // gets its own narrow entry point instead of the full Edit item sheet (which already folds the
+  // threshold section in for whoever reaches it, i.e. the Owner).
+  const canManageThresholdsOnly = !canEdit && can(permissions, 'stockitems.thresholds_manage');
 
   const chartPoints: ChartPoint[] = item
     ? item.price_points.map((point) => ({
@@ -199,6 +204,14 @@ export default function StockItemDetailScreen() {
                 onPress={() => setEditSheetVisible(true)}
               />
             ) : null}
+
+            {canManageThresholdsOnly ? (
+              <Button
+                label={s.lowStockAlert}
+                variant="secondary"
+                onPress={() => setThresholdSheetVisible(true)}
+              />
+            ) : null}
           </>
         )}
       </Screen>
@@ -225,6 +238,20 @@ export default function StockItemDetailScreen() {
           onClose={() => setEditSheetVisible(false)}
           onSaved={(message) => {
             setEditSheetVisible(false);
+            setToast(message);
+            load();
+          }}
+        />
+      ) : null}
+      {item ? (
+        <StockItemSheet
+          visible={thresholdSheetVisible}
+          editingItem={item}
+          existingItems={[]}
+          mode="thresholds"
+          onClose={() => setThresholdSheetVisible(false)}
+          onSaved={(message) => {
+            setThresholdSheetVisible(false);
             setToast(message);
             load();
           }}

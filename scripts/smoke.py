@@ -1428,6 +1428,79 @@ def check_low_stock_flow() -> None:
         fail(f"low stock flow: helper low-stock list expected 403/404, got {status} ({body})")
     print("OK — a Helper can't reach the low-stock list either.")
 
+    # Step 43b1c2a: estimated_stock_now must subtract an UNCONFIRMED (suggested, not yet reviewed)
+    # recipe's usage too, not confirmed-only, and flag (not hide) that it did. There's no API path
+    # to recipe_status=unconfirmed yet (Step C2b's guided-ingredients flow isn't built) — same
+    # direct-DB-write pattern _ai_sql_write uses elsewhere in this file for states the API can't
+    # reach.
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Sugar", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"low stock flow: Sugar stock item create expected 201, got {status} ({body})")
+    sugar_id = body[0]["id"]
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/stock-items/{sugar_id}/",
+        {"low_stock_fixed_qty": "100.000"},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"low stock flow: setting Sugar's fixed threshold expected 200, got {status} ({body})")
+
+    dessert_id, _ = _create_dish(business_id, owner_access, "Dessert", "50.00", [(sugar_id, "0.200")])
+    _ai_sql_write(
+        "UPDATE stock_sellitem SET recipe_status = 'unconfirmed' WHERE id = ?", (dessert_id,)
+    )
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sales/",
+        {"business_date": today, "lines": [{"sell_item": dessert_id, "quantity": 10}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"low stock flow: dessert sale expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/counts/",
+        {
+            "type": "closing",
+            "lines": [
+                {"stock_item": sugar_id, "state": "counted", "counted_qty": "10.000"},
+                {"stock_item": milk_id, "state": "skipped"},
+                {"stock_item": rice_id, "state": "skipped"},
+            ],
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"low stock flow: Sugar closing count expected 201, got {status} ({body})")
+
+    status, body, _ = request(
+        "GET", f"/businesses/{business_id}/stock/low-stock/", token=owner_access
+    )
+    if status != 200:
+        fail(f"low stock flow: low-stock list expected 200, got {status} ({body})")
+    sugar_row = next((r for r in body["results"] if r["stock_item"] == sugar_id), None)
+    if sugar_row is None:
+        fail(f"low stock flow: expected Sugar below its 100kg fixed threshold, got {body['results']}")
+    # 10 counted - (10 sold x 0.200 kg/portion from the UNCONFIRMED dish) = 8.000 kg. Ignoring the
+    # unconfirmed recipe (the pre-fix behaviour) would have left the estimate at 10.000 instead.
+    if float(sugar_row["estimated_stock_now"]) != 8 or not sugar_row["partly_unconfirmed"]:
+        fail(
+            "low stock flow: estimated_stock_now must subtract an unconfirmed recipe's usage too, "
+            f"and flag partly_unconfirmed rather than hide it, got {sugar_row}"
+        )
+    print(
+        "OK — estimated_stock_now subtracts an unconfirmed (suggested) recipe's usage too, and "
+        "flags partly_unconfirmed rather than hiding it."
+    )
+
 
 def check_bases_flow() -> None:
     """Step 42b1c1 (docs/BASES_PLAN.md secs 1-2, 5, 8.4): base CRUD, linking a base to a dish

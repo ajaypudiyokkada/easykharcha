@@ -89,6 +89,11 @@ export default function StockItemsSettings() {
         draft.goesOff && draft.shelfLifeDays.trim() ? Number(draft.shelfLifeDays) : null,
       group: draft.group.trim(),
       active: true,
+      // Mirrors stock/low_stock.py's default_category_for — the real create response overwrites
+      // this the moment the list reloads.
+      low_stock_category: draft.goesOff ? 'perishable' : 'dry_staples',
+      low_stock_days_override: null,
+      low_stock_fixed_qty: null,
       created_at: new Date().toISOString(),
       last_unit_price: null,
       last_unit_price_per_major_unit: null,

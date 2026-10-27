@@ -110,10 +110,14 @@ def effective_threshold(stock_item: StockItem, avg_daily_usage: Decimal) -> Deci
 
 
 def estimated_stock_now(business: Business, stock_item: StockItem, as_of=None) -> dict | None:
-    """last count + purchases since - wastage since - expected usage since (confirmed-recipe only,
-    coverage-aware: unconfirmed/no-recipe usage counts as zero so the estimate never *overstates*
-    available stock). None if this item has never been counted — there's no baseline to estimate
-    from at all."""
+    """last count + purchases since - wastage since - expected usage since. Step 43b1c2a: the usage
+    part now counts ALL recipes (confirmed and unconfirmed/suggested), not confirmed-only, since an
+    estimate that ignores a suggested-but-unreviewed recipe's usage *overstates* available stock —
+    the opposite of the safe direction. `partly_unconfirmed` flags (doesn't hide) that some of the
+    usage subtracted rests on an unconfirmed recipe, so the UI can say so. `coverage_pct` is
+    unchanged and still only describes the confirmed/unconfirmed usage split for the gap-tolerance
+    rules in counts/gap.py — it does not gate this estimate. None if this item has never been
+    counted — there's no baseline to estimate from at all."""
     as_of = as_of or timezone.now()
     last_line = (
         CountLine.objects.filter(stock_item=stock_item, state=CountLineState.COUNTED)
@@ -153,12 +157,15 @@ def estimated_stock_now(business: Business, stock_item: StockItem, as_of=None) -
     denominator = confirmed_expected + unconfirmed_expected
     coverage_pct = (confirmed_expected / denominator) * HUNDRED if denominator > ZERO else None
 
-    estimate = last_line.counted_qty + purchased - wasted - confirmed_expected
+    estimate = (
+        last_line.counted_qty + purchased - wasted - confirmed_expected - unconfirmed_expected
+    )
     return {
         "estimate": estimate,
         "is_estimate": True,
         "coverage_pct": coverage_pct,
         "last_counted_at": last_line.count.submitted_at,
+        "partly_unconfirmed": unconfirmed_expected > ZERO,
     }
 
 
@@ -194,6 +201,7 @@ def low_stock_rows(business: Business) -> list[dict]:
                 "threshold": threshold,
                 "is_estimate": estimate_info["is_estimate"],
                 "coverage_pct": estimate_info["coverage_pct"],
+                "partly_unconfirmed": estimate_info["partly_unconfirmed"],
                 "suggested_order_qty": suggested_order_qty,
             }
         )
