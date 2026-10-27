@@ -19,11 +19,29 @@ from purchases.models import Purchase, PurchaseLine
 from purchases.serializers import PurchaseSerializer
 from wastage.models import WastageEntry
 
-from .exceptions import BulkValidationError, StockItemInUse, StockItemUnitLocked, TooManyRows
+from .exceptions import (
+    BaseInUse,
+    BulkValidationError,
+    StockItemInUse,
+    StockItemUnitLocked,
+    TooManyRows,
+)
 from .low_stock import default_category_for, low_stock_rows
-from .models import RecipeStatus, SellItem, SellItemIngredient, StockItem
+from .models import (
+    Base,
+    BaseIngredient,
+    RecipeStatus,
+    SellItem,
+    SellItemBase,
+    SellItemIngredient,
+    StockItem,
+)
 from .serializers import (
     LOW_STOCK_THRESHOLD_FIELDS,
+    BaseCreateSerializer,
+    BaseSerializer,
+    BaseUpdateSerializer,
+    BaseUsageLinkRowSerializer,
     SellItemCreateSerializer,
     SellItemRowSerializer,
     SellItemSerializer,
@@ -312,7 +330,7 @@ class StockItemBulkCreateView(APIView):
 
 
 def _with_ingredients(queryset):
-    return queryset.prefetch_related("ingredients__stock_item")
+    return queryset.prefetch_related("ingredients__stock_item", "bases__base")
 
 
 def _linkable_stock_items(business) -> dict[int, StockItem]:
@@ -337,6 +355,22 @@ def _resolve_ingredient_rows(
         except UnitEntryError as exc:
             raise ValidationError({"ingredients": str(exc)}) from exc
         resolved.append((stock_item, quantity))
+    return resolved
+
+
+def _linkable_bases(business) -> dict[int, Base]:
+    return {base.id: base for base in business.bases.filter(active=True)}
+
+
+def _resolve_base_rows(
+    rows: list[dict], bases_by_id: dict[int, Base]
+) -> list[tuple[Base, Decimal]]:
+    resolved = []
+    for row in rows:
+        base = bases_by_id.get(row["base"])
+        if base is None:
+            raise ValidationError({"bases": "Choose a base from this business."})
+        resolved.append((base, row["quantity"]))
     return resolved
 
 
@@ -381,6 +415,7 @@ class SellItemListView(APIView):
         ingredient_rows = _resolve_ingredient_rows(
             data.pop("ingredients"), _linkable_stock_items(business)
         )
+        base_rows = _resolve_base_rows(data.pop("bases"), _linkable_bases(business))
         data["group"] = _canonical_group(_group_resolver(business.sell_items), data["group"])
         data["recipe_status"] = RecipeStatus.CONFIRMED
 
@@ -390,6 +425,10 @@ class SellItemListView(APIView):
                 SellItemIngredient(sell_item=item, stock_item=stock_item, quantity=quantity)
                 for stock_item, quantity in ingredient_rows
             )
+            SellItemBase.objects.bulk_create(
+                SellItemBase(sell_item=item, base=base, quantity=quantity)
+                for base, quantity in base_rows
+            )
 
         log_action(
             user=request.user,
@@ -397,6 +436,7 @@ class SellItemListView(APIView):
             business=business,
             item_id=item.id,
             ingredient_count=len(ingredient_rows),
+            base_count=len(base_rows),
         )
         item = _with_ingredients(business.sell_items).get(id=item.id)
         return Response(SellItemSerializer(item).data, status=201)
@@ -488,13 +528,29 @@ class SellItemDetailView(APIView):
             )
 
         # Editing a dish goes through the same form as creating one — present at all means "save
-        # this recipe", so it fully replaces the ingredient rows and re-confirms, same as create.
+        # this recipe", so it fully replaces that kind's rows and re-confirms, same as create.
         ingredient_rows = None
         if "ingredients" in data:
             ingredient_rows = _resolve_ingredient_rows(
                 data.pop("ingredients"), _linkable_stock_items(business)
             )
             data["recipe_status"] = RecipeStatus.CONFIRMED
+        base_rows = None
+        if "bases" in data:
+            base_rows = _resolve_base_rows(data.pop("bases"), _linkable_bases(business))
+            data["recipe_status"] = RecipeStatus.CONFIRMED
+
+        # Step 42b1c1: a dish needs at least one real line (ingredient or base) total — checked
+        # here, once both replacements (if any) are resolved, against whichever side wasn't sent
+        # this time (its existing row count stands).
+        final_ingredient_count = (
+            len(ingredient_rows) if ingredient_rows is not None else item.ingredients.count()
+        )
+        final_base_count = len(base_rows) if base_rows is not None else item.bases.count()
+        if (ingredient_rows is not None or base_rows is not None) and (
+            final_ingredient_count + final_base_count == 0
+        ):
+            raise ValidationError({"ingredients": "Add at least one ingredient or a base."})
 
         changed = sorted(data.keys())
         before = {f: jsonable(getattr(item, f)) for f in changed}
@@ -509,6 +565,13 @@ class SellItemDetailView(APIView):
                 SellItemIngredient.objects.bulk_create(
                     SellItemIngredient(sell_item=item, stock_item=stock_item, quantity=quantity)
                     for stock_item, quantity in ingredient_rows
+                )
+        if base_rows is not None:
+            with transaction.atomic():
+                item.bases.all().delete()
+                SellItemBase.objects.bulk_create(
+                    SellItemBase(sell_item=item, base=base, quantity=quantity)
+                    for base, quantity in base_rows
                 )
 
         log_action(
@@ -571,3 +634,195 @@ class LowStockListView(APIView):
             grouped.setdefault(item.group or "Ungrouped", []).append(entry)
 
         return Response({"results": results, "grouped": grouped})
+
+
+def _with_base_detail(queryset):
+    return queryset.prefetch_related("ingredients__stock_item", "used_in__sell_item")
+
+
+def _resolve_base_ingredient_rows(
+    rows: list[dict], stock_items_by_id: dict[int, StockItem]
+) -> list[tuple[StockItem, Decimal]]:
+    resolved = []
+    for row in rows:
+        stock_item = stock_items_by_id.get(row["stock_item"])
+        if stock_item is None:
+            raise ValidationError(
+                {"ingredients": "Choose stock items from this business — not a shared item."}
+            )
+        resolved.append((stock_item, row["quantity"]))
+    return resolved
+
+
+class BaseListView(APIView):
+    """Settings' "Things you make in batches" — Step 42b1c1 (docs/BASES_PLAN.md secs 1-2, 5, 8.4).
+    Owner-only, same as `sellitems.manage` (a base is a recipe concept, not a stock-item one)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        bases = _with_base_detail(business.bases.filter(active=True))
+        return Response(BaseSerializer(bases, many=True).data)
+
+    def post(self, request, business_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+
+        serializer = BaseCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if business.bases.filter(name__iexact=data["name"]).exists():
+            raise ValidationError({"name": "A base with this name already exists."})
+
+        ingredient_rows = _resolve_base_ingredient_rows(
+            data.pop("ingredients"), _linkable_stock_items(business)
+        )
+
+        with transaction.atomic():
+            base = Base.objects.create(business=business, created_by=request.user, **data)
+            BaseIngredient.objects.bulk_create(
+                BaseIngredient(base=base, stock_item=stock_item, quantity_per_1000=quantity)
+                for stock_item, quantity in ingredient_rows
+            )
+
+        log_action(
+            user=request.user,
+            action="base.create",
+            business=business,
+            base_id=base.id,
+            ingredient_count=len(ingredient_rows),
+        )
+        base = _with_base_detail(business.bases).get(id=base.id)
+        return Response(BaseSerializer(base).data, status=201)
+
+
+class BaseDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id, base_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        base = get_object_or_404(_with_base_detail(business.bases), id=base_id)
+        return Response(BaseSerializer(base).data)
+
+    def patch(self, request, business_id, base_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        base = get_object_or_404(business.bases, id=base_id)
+
+        serializer = BaseUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if "name" in data:
+            clash = business.bases.exclude(id=base.id).filter(name__iexact=data["name"])
+            if clash.exists():
+                raise ValidationError({"name": "A base with this name already exists."})
+
+        ingredient_rows = None
+        if "ingredients" in data:
+            ingredient_rows = _resolve_base_ingredient_rows(
+                data.pop("ingredients"), _linkable_stock_items(business)
+            )
+
+        changed = sorted(data.keys())
+        before = {f: jsonable(getattr(base, f)) for f in changed}
+        for field, value in data.items():
+            setattr(base, field, value)
+        base.save()
+        after = {f: jsonable(getattr(base, f)) for f in changed}
+
+        if ingredient_rows is not None:
+            with transaction.atomic():
+                base.ingredients.all().delete()
+                BaseIngredient.objects.bulk_create(
+                    BaseIngredient(base=base, stock_item=stock_item, quantity_per_1000=quantity)
+                    for stock_item, quantity in ingredient_rows
+                )
+
+        log_action(
+            user=request.user,
+            action="base.update",
+            business=business,
+            base_id=base.id,
+            before=before,
+            after=after,
+        )
+        base = _with_base_detail(business.bases).get(id=base.id)
+        return Response(BaseSerializer(base).data)
+
+    def delete(self, request, business_id, base_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        base = get_object_or_404(_with_base_detail(business.bases), id=base_id)
+
+        used_in = list(base.used_in.all())
+        if used_in and not request.data.get("confirm_unlink"):
+            raise BaseInUse([link.sell_item.name for link in used_in])
+
+        with transaction.atomic():
+            SellItemBase.objects.filter(base=base).delete()
+            base.delete()
+
+        log_action(
+            user=request.user,
+            action="base.delete",
+            business=business,
+            base_id=base_id,
+            unlinked_from=[link.sell_item_id for link in used_in],
+        )
+        return Response(status=204)
+
+
+class BaseUsedInView(APIView):
+    """A base's own "Used in" section — full replace of exactly this base's SellItemBase rows
+    (which dishes use it, and how many grams/ml per portion), leaving every other base/ingredient
+    on each dish untouched. The dish-side alternative (PATCH sell-items/<id>/'s `bases`) replaces a
+    whole dish's base rows instead — both write the same table, just scoped differently."""
+
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, business_id, base_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        base = get_object_or_404(business.bases, id=base_id)
+
+        links = request.data.get("links")
+        if not isinstance(links, list):
+            raise ValidationError({"links": "Send a list of {sell_item, quantity} rows."})
+
+        row_serializer = BaseUsageLinkRowSerializer(data=links, many=True)
+        row_serializer.is_valid(raise_exception=True)
+        rows = row_serializer.validated_data
+
+        sell_items_by_id = {item.id: item for item in business.sell_items.filter(active=True)}
+        resolved = []
+        for row in rows:
+            sell_item = sell_items_by_id.get(row["sell_item"])
+            if sell_item is None:
+                raise ValidationError({"links": "Choose an active dish from this business."})
+            resolved.append((sell_item, row["quantity"]))
+
+        with transaction.atomic():
+            SellItemBase.objects.filter(base=base).delete()
+            SellItemBase.objects.bulk_create(
+                SellItemBase(sell_item=sell_item, base=base, quantity=quantity)
+                for sell_item, quantity in resolved
+            )
+            for sell_item, _quantity in resolved:
+                if sell_item.recipe_status == RecipeStatus.NONE:
+                    sell_item.recipe_status = RecipeStatus.CONFIRMED
+                    sell_item.save(update_fields=["recipe_status"])
+
+        log_action(
+            user=request.user,
+            action="base.used_in_update",
+            business=business,
+            base_id=base.id,
+            dish_count=len(resolved),
+        )
+        base = _with_base_detail(business.bases).get(id=base.id)
+        return Response(BaseSerializer(base).data)

@@ -34,8 +34,14 @@ export function validateDishDraft(
   else if (priceCheck === 'invalid') errors.price = sd.errors.invalidNumber;
   else if (priceCheck === 'negative') errors.price = sd.errors.negativeNumber;
 
-  if (draft.ingredients.length === 0) {
+  // Step 42b1c1: a dish needs at least one real line total — a direct ingredient or a batch
+  // recipe ("base") — not necessarily both.
+  const hasAnyBase = draft.bases.some((row) => row.baseId !== null && row.amount.trim());
+  if (draft.ingredients.length === 0 && !hasAnyBase) {
     errors.ingredients = sd.errors.ingredientsRequired;
+    return errors;
+  }
+  if (draft.ingredients.length === 0) {
     return errors;
   }
 

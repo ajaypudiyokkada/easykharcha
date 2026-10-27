@@ -1,6 +1,9 @@
 from django.urls import path
 
 from .views import (
+    BaseDetailView,
+    BaseListView,
+    BaseUsedInView,
     LowStockListView,
     SellItemBulkCreateView,
     SellItemDetailView,
@@ -40,6 +43,17 @@ urlpatterns = [
         "businesses/<int:business_id>/sell-items/bulk/",
         SellItemBulkCreateView.as_view(),
         name="sell-item-bulk-create",
+    ),
+    path("businesses/<int:business_id>/bases/", BaseListView.as_view(), name="base-list"),
+    path(
+        "businesses/<int:business_id>/bases/<int:base_id>/",
+        BaseDetailView.as_view(),
+        name="base-detail",
+    ),
+    path(
+        "businesses/<int:business_id>/bases/<int:base_id>/used-in/",
+        BaseUsedInView.as_view(),
+        name="base-used-in",
     ),
     path(
         "businesses/<int:business_id>/sell-items/<int:item_id>/",

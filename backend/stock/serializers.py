@@ -6,8 +6,23 @@ from counts.models import CountLine
 from purchases.models import PurchaseLine
 from wastage.models import WastageEntry
 
-from .models import LowStockCategory, SellItem, SellItemIngredient, StockItem, Unit
-from .units import base_unit_for, display_price_per_major_unit, display_quantity
+from .models import (
+    BASE_UNIT_FAMILY_CHOICES,
+    Base,
+    BaseIngredient,
+    LowStockCategory,
+    SellItem,
+    SellItemBase,
+    SellItemIngredient,
+    StockItem,
+    Unit,
+)
+from .units import (
+    BASE_UNIT_FOR_FAMILY,
+    base_unit_for,
+    display_price_per_major_unit,
+    display_quantity,
+)
 from .units import unit_family as _unit_family_for
 
 ZERO = Decimal("0")
@@ -16,6 +31,7 @@ ZERO = Decimal("0")
 MIN_POSITIVE_QTY = Decimal("0.001")
 MAX_INGREDIENT_QTY = Decimal("100000")
 MIN_POSITIVE_PACK_SIZE = Decimal("0.001")
+MIN_POSITIVE_YIELD = Decimal("0.001")
 
 
 def _clean_group(value: str) -> str:
@@ -258,8 +274,11 @@ class IngredientRowSerializer(serializers.Serializer):
     )
 
 
-def _validate_ingredient_rows(rows: list[dict]) -> list[dict]:
-    if not rows:
+def _validate_ingredient_rows(rows: list[dict], required: bool = True) -> list[dict]:
+    """Step 42b1c1: `required` is False wherever a dish's `bases` can satisfy the "at least one
+    real line" rule instead — the view checks the ingredients+bases total once both are resolved,
+    since a serializer validating one field alone can't see the other."""
+    if not rows and required:
         raise serializers.ValidationError("Add at least one ingredient.")
     seen_stock_item_ids: set[int] = set()
     for row in rows:
@@ -269,11 +288,40 @@ def _validate_ingredient_rows(rows: list[dict]) -> list[dict]:
     return rows
 
 
+class BaseUsageRowSerializer(serializers.Serializer):
+    """One row of a dish's optional `bases` array — parallel to IngredientRowSerializer, with no
+    entry-unit conversion (a base's own batch unit is always already g/ml)."""
+
+    base = serializers.IntegerField()
+    quantity = serializers.DecimalField(
+        max_digits=10, decimal_places=3, min_value=MIN_POSITIVE_QTY, max_value=MAX_INGREDIENT_QTY
+    )
+
+
+class BaseUsageLinkRowSerializer(serializers.Serializer):
+    """One row of a base's own "Used in" full-replace list — the mirror image of
+    BaseUsageRowSerializer, keyed by dish instead of by base (see BaseUsedInView)."""
+
+    sell_item = serializers.IntegerField()
+    quantity = serializers.DecimalField(
+        max_digits=10, decimal_places=3, min_value=MIN_POSITIVE_QTY, max_value=MAX_INGREDIENT_QTY
+    )
+
+
+def _validate_base_rows(rows: list[dict]) -> list[dict]:
+    seen_base_ids: set[int] = set()
+    for row in rows:
+        if row["base"] in seen_base_ids:
+            raise serializers.ValidationError("Each base can only be used once in a dish.")
+        seen_base_ids.add(row["base"])
+    return rows
+
+
 class SellItemCreateSerializer(serializers.Serializer):
     """POST sell-items/ — the manual dish form's single-item create, with its full recipe (Step
-    22a). The view resolves `ingredients[].stock_item` against this business's own, non-shared
-    stock items; a dish can't be saved without at least one valid one, so this always lands at
-    recipe_status=confirmed."""
+    22a; Step 42b1c1 added `bases`). The view resolves `ingredients[].stock_item`/`bases[].base`
+    against this business's own rows; a dish can't be saved without at least one valid ingredient
+    or base line between the two, so this always lands at recipe_status=confirmed."""
 
     name = serializers.CharField(max_length=120)
     selling_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=ZERO)
@@ -281,7 +329,8 @@ class SellItemCreateSerializer(serializers.Serializer):
         max_length=40, required=False, allow_blank=True, default=""
     )
     group = serializers.CharField(max_length=40, required=False, allow_blank=True, default="")
-    ingredients = IngredientRowSerializer(many=True)
+    ingredients = IngredientRowSerializer(many=True, required=False, default=list)
+    bases = BaseUsageRowSerializer(many=True, required=False, default=list)
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -296,15 +345,25 @@ class SellItemCreateSerializer(serializers.Serializer):
         return _clean_portion_label(value)
 
     def validate_ingredients(self, value: list[dict]) -> list[dict]:
-        return _validate_ingredient_rows(value)
+        return _validate_ingredient_rows(value, required=False)
+
+    def validate_bases(self, value: list[dict]) -> list[dict]:
+        return _validate_base_rows(value)
+
+    def validate(self, attrs: dict) -> dict:
+        if not attrs.get("ingredients") and not attrs.get("bases"):
+            raise serializers.ValidationError(
+                {"ingredients": "Add at least one ingredient or a base."}
+            )
+        return attrs
 
 
 class SellItemUpdateSerializer(serializers.Serializer):
-    """PATCH sell-items/<id>/ — every field optional (partial update). `ingredients`, when present
-    at all, fully replaces the dish's ingredient rows under the same rule as create (at least one,
-    no duplicates) and re-confirms the recipe — editing a dish still goes through the same form.
-    Cross-field checks that need a query (stock items must belong to this business, not be shared)
-    are the view's job, same split as StockItemUpdateSerializer."""
+    """PATCH sell-items/<id>/ — every field optional (partial update). `ingredients`/`bases`, when
+    either is present, fully replaces that dish's rows of that kind under the same rule as create
+    (no duplicates) and re-confirms the recipe — editing a dish still goes through the same form.
+    Cross-field checks that need a query (stock items/bases must belong to this business, stock
+    items not shared) are the view's job, same split as StockItemUpdateSerializer."""
 
     name = serializers.CharField(max_length=120, required=False)
     selling_price = serializers.DecimalField(
@@ -313,6 +372,7 @@ class SellItemUpdateSerializer(serializers.Serializer):
     portion_label = serializers.CharField(max_length=40, required=False, allow_blank=True)
     group = serializers.CharField(max_length=40, required=False, allow_blank=True)
     ingredients = IngredientRowSerializer(many=True, required=False)
+    bases = BaseUsageRowSerializer(many=True, required=False)
     active = serializers.BooleanField(required=False)
 
     def validate_name(self, value: str) -> str:
@@ -328,7 +388,10 @@ class SellItemUpdateSerializer(serializers.Serializer):
         return _clean_portion_label(value)
 
     def validate_ingredients(self, value: list[dict]) -> list[dict]:
-        return _validate_ingredient_rows(value)
+        return _validate_ingredient_rows(value, required=False)
+
+    def validate_bases(self, value: list[dict]) -> list[dict]:
+        return _validate_base_rows(value)
 
 
 # Step 41b1b3a: the fields of StockItemUpdateSerializer gated on "stockitems.thresholds_manage"
@@ -366,8 +429,34 @@ class SellItemIngredientSerializer(serializers.ModelSerializer):
         return unit
 
 
+class SellItemBaseSerializer(serializers.ModelSerializer):
+    """One base a dish uses — grams/ml per portion, in the base's own batch unit (already g/ml,
+    see Base.unit_family), rolled up for display the same way a raw ingredient is."""
+
+    base_name = serializers.CharField(source="base.name", read_only=True)
+    unit = serializers.SerializerMethodField()
+    display_quantity = serializers.SerializerMethodField()
+    display_unit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SellItemBase
+        fields = ("id", "base", "base_name", "unit", "quantity", "display_quantity", "display_unit")
+
+    def get_unit(self, obj: SellItemBase) -> str:
+        return BASE_UNIT_FOR_FAMILY[obj.base.unit_family]
+
+    def get_display_quantity(self, obj: SellItemBase) -> str:
+        value, _ = display_quantity(obj.quantity, self.get_unit(obj))
+        return str(value)
+
+    def get_display_unit(self, obj: SellItemBase) -> str:
+        _, unit = display_quantity(obj.quantity, self.get_unit(obj))
+        return unit
+
+
 class SellItemSerializer(serializers.ModelSerializer):
     ingredients = SellItemIngredientSerializer(many=True, read_only=True)
+    bases = SellItemBaseSerializer(many=True, read_only=True)
 
     class Meta:
         model = SellItem
@@ -378,7 +467,135 @@ class SellItemSerializer(serializers.ModelSerializer):
             "portion_label",
             "recipe_status",
             "ingredients",
+            "bases",
             "group",
             "active",
             "created_at",
         )
+
+
+class BaseIngredientRowSerializer(serializers.Serializer):
+    """One raw line of a base's batch formula — `quantity` is per the base's own `batch_yield_qty`
+    (default 1,000 g/ml), already in the stock item's base unit (no entry-unit conversion, same as
+    a dish's direct ingredient rows always being pre-converted by the time they're resolved)."""
+
+    stock_item = serializers.IntegerField()
+    quantity = serializers.DecimalField(
+        max_digits=10, decimal_places=3, min_value=MIN_POSITIVE_QTY, max_value=MAX_INGREDIENT_QTY
+    )
+
+
+def _validate_base_ingredient_rows(rows: list[dict]) -> list[dict]:
+    if not rows:
+        raise serializers.ValidationError("Add at least one ingredient.")
+    seen_stock_item_ids: set[int] = set()
+    for row in rows:
+        if row["stock_item"] in seen_stock_item_ids:
+            raise serializers.ValidationError("Each ingredient can only be used once in a base.")
+        seen_stock_item_ids.add(row["stock_item"])
+    return rows
+
+
+class BaseCreateSerializer(serializers.Serializer):
+    """POST bases/ — a base's full batch formula, created in one call (mirrors
+    SellItemCreateSerializer's shape)."""
+
+    name = serializers.CharField(max_length=120)
+    unit_family = serializers.ChoiceField(choices=BASE_UNIT_FAMILY_CHOICES)
+    batch_yield_qty = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        required=False,
+        default=Decimal("1000"),
+        min_value=MIN_POSITIVE_YIELD,
+    )
+    ingredients = BaseIngredientRowSerializer(many=True)
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Enter a name.")
+        return value
+
+    def validate_ingredients(self, value: list[dict]) -> list[dict]:
+        return _validate_base_ingredient_rows(value)
+
+
+class BaseUpdateSerializer(serializers.Serializer):
+    """PATCH bases/<id>/ — every field optional; `ingredients`, when present, fully replaces the
+    batch formula (same full-replace rule as a dish's own ingredients)."""
+
+    name = serializers.CharField(max_length=120, required=False)
+    batch_yield_qty = serializers.DecimalField(
+        max_digits=10, decimal_places=3, required=False, min_value=MIN_POSITIVE_YIELD
+    )
+    ingredients = BaseIngredientRowSerializer(many=True, required=False)
+    active = serializers.BooleanField(required=False)
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Enter a name.")
+        return value
+
+    def validate_ingredients(self, value: list[dict]) -> list[dict]:
+        return _validate_base_ingredient_rows(value)
+
+
+class BaseIngredientSerializer(serializers.ModelSerializer):
+    stock_item_name = serializers.CharField(source="stock_item.name", read_only=True)
+    display_quantity = serializers.SerializerMethodField()
+    display_unit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BaseIngredient
+        fields = (
+            "id",
+            "stock_item",
+            "stock_item_name",
+            "quantity_per_1000",
+            "display_quantity",
+            "display_unit",
+        )
+
+    def _unit(self, obj: BaseIngredient) -> str:
+        return BASE_UNIT_FOR_FAMILY[obj.base.unit_family]
+
+    def get_display_quantity(self, obj: BaseIngredient) -> str:
+        value, _ = display_quantity(obj.quantity_per_1000, self._unit(obj))
+        return str(value)
+
+    def get_display_unit(self, obj: BaseIngredient) -> str:
+        _, unit = display_quantity(obj.quantity_per_1000, self._unit(obj))
+        return unit
+
+
+class BaseUsedInDishSerializer(serializers.ModelSerializer):
+    sell_item_name = serializers.CharField(source="sell_item.name", read_only=True)
+
+    class Meta:
+        model = SellItemBase
+        fields = ("id", "sell_item", "sell_item_name", "quantity")
+
+
+class BaseSerializer(serializers.ModelSerializer):
+    ingredients = BaseIngredientSerializer(many=True, read_only=True)
+    used_in = BaseUsedInDishSerializer(many=True, read_only=True)
+    unit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Base
+        fields = (
+            "id",
+            "name",
+            "unit_family",
+            "unit",
+            "batch_yield_qty",
+            "ingredients",
+            "used_in",
+            "active",
+            "created_at",
+        )
+
+    def get_unit(self, obj: Base) -> str:
+        return BASE_UNIT_FOR_FAMILY[obj.unit_family]

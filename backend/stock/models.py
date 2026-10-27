@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
@@ -206,6 +208,13 @@ class Base(models.Model):
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="bases")
     name = models.CharField(max_length=120)
     unit_family = models.CharField(max_length=10, choices=BASE_UNIT_FAMILY_CHOICES)
+    # Step 42b1c1: the batch size BaseIngredient.quantity_per_1000 rows are actually defined
+    # against — defaults to 1,000 (the plan's original "always per 1,000 g/ml" assumption) but an
+    # owner can record a real batch size that isn't a round 1,000 (e.g. a 1,200 g batch) without
+    # needing to rescale every ingredient row by hand. The column name on BaseIngredient stays
+    # `quantity_per_1000` (pre-dates this field); stock/base_expansion.py divides by this field,
+    # not a hardcoded 1,000.
+    batch_yield_qty = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal("1000"))
     active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="bases_created"

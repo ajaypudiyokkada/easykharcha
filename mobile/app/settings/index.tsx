@@ -38,6 +38,7 @@ const BUSINESS_ROWS: Row[] = [
 const STOCK_ROWS: Row[] = [
   { key: 'stock', label: s.whatYouBuy, icon: 'stock', href: '/settings/stock' },
   { key: 'sell', label: s.whatYouSell, icon: 'sales', href: '/settings/sell' },
+  { key: 'bases', label: s.thingsYouMakeInBatches, icon: 'stock', href: '/settings/bases' },
   { key: 'alerts', label: s.alertRules, icon: 'alert', href: '/settings/alerts' },
   { key: 'expiry', label: s.expiryAlerts, icon: 'clock', href: '/settings/alerts' },
 ];

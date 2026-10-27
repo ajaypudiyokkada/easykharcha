@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View, type TextInput } from 'react-native';
 
+import type { Base } from '../api/bases';
 import type { SellItem, StockItem } from '../api/stock';
 import { sectorCopyFor } from '../sectorCopy';
 import { strings } from '../strings';
@@ -25,12 +26,21 @@ export type DishIngredientDraft = {
   amount: string;
 };
 
+/** Step 42b1c1: one batch recipe ("base") a dish uses, grams/ml per portion — no entry-unit
+ * conversion, since a base's own batch unit is already g/ml (see BaseRecipeForm). */
+export type DishBaseDraft = {
+  key: string;
+  baseId: number | null;
+  amount: string;
+};
+
 export type DishDraft = {
   name: string;
   sellingPrice: string;
   portionLabel: string;
   group: string;
   ingredients: DishIngredientDraft[];
+  bases: DishBaseDraft[];
   active: boolean;
 };
 
@@ -40,6 +50,7 @@ export const EMPTY_DISH_DRAFT: DishDraft = {
   portionLabel: '',
   group: '',
   ingredients: [],
+  bases: [],
   active: true,
 };
 
@@ -76,7 +87,20 @@ export function dishToDraft(item: SellItem): DishDraft {
       entryUnit: ingredient.display_unit,
       amount: ingredient.display_quantity,
     })),
+    bases: item.bases.map((link) => ({
+      key: `existing-base-${link.id}`,
+      baseId: link.base,
+      amount: link.quantity,
+    })),
   };
+}
+
+/** Builds the `bases` the server expects for a dish save — parallel to ingredientsPayload. */
+export function basesPayload(draft: DishDraft): { base: number; quantity: string }[] {
+  return draft.bases.map((row) => ({
+    base: row.baseId as number,
+    quantity: row.amount.trim().replace(',', '.'),
+  }));
 }
 
 function newRowKey(): string {
@@ -106,6 +130,9 @@ type Props = {
   /** Saves one new stock item (the picker's "+ Add a new item") and returns it — the caller owns
    * the actual request, since this form has no fetch access of its own. */
   onAddStockItem: (draft: StockItemDraft) => Promise<StockItem>;
+  /** Step 42b1c1: this business's batch recipes ("bases"), for the "use a batch recipe" picker —
+   * undefined/null hides the section entirely (a caller that hasn't wired bases in yet). */
+  bases?: Base[] | null;
   existingGroups?: string[];
   /** Settings' edit sheet shows this; a brand-new dish never does. */
   showActive?: boolean;
@@ -141,6 +168,7 @@ export function DishRecipeForm({
   businessType,
   stockItems,
   onAddStockItem,
+  bases,
   existingGroups,
   showActive,
   nameFieldRef,
@@ -206,6 +234,32 @@ export function DishRecipeForm({
 
   function removeRow(key: string) {
     setRows(value.ingredients.filter((row) => row.key !== key));
+  }
+
+  const [basePickerOpen, setBasePickerOpen] = useState(false);
+  const basesById = useMemo(() => {
+    const map = new Map<number, Base>();
+    for (const base of bases ?? []) map.set(base.id, base);
+    return map;
+  }, [bases]);
+  const pickedBaseIds = new Set(value.bases.map((row) => row.baseId));
+  const pickableBases = (bases ?? []).filter((base) => !pickedBaseIds.has(base.id));
+
+  function setBaseRows(rows: DishBaseDraft[]) {
+    onChange({ bases: rows });
+  }
+
+  function addBaseRow(base: Base) {
+    setBaseRows([...value.bases, { key: newRowKey(), baseId: base.id, amount: '' }]);
+    setBasePickerOpen(false);
+  }
+
+  function updateBaseRow(key: string, patch: Partial<DishBaseDraft>) {
+    setBaseRows(value.bases.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  }
+
+  function removeBaseRow(key: string) {
+    setBaseRows(value.bases.filter((row) => row.key !== key));
   }
 
   async function handleAddStockItem() {
@@ -399,6 +453,68 @@ export function DishRecipeForm({
           </Pressable>
         )}
       </View>
+
+      {bases ? (
+        <View style={styles.field}>
+          <Small style={styles.sectionLabel}>{sd.basesLabel}</Small>
+          <Small style={styles.introText}>{sd.basesHelp}</Small>
+
+          {bases.length === 0 ? <Small style={styles.introText}>{sd.noBasesYet}</Small> : null}
+
+          {value.bases.map((row) => {
+            const base = row.baseId !== null ? basesById.get(row.baseId) : null;
+            const unitLabel = base?.unit ?? 'g';
+            return (
+              <View key={row.key} style={styles.ingredientRow}>
+                <View style={styles.ingredientHead}>
+                  <Body style={styles.ingredientName}>{base?.name ?? '—'}</Body>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${sd.removeBase} ${base?.name ?? ''}`}
+                    onPress={() => removeBaseRow(row.key)}
+                    style={styles.removeButton}
+                  >
+                    <Icon name="delete" size={18} colour={colours.danger} />
+                  </Pressable>
+                </View>
+                <TextField
+                  label={`${sd.baseAmountLabel} (${unitLabel})`}
+                  value={row.amount}
+                  onChangeText={(amount) => updateBaseRow(row.key, { amount })}
+                  placeholder={sd.amountPlaceholder}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            );
+          })}
+
+          {basePickerOpen ? (
+            <View style={styles.pickerPanel}>
+              <Body style={styles.pickerTitle}>{sd.pickBaseTitle}</Body>
+              <View style={styles.unitRow}>
+                {pickableBases.map((base) => (
+                  <Pressable
+                    key={base.id}
+                    accessibilityRole="button"
+                    onPress={() => addBaseRow(base)}
+                    style={styles.unitChip}
+                  >
+                    <Small style={styles.unitChipText}>{base.name}</Small>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : pickableBases.length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setBasePickerOpen(true)}
+              style={styles.addNewButton}
+            >
+              <Small style={styles.addNewButtonText}>{sd.addBase}</Small>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.field}>
         <TextField

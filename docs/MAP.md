@@ -142,8 +142,15 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `GET businesses/<id>/sell-items/` — SellItemListView — Owner (`sellitems.manage`, `?include_inactive=1`
   for Settings) or Owner/Manager (`sales.view`/`sales.create`, active items only, for Record sales)
 - `POST businesses/<id>/sell-items/bulk/` — SellItemBulkCreateView
+- `POST businesses/<id>/sell-items/` — SellItemListView.post — single dish create, `ingredients`
+  and/or `bases` (Step 42b1c1), needs at least one real line between the two
 - `PATCH businesses/<id>/sell-items/<item_id>/` — SellItemDetailView — `uses_qty` needs a main
-  stock item
+  stock item; `ingredients`/`bases`, each full-replace when present
+- `GET/POST businesses/<id>/bases/`, `GET/PATCH/DELETE .../bases/<id>/` — BaseListView/
+  BaseDetailView — Step 42b1c1: batch recipes ("bases"), Owner-only (`sellitems.manage`); DELETE on
+  an in-use base is refused (409, dish names) unless `confirm_unlink: true`
+- `PUT businesses/<id>/bases/<id>/used-in/` — BaseUsedInView — full-replace which dishes use this
+  base and at how many grams/ml per portion (no screen yet — see docs/STATUS.md)
 - `GET businesses/<id>/suppliers/` — SupplierListView — distinct supplier names typed so far
 - `GET/POST businesses/<id>/purchases/` — PurchaseListCreateView — list + today/7-day summary, record
 - `GET/PATCH/DELETE businesses/<id>/purchases/<pid>/` — PurchaseDetailView — soft-delete on DELETE
@@ -258,9 +265,12 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   add or edit) — Step 22a2 removed its old ingredients-free quick-add box; Step C2a added an "Add
   from menu" button (sectorCopy's `menuScanEnabled` + `sellitems.manage`) to `/menu-scan`;
   `?filter=needs_ingredients`
-  and `?edit=<id>` query params drive it from Home's nudge and a count-gap reason link;
-  `settings/alerts.tsx` — the 6 alert settings (Step 18 added expiry_warn_days; the hub's "Expiry
-  alerts" row links here too, not its own screen)
+  and `?edit=<id>` query params drive it from Home's nudge and a count-gap reason link; Step
+  42b1c1's `DishRecipeForm` "use a batch recipe" section is wired in here (fetches `bases/`); `setup/
+  4.tsx`'s own dish form doesn't pass `bases` yet, so that picker stays hidden there; `settings/
+  bases.tsx` — Step 42b1c1: "Things you make in batches" list + add/edit sheet (`BaseSheet`/
+  `BaseRecipeForm`), Owner-only; `settings/alerts.tsx` — the 6 alert settings (Step 18 added
+  expiry_warn_days; the hub's "Expiry alerts" row links here too, not its own screen)
 - `dev/kit.tsx` — internal UI kit / component gallery, not user-facing
 - `dev/health.tsx` — internal backend-reachability probe, not user-facing
 
