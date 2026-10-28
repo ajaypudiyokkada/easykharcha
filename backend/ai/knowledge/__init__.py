@@ -20,6 +20,10 @@ EMPTY_LIBRARY: dict = {
         # own classification (classification.py) so the model can never misplace a dish the owner's
         # sector already has a firm rule for (e.g. "malai" dishes are tandoori, not makhani).
         "keyword_type_overrides": [],
+        # Step EK-2d: deterministic protein+style keyword rule that adds a SECOND base (never
+        # replaces the primary) to a dish real kitchens batter AND sauce — see base_discovery.
+        # _secondary_types_for. None (not just {}) so a sector with no rule is a clean no-op.
+        "two_base_starter_rule": None,
     },
     # type (from dish_types.json) -> {"base": <base template name>, "grams_per_portion": N,
     # "family_overrides": {<family>: N}} | null (no base for that type) — the deterministic mapping

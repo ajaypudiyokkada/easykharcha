@@ -168,7 +168,13 @@
         "family": "snack",
         "note": "a plain fried snack uses fry oil only, no batter"
       }
-    ]
+    ],
+    "two_base_starter_rule": {
+      "add_bases_for_types": ["fried_starter_dry", "fried_starter_tossed"],
+      "protein_keywords": ["chicken", "fish", "prawn", "paneer", "gobi", "mushroom", "baby corn", "babycorn"],
+      "style_keywords": ["chilli", "manchurian", "65", "pepper", "lollipop", "wings", "finger", "pakoda", "fry"],
+      "note": "Step EK-2d: a dish naming both a protein/veg AND one of these frying styles is always battered AND tossed in sauce in real kitchens — the model can only pick one primary type, so this deterministically ensures the OTHER one of this pair is added too, regardless of which the model picked as primary. Never applies to a type outside this pair (fries/nuts/mutton-fry/tandoori/soups keep their own no-base types)."
+    }
   },
   "type_rules": {
     "fried_starter_tossed": {"base": "Indo-Chinese sauce base", "grams_per_portion": 40},

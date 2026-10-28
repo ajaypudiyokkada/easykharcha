@@ -23,6 +23,9 @@ def _apply_keyword_override(name: str, classified: dict, overrides: list[dict]) 
         if any(keyword in name_norm for keyword in rule["keywords"]):
             return {
                 "type": rule["type"],
+                # Step EK-2d: an override replaces the whole classification, including a stale
+                # secondary_type from whatever primary type the model (wrongly) picked.
+                "secondary_type": "",
                 "family": rule.get("family", classified.get("family", "")),
                 "confidence": max(classified.get("confidence", 0.0), 0.9),
             }
@@ -70,8 +73,12 @@ def classify_dishes(
         for dish in result.data["dishes"]:
             key = normalise(dish["name"])
             dish_type = dish["type"] if dish["type"] in dish_types else "other"
+            secondary_type = dish.get("secondary_type") or ""
+            if secondary_type not in dish_types or secondary_type == dish_type:
+                secondary_type = ""
             classified = {
                 "type": dish_type,
+                "secondary_type": secondary_type,
                 "family": dish.get("family", ""),
                 "confidence": dish["confidence"],
             }
@@ -87,7 +94,9 @@ def classify_dishes(
             by_norm.setdefault(
                 normalise(name),
                 _apply_keyword_override(
-                    name, {"type": "other", "family": "", "confidence": 0.0}, overrides
+                    name,
+                    {"type": "other", "secondary_type": "", "family": "", "confidence": 0.0},
+                    overrides,
                 ),
             )
 

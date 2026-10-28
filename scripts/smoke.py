@@ -6231,6 +6231,43 @@ def check_kitchen_base_discovery() -> None:
         )
     print("OK — every overridden no-base type maps to no base; only Butter Chicken keeps its makhani base.")
 
+    # --- Step EK-2d: a fried starter genuinely needs BOTH the batter and the sauce base — the
+    # deterministic two_base_starter_rule adds whichever of the pair isn't the model's own primary
+    # type, so this holds regardless of which one the model (or its run-to-run variance) picked. ---
+    two_base_dishes = [
+        {"name": "Chicken Chilli"},  # primary sauce (tossed) -> batter also added
+        {"name": "Gobi Manchurian"},  # primary batter (dry) -> sauce also added
+        {"name": "Prawn Pepper"},  # primary sauce -> batter also added
+        {"name": "French Fries"},  # plain_fried_snack: no base at all, rule must not touch it
+        {"name": "Lemon Coriander Soup"},  # soup: no base at all
+        {"name": "Thai Green Curry"},  # gravy_thai: no base at all
+    ]
+    two_base_classifications = {
+        "chicken chilli": {"type": "fried_starter_tossed", "family": "chilli", "confidence": 0.9},
+        "gobi manchurian": {"type": "fried_starter_dry", "family": "manchurian", "confidence": 0.9},
+        "prawn pepper": {"type": "fried_starter_tossed", "family": "pepper", "confidence": 0.9},
+        "french fries": {"type": "plain_fried_snack", "family": "snack", "confidence": 0.9},
+        "lemon coriander soup": {"type": "soup", "family": "", "confidence": 0.9},
+        "thai green curry": {"type": "gravy_thai", "family": "thai", "confidence": 0.9},
+    }
+    two_base_result = map_bases_from_classification(two_base_dishes, two_base_classifications, library)
+    bases_by_dish: dict[str, set[str]] = {}
+    for base in two_base_result:
+        for use in base["used_by"]:
+            bases_by_dish.setdefault(use["dish"], set()).add(base["name"])
+    for dish_name in ["Chicken Chilli", "Gobi Manchurian", "Prawn Pepper"]:
+        got = bases_by_dish.get(dish_name, set())
+        if got != {"Frying batter", "Indo-Chinese sauce base"}:
+            fail(f"kitchen base discovery: expected {dish_name!r} mapped to both batter and sauce, got {got}")
+    for dish_name in ["French Fries", "Lemon Coriander Soup", "Thai Green Curry"]:
+        got = bases_by_dish.get(dish_name, set())
+        if got:
+            fail(f"kitchen base discovery: expected {dish_name!r} mapped to no base at all, got {got}")
+    print(
+        "OK — Chicken Chilli/Gobi Manchurian/Prawn Pepper map to both batter and sauce regardless of "
+        "the model's primary pick; French Fries/soup/Thai curry stay on no base at all."
+    )
+
     # --- classify-then-map end to end (fake provider) + per-dish-name caching ---
     curry_dishes = ["Chicken Curry", "Chicken Masala", "Chicken Kadai"]
     manchurian_dishes = ["Veg Manchurian", "Chicken Manchurian", "Gobi Manchurian"]

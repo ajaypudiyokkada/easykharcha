@@ -331,6 +331,10 @@ class DishClassification(BaseModel):
 
     name: str
     type: str
+    # Step EK-2d: a fried starter genuinely battered AND tossed in sauce needs two bases — most
+    # dishes leave this blank (one base only). classification.py validates it against the sector's
+    # taxonomy and clears it whenever a keyword override fires, same as `type`.
+    secondary_type: str = ""
     family: str = ""
     confidence: float = 0.5
     # Only meaningful when the model deliberately moved a dish away from its most obvious type —
@@ -345,6 +349,11 @@ class DishClassification(BaseModel):
     @field_validator("type")
     @classmethod
     def _clean_type(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("secondary_type")
+    @classmethod
+    def _clean_secondary_type(cls, value: str) -> str:
         return _clean_text(value, MAX_NAME_LENGTH)
 
     @field_validator("family")

@@ -133,7 +133,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   after the model, on every call AND every cache hit, so malai/naan-kulcha/Thai-curry/butter-garlic/
   fries/mutton-fry dishes can't be misclassified by the model) — `CLASSIFY_PROMPT_VERSION` 1->3 (also
   clarified the fried_starter_tossed/dry wet-vs-dry split after a real run funnelled nearly
-  everything into tossed), `base_discovery.MAPPING_VERSION` 1->2.
+  everything into tossed), `base_discovery.MAPPING_VERSION` 1->2. Step EK-2d: a dish can now map to
+  up to 2 bases — `DishClassification.secondary_type` (optional, model-reported) and
+  `base_discovery._secondary_types_for` (deterministic: `restaurant_cafe.json`'s
+  `two_base_starter_rule` adds whichever of fried_starter_dry/fried_starter_tossed ISN'T the primary
+  type to a dish naming both a protein/veg and a frying style, e.g. Chicken Chilli, Gobi Manchurian,
+  Prawn Pepper — real kitchens batter AND sauce these, the model can only pick one primary) both feed
+  `map_bases_from_classification`'s new `add_mapping` helper (dedups so a dish is never double-listed
+  in the same base); `CLASSIFY_PROMPT_VERSION` 3->4.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
