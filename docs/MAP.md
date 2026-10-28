@@ -140,7 +140,11 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   type to a dish naming both a protein/veg and a frying style, e.g. Chicken Chilli, Gobi Manchurian,
   Prawn Pepper — real kitchens batter AND sauce these, the model can only pick one primary) both feed
   `map_bases_from_classification`'s new `add_mapping` helper (dedups so a dish is never double-listed
-  in the same base); `CLASSIFY_PROMPT_VERSION` 3->4.
+  in the same base); `CLASSIFY_PROMPT_VERSION` 3->4. Step EK-3: `recipe_composer.py` — `suggest_setup`
+  (best-seller picker, per-family recipe composer capped at 25 AI calls/menu via `_merge_small_
+  families`, ingredient resolver merging near-duplicates and matching/proposing stock items), new
+  `AiFamilyRecipeCache`, `FAMILY_RECIPE_PROMPT_VERSION`/`BEST_SELLER_PROMPT_VERSION` (`prompts.py`).
+  No endpoint/screen yet — `scripts/ai_try_kitchen.py --setup` is the only caller today.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/

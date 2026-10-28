@@ -650,6 +650,23 @@ not built yet.
   to neither. Real-run proof (`scripts/ai_try_kitchen.py`, 1 run each, ~$0.20 total): Kavan batter 40/
   sauce 45 (target 28-45/28-55 ✓), FOMO batter 41/sauce 54 (✓, right at the sauce ceiling), 0
   duplicates and 0 bare headings both menus, no fries/soup/Thai dish in any base either menu.
+- **Step EK-3 — Recipe composer + ingredient resolver (backend only, docs/BASES_PLAN.md).** New
+  `ai/recipe_composer.py`: `pick_best_sellers` (library-keyword-ranked shortlist, one AI call,
+  deterministic category spread from each dish's own classify_dishes type, gaps filled from the
+  ranked shortlist if the model under-picks); `build_families`/`compose_family_recipes` (one AI call
+  per family of dishes sharing a recipe shape, capped at 25/menu — `_merge_small_families` exhausts
+  same-`type` merges before ever merging across types; base grams/ml per portion are looked up
+  deterministically, never asked of the model; a family recipe never repeats its base's own
+  ingredients; an implausible quantity falls back to a flat default, flagged in `corrections`); new
+  `AiFamilyRecipeCache` (per sector + family-members-hash, like `AiKitchenBaseCache`). `resolve_
+  ingredients` merges near-duplicate names (Onion/Onions/Onion Chopped), matches the business's own
+  stock items (fuzzy), and proposes new ones with a unit family and low-stock category guess, each
+  carrying `used_in`. `suggest_setup(dishes, sector, business=None, menu_scan=None)` is the one
+  orchestrator, optionally saving onto `MenuScan.result["setup"]`; writes nothing to StockItem/
+  SellItem/Base — EK-4 owns applying it. `scripts/ai_try_kitchen.py --setup` real-run proof (2 runs
+  each after fixing a same-type-merge bug found on the first Kavan run): Kavan 10 best sellers/5
+  categories, 25 families, 93 ingredients (target ≤90, missed by 3), ~Rs 7.66; FOMO 10/5 categories,
+  25 families, 89 ingredients, ~Rs 8.22 — both well under the Rs 15/menu cost target.
 - **Step EK-2c — Remove duplicate expansion, fix names/splits, refine types.** Two real bugs fixed:
   (1) the first pass's own inline-variant expansion and the dedicated group pass could both expand
   the same heading, producing duplicates/garbled names ("Gobi Manchurian/65 65") — `apply_groups` is

@@ -51,7 +51,9 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
 from django.conf import settings
 
 from ..schemas import (
+    BestSellersResult,
     DishClassificationResult,
+    FamilyRecipeSuggestion,
     GroupExtractionResult,
     MenuExtractionResult,
     RecipeSuggestionsResult,
@@ -65,6 +67,10 @@ _RECIPE_INPUT_TOKENS = 800
 _RECIPE_OUTPUT_TOKENS = 300
 _KITCHEN_INPUT_TOKENS = 600
 _KITCHEN_OUTPUT_TOKENS = 400
+_BEST_SELLER_INPUT_TOKENS = 500
+_BEST_SELLER_OUTPUT_TOKENS = 250
+_FAMILY_RECIPE_INPUT_TOKENS = 500
+_FAMILY_RECIPE_OUTPUT_TOKENS = 300
 
 # Dish-name keyword -> (type, family) — a stand-in for the real model's judgement, just enough to
 # exercise classify-then-map end to end without a network call. Checked in order, first match wins.
@@ -416,4 +422,105 @@ def classify_dishes(dish_names: list[str], sector: str, dish_types: list[str]) -
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=get_raw,
         parse=lambda raw: DishClassificationResult.model_validate(raw).model_dump(),
+    )
+
+
+def pick_best_sellers(shortlist: list[dict], business_type: str) -> AiCallResult:
+    """Picks every shortlist entry whose name doesn't contain FORCE_DROP_ME (proves the orchestrator
+    fills gaps deterministically when the model under-picks), capped at 12, round-robin by category
+    so more than one category survives even from a lopsided shortlist."""
+    by_category: dict[str, list[dict]] = {}
+    for item in shortlist:
+        if "FORCE_DROP_ME" in item["name"]:
+            continue
+        by_category.setdefault(item["category"], []).append(item)
+
+    picks = []
+    while len(picks) < 12 and any(by_category.values()):
+        for category in list(by_category):
+            bucket = by_category[category]
+            if bucket:
+                item = bucket.pop(0)
+                picks.append({"name": item["name"], "reason": f"a popular {category} choice"})
+            else:
+                del by_category[category]
+            if len(picks) >= 12:
+                break
+
+    def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        return (
+            {"picks": picks},
+            model,
+            _BEST_SELLER_INPUT_TOKENS,
+            _BEST_SELLER_OUTPUT_TOKENS,
+            False,
+        )
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_KITCHEN,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=get_raw,
+        parse=lambda raw: BestSellersResult.model_validate(raw).model_dump(),
+    )
+
+
+def compose_family_recipe(
+    family_name: str,
+    member_dish_names: list[str],
+    business_type: str,
+    stock_items: list[tuple[str, str]],
+    excluded_ingredient_names: list[str],
+) -> AiCallResult:
+    """ "FORCE_SILLY_QTY" in family_name returns an implausible main_item_qty (50,000 g) — proves
+    recipe_composer's sanity rule replaces it with the library default instead of trusting it.
+    Otherwise a plausible-looking shared recipe, never repeating an excluded (base-covered)
+    ingredient name."""
+    default_match = stock_items[0][0] if stock_items else None
+    force_silly = "FORCE_SILLY_QTY" in family_name
+    main_qty = 50000.0 if force_silly else 150.0
+    excluded_norm = {name.lower() for name in excluded_ingredient_names}
+    ingredients = []
+    if "ginger" not in excluded_norm:
+        ingredients.append(
+            {
+                "name": "Ginger",
+                "amount": 15.0,
+                "unit": "g",
+                "role": "auxiliary",
+                "confidence": 0.7,
+                "matched_stock_name": default_match,
+            }
+        )
+
+    def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        return (
+            {
+                "portion_label": "1 plate",
+                "main_item_name": member_dish_names[0] if member_dish_names else "Main item",
+                "main_item_unit": "g",
+                "main_item_qty": main_qty,
+                "member_quantities": [],
+                "ingredients": ingredients,
+                "minor_ingredients": [
+                    {
+                        "name": "Salt",
+                        "amount": 1.0,
+                        "unit": "g",
+                        "role": "auxiliary",
+                        "confidence": 0.6,
+                        "matched_stock_name": None,
+                    }
+                ],
+            },
+            model,
+            _FAMILY_RECIPE_INPUT_TOKENS,
+            _FAMILY_RECIPE_OUTPUT_TOKENS,
+            False,
+        )
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_RECIPE,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=get_raw,
+        parse=lambda raw: FamilyRecipeSuggestion.model_validate(raw).model_dump(),
     )

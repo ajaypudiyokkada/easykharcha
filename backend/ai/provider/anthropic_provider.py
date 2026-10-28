@@ -7,7 +7,9 @@ from django.conf import settings
 
 from .. import prompts
 from ..schemas import (
+    BestSellersResult,
     DishClassificationResult,
+    FamilyRecipeSuggestion,
     GroupExtractionResult,
     MenuExtractionResult,
     RecipeSuggestionsResult,
@@ -20,6 +22,8 @@ _MAX_TOKENS_MENU = 8000
 _MAX_TOKENS_RECIPE = 4000
 # A batch of ~60-80 dishes each needing a type/family/confidence echoed back needs real room.
 _MAX_TOKENS_KITCHEN = 8000
+_MAX_TOKENS_BEST_SELLER = 2000
+_MAX_TOKENS_FAMILY_RECIPE = 2000
 
 # Models that default to adaptive extended thinking reject a forced tool_choice ("tool" or "any") —
 # the API returns a 400 ("tool_choice: type ... are not supported for this model"), since forcing an
@@ -158,4 +162,48 @@ def classify_dishes(dish_names: list[str], sector: str, dish_types: list[str]) -
             max_tokens=_MAX_TOKENS_KITCHEN,
         ),
         parse=lambda raw: DishClassificationResult.model_validate(raw).model_dump(),
+    )
+
+
+def pick_best_sellers(shortlist: list[dict], business_type: str) -> AiCallResult:
+    messages = prompts.best_seller_messages(shortlist, business_type)
+    tool = prompts.best_seller_tool()
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_KITCHEN,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=prompts.BEST_SELLER_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_BEST_SELLER,
+        ),
+        parse=lambda raw: BestSellersResult.model_validate(raw).model_dump(),
+    )
+
+
+def compose_family_recipe(
+    family_name: str,
+    member_dish_names: list[str],
+    business_type: str,
+    stock_items: list[tuple[str, str]],
+    excluded_ingredient_names: list[str],
+) -> AiCallResult:
+    messages = prompts.family_recipe_messages(
+        family_name, member_dish_names, business_type, stock_items, excluded_ingredient_names
+    )
+    tool = prompts.family_recipe_tool()
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_RECIPE,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=prompts.FAMILY_RECIPE_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_FAMILY_RECIPE,
+        ),
+        parse=lambda raw: FamilyRecipeSuggestion.model_validate(raw).model_dump(),
     )

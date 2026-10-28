@@ -33,3 +33,19 @@ def suggest_recipes(
 
 def classify_dishes(dish_names: list[str], sector: str, dish_types: list[str]) -> AiCallResult:
     return _provider().classify_dishes(dish_names, sector, dish_types)
+
+
+def pick_best_sellers(shortlist: list[dict], business_type: str) -> AiCallResult:
+    return _provider().pick_best_sellers(shortlist, business_type)
+
+
+def compose_family_recipe(
+    family_name: str,
+    member_dish_names: list[str],
+    business_type: str,
+    stock_items: list[tuple[str, str]],
+    excluded_ingredient_names: list[str],
+) -> AiCallResult:
+    return _provider().compose_family_recipe(
+        family_name, member_dish_names, business_type, stock_items, excluded_ingredient_names
+    )

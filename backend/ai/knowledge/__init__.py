@@ -12,6 +12,10 @@ EMPTY_LIBRARY: dict = {
     "sector": "",
     "base_templates": [],
     "portion_defaults": [],
+    # Step EK-3: dish names/phrases this sector's owners tend to sell a lot of — recipe_composer.py's
+    # best-seller picker scores candidates against this list before the one AI call that narrows them
+    # down, same "library-first, model second" spirit as base discovery's type_rules.
+    "popular_keywords": [],
     "rules": {
         "min_dishes_to_suggest_base": 3,
         "min_grams_per_portion": 30,

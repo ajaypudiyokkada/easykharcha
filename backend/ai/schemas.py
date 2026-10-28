@@ -379,3 +379,97 @@ class DishClassificationResult(BaseModel):
     @classmethod
     def _cap_dishes(cls, value: list) -> list:
         return value[:MAX_DISHES_PER_CLASSIFY_CALL]
+
+
+# Step EK-3: best-seller picker + per-family recipe composer (recipe_composer.py). The model never
+# picks a dish's category (that's looked up deterministically from its classify_dishes type) and
+# never invents which dishes exist — recipe_composer.pick_best_sellers drops any name that isn't an
+# exact normalised match against the dish list it was given.
+MAX_BEST_SELLER_PICKS = 20
+MAX_REASON_SHORT_LENGTH = 100
+
+
+class BestSellerPick(BaseModel):
+    name: str
+    reason: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("reason")
+    @classmethod
+    def _clean_reason(cls, value: str) -> str:
+        return _clean_text(value, MAX_REASON_SHORT_LENGTH)
+
+
+class BestSellersResult(BaseModel):
+    picks: list[BestSellerPick] = Field(default_factory=list)
+
+    @field_validator("picks")
+    @classmethod
+    def _cap_picks(cls, value: list) -> list:
+        return value[:MAX_BEST_SELLER_PICKS]
+
+
+MAX_FAMILY_MEMBERS_WITH_OVERRIDE = 40
+
+
+class FamilyMemberQuantity(BaseModel):
+    """Step EK-3: one family member whose main-item quantity differs from the family's own
+    main_item_qty default (e.g. prawn 120 g vs the family's chicken 150 g) — a member not listed
+    here just uses the family default."""
+
+    dish_name: str
+    main_item_qty: float
+
+    @field_validator("dish_name")
+    @classmethod
+    def _clean_dish_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("main_item_qty")
+    @classmethod
+    def _non_negative_qty(cls, value: float) -> float:
+        return max(0.0, value)
+
+
+class FamilyRecipeSuggestion(BaseModel):
+    portion_label: str = ""
+    main_item_name: str
+    main_item_unit: Literal["g", "ml", "pieces"]
+    main_item_qty: float
+    member_quantities: list[FamilyMemberQuantity] = Field(default_factory=list)
+    ingredients: list[IngredientSuggestion] = Field(default_factory=list)
+    minor_ingredients: list[IngredientSuggestion] = Field(default_factory=list)
+
+    @field_validator("portion_label")
+    @classmethod
+    def _clean_portion_label(cls, value: str) -> str:
+        return _clean_text(value, MAX_PORTION_LABEL_LENGTH)
+
+    @field_validator("main_item_name")
+    @classmethod
+    def _clean_main_item_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("main_item_qty")
+    @classmethod
+    def _non_negative_main_qty(cls, value: float) -> float:
+        return max(0.0, value)
+
+    @field_validator("member_quantities")
+    @classmethod
+    def _cap_member_quantities(cls, value: list) -> list:
+        return value[:MAX_FAMILY_MEMBERS_WITH_OVERRIDE]
+
+    @field_validator("ingredients")
+    @classmethod
+    def _cap_ingredients(cls, value: list) -> list:
+        return value[:MAX_INGREDIENTS_PER_DISH]
+
+    @field_validator("minor_ingredients")
+    @classmethod
+    def _cap_minor_ingredients(cls, value: list) -> list:
+        return value[:MAX_MINOR_INGREDIENTS_PER_DISH]

@@ -115,6 +115,12 @@
     {"dish_type": "chapathi", "dough_g": 60},
     {"dish_type": "paratha", "dough_g": 100}
   ],
+  "popular_keywords": [
+    "butter chicken", "chicken biryani", "mutton biryani", "veg biryani", "paneer butter masala",
+    "chicken 65", "chilli chicken", "manchurian", "fried rice", "noodles", "chicken tikka",
+    "tandoori chicken", "kebab", "seekh", "masala dosa", "gulab jamun", "ice cream", "naan",
+    "butter naan", "kadai", "dal makhani", "paneer tikka", "momos", "soup", "lassi", "mocktail"
+  ],
   "rules": {
     "min_dishes_to_suggest_base": 3,
     "min_grams_per_portion": 30,

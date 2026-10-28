@@ -33,8 +33,15 @@ from ai.base_discovery import (  # noqa: E402
     discover_bases,
     expand_dish_options,
 )
+from ai.classification import classify_dishes  # noqa: E402
 from ai.extraction import run_menu_extraction  # noqa: E402
 from ai.provider import anthropic_provider  # noqa: E402
+from ai.recipe_composer import (  # noqa: E402
+    build_families,
+    compose_family_recipes,
+    pick_best_sellers,
+    resolve_ingredients,
+)
 from businesses.models import BusinessType  # noqa: E402
 
 _MEDIA_TYPE_BY_SUFFIX = {
@@ -80,10 +87,17 @@ def _cost(input_tokens: int, output_tokens: int) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("menu_file", type=Path, help="Path to one menu image or PDF")
     parser.add_argument(
         "--type", dest="business_type", required=True, choices=[c.value for c in BusinessType]
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Step EK-3: also run recipe_composer.suggest_setup (best sellers, family recipes, ingredient resolution) after base discovery.",
     )
     args = parser.parse_args()
 
@@ -149,7 +163,9 @@ def main() -> None:
             seen_keys[key] = dish["name"]
     print(f"\nDISH COUNT: {len(expanded)}")
     print(f"BARE HEADING DISHES: {len(bare)} {bare}")
-    print(f"DUPLICATE NAMES (after token-sort normalisation): {len(duplicate_names)} {duplicate_names}")
+    print(
+        f"DUPLICATE NAMES (after token-sort normalisation): {len(duplicate_names)} {duplicate_names}"
+    )
 
     print(f"\nClassifying dishes and mapping bases ({settings.AI_MODEL_KITCHEN})...")
     result = discover_bases(
@@ -167,7 +183,9 @@ def main() -> None:
                 f"  batch: {call['model']}{fallback_note} — {call['input_tokens']} in / "
                 f"{call['output_tokens']} out"
             )
-        print(f"Classification total: {kitchen_input} in / {kitchen_output} out (~{_cost(kitchen_input, kitchen_output)})")
+        print(
+            f"Classification total: {kitchen_input} in / {kitchen_output} out (~{_cost(kitchen_input, kitchen_output)})"
+        )
 
     bases = result["bases"]
     print(f"\n{len(bases)} base(s) found:")
@@ -178,7 +196,9 @@ def main() -> None:
         by_family: dict[str, int] = {}
         for use in base["used_by"]:
             by_family[use.get("family", "")] = by_family.get(use.get("family", ""), 0) + 1
-        family_summary = ", ".join(f"{fam or '(none)'}: {n}" for fam, n in sorted(by_family.items()))
+        family_summary = ", ".join(
+            f"{fam or '(none)'}: {n}" for fam, n in sorted(by_family.items())
+        )
         print(
             f"\n- {base['name']} ({base.get('type', '')}, {base['source']}, "
             f"confidence {base['confidence']:.2f}, yield {base['yield_qty']:g})"
@@ -187,7 +207,9 @@ def main() -> None:
         print(f"  reason: {base.get('reason', '')}")
         print(f"  used by {len(base['used_by'])} dishes — by family: {family_summary}")
         for use in base["used_by"][:15]:
-            print(f"    - {use['dish']}: {use['grams_per_portion']:g} g/ml per portion ({use.get('family', '')})")
+            print(
+                f"    - {use['dish']}: {use['grams_per_portion']:g} g/ml per portion ({use.get('family', '')})"
+            )
         if len(base["used_by"]) > 15:
             print(f"    ... and {len(base['used_by']) - 15} more")
         if base.get("flags"):
@@ -197,6 +219,147 @@ def main() -> None:
         outcome.total_input_tokens + kitchen_input, outcome.total_output_tokens + kitchen_output
     )
     print(f"\nTotal cost (menu read + classification): ~{total_cost}")
+
+    if not args.setup:
+        return
+
+    print("\n" + "=" * 70)
+    print("STEP EK-3: suggest_setup (best sellers, family recipes, ingredients)")
+    print("=" * 70)
+
+    classifications, _classify_usage = classify_dishes(
+        expanded, args.business_type, classify_fn=anthropic_provider.classify_dishes
+    )
+
+    best_sellers_data = pick_best_sellers(
+        expanded, classifications, args.business_type, pick_fn=anthropic_provider.pick_best_sellers
+    )
+    best_sellers = best_sellers_data["best_sellers"]
+    bs_categories = {p["category"] for p in best_sellers}
+    print(
+        f"\nBEST SELLERS ({len(best_sellers)}, {len(bs_categories)} categories: {sorted(bs_categories)}):"
+    )
+    for p in best_sellers:
+        print(f"  - {p['name']} ({p['category']}) — {p['reason']}")
+
+    families = build_families(expanded, classifications)
+    print(
+        f"\n{len(families)} raw families built from {len(expanded)} dishes (before the 25-family cap)"
+    )
+
+    family_data = compose_family_recipes(
+        families,
+        bases,
+        args.business_type,
+        [],
+        compose_fn=anthropic_provider.compose_family_recipe,
+    )
+    family_results = family_data["families"]
+    family_usage = family_data["usage"]
+    family_input = sum(u["input_tokens"] for u in family_usage)
+    family_output = sum(u["output_tokens"] for u in family_usage)
+    print(
+        f"Family recipe calls: {len(family_usage)} (of {len(family_results)} families — rest were "
+        f"cache hits), {family_input} in / {family_output} out (~{_cost(family_input, family_output)})"
+    )
+
+    corrections = [(f["name"], c) for f in family_results for c in f["corrections"]]
+    print(f"\n3 SAMPLE FAMILY RECIPES (of {len(family_results)}):")
+    for family in family_results[:3]:
+        main = family["main_item"]
+        print(f"\n- {family['name']} ({len(family['dishes'])} dishes: {family['dishes']})")
+        print(
+            f"  portion: {family['portion_label']!r}, main item: {main['qty']:g} {main['unit']} {main['name']}"
+        )
+        if family["member_overrides"]:
+            overrides = ", ".join(
+                f"{o['dish_name']}={o['qty']:g}" for o in family["member_overrides"]
+            )
+            print(f"  member overrides: {overrides}")
+        if family["bases_used"]:
+            bases_line = ", ".join(
+                f"{b['base']} {b['grams_per_portion']:g}g" for b in family["bases_used"]
+            )
+            print(f"  bases used: {bases_line}")
+        ingredients_line = ", ".join(
+            f"{i['name']} {i['amount']:g}{i['unit']}" for i in family["ingredients"]
+        )
+        print(f"  ingredients: {ingredients_line or '(none)'}")
+        minor_line = ", ".join(
+            f"{i['name']} {i['amount']:g}{i['unit']}" for i in family["minor_ingredients"]
+        )
+        print(f"  minor ingredients: {minor_line or '(none)'}")
+
+    ingredients = resolve_ingredients(family_results, bases)
+    distinct_count = ingredients["matched_count"] + ingredients["new_count"]
+    print(
+        f"\nINGREDIENTS: {distinct_count} distinct ({ingredients['matched_count']} matched to "
+        f"existing stock, {ingredients['new_count']} new)"
+    )
+    all_names = [m["stock_item_name"] for m in ingredients["matched"]] + [
+        n["name"] for n in ingredients["new"]
+    ]
+    duplicate_names = {name for name in all_names if all_names.count(name) > 1}
+    for n in ingredients["new"][:40]:
+        print(
+            f"  new: {n['name']} ({n['unit_family']}, {n['low_stock_category']}) — "
+            f"used in {len(n['used_in'])}: {n['used_in'][:3]}{'...' if len(n['used_in']) > 3 else ''}"
+        )
+
+    if corrections:
+        print(f"\nQUANTITY CORRECTIONS ({len(corrections)}):")
+        for family_name, note in corrections:
+            print(f"  - [{family_name}] {note}")
+    else:
+        print("\nQUANTITY CORRECTIONS: none")
+
+    setup_input = (
+        kitchen_input + sum(u["input_tokens"] for u in best_sellers_data["usage"]) + family_input
+    )
+    setup_output = (
+        kitchen_output + sum(u["output_tokens"] for u in best_sellers_data["usage"]) + family_output
+    )
+    setup_cost_usd = (
+        Decimal(setup_input) / Decimal(1_000_000) * settings.AI_PRICE_IN_PER_MTOK
+        + Decimal(setup_output) / Decimal(1_000_000) * settings.AI_PRICE_OUT_PER_MTOK
+    )
+    print(f"Setup-only cost (best sellers + family recipes, no menu read): ~${setup_cost_usd:.4f}")
+    full_cost_usd = (
+        Decimal(outcome.total_input_tokens + setup_input)
+        / Decimal(1_000_000)
+        * settings.AI_PRICE_IN_PER_MTOK
+        + Decimal(outcome.total_output_tokens + setup_output)
+        / Decimal(1_000_000)
+        * settings.AI_PRICE_OUT_PER_MTOK
+    )
+    # Approximate, for a rough Rs comparison only — no live FX lookup.
+    inr_rate = Decimal("83")
+    full_cost_inr = full_cost_usd * inr_rate
+    print(
+        f"\nTOTAL COST (menu read + classification + best sellers + family recipes): "
+        f"~${full_cost_usd:.4f} (~Rs {full_cost_inr:.2f} at Rs {inr_rate}/USD, approximate)"
+    )
+
+    print("\nTARGETS:")
+    misses = []
+    if not (8 <= len(best_sellers) <= 12):
+        misses.append(f"best sellers: got {len(best_sellers)}, target 8-12")
+    if len(bs_categories) < 4:
+        misses.append(f"best seller categories: got {len(bs_categories)}, target >=4")
+    if not (12 <= len(family_results) <= 25):
+        misses.append(f"families: got {len(family_results)} (of {len(families)} raw), target 12-25")
+    if not (40 <= distinct_count <= 90):
+        misses.append(f"distinct ingredients: got {distinct_count}, target 40-90")
+    if duplicate_names:
+        misses.append(f"duplicate ingredient names: {duplicate_names}")
+    if full_cost_inr > 15:
+        misses.append(f"cost: ~Rs {full_cost_inr:.2f}, target under Rs 15")
+    if misses:
+        print("MISSED:")
+        for m in misses:
+            print(f"  - {m}")
+    else:
+        print("All targets met.")
 
 
 if __name__ == "__main__":
