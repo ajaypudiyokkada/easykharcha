@@ -16,6 +16,10 @@ EMPTY_LIBRARY: dict = {
         "min_dishes_to_suggest_base": 3,
         "min_grams_per_portion": 30,
         "excluded_by_default": [],
+        # Step EK-2c: deterministic name-keyword -> type/family overrides, applied AFTER the model's
+        # own classification (classification.py) so the model can never misplace a dish the owner's
+        # sector already has a firm rule for (e.g. "malai" dishes are tandoori, not makhani).
+        "keyword_type_overrides": [],
     },
     # type (from dish_types.json) -> {"base": <base template name>, "grams_per_portion": N,
     # "family_overrides": {<family>: N}} | null (no base for that type) — the deterministic mapping

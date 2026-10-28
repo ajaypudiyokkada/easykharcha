@@ -27,7 +27,12 @@ django.setup()
 
 from django.conf import settings  # noqa: E402
 
-from ai.base_discovery import apply_groups, discover_bases, expand_dish_options  # noqa: E402
+from ai.base_discovery import (  # noqa: E402
+    _dedup_key,
+    apply_groups,
+    discover_bases,
+    expand_dish_options,
+)
 from ai.extraction import run_menu_extraction  # noqa: E402
 from ai.provider import anthropic_provider  # noqa: E402
 from businesses.models import BusinessType  # noqa: E402
@@ -108,7 +113,8 @@ def main() -> None:
     )
     print(f"Groups found (dedicated pass): {len(outcome.groups)}")
     for group in outcome.groups:
-        print(f"  - {group['heading']!r} + {group['choices']} ({group['position']})")
+        dish_names = [d["name"] for d in group["dishes"]]
+        print(f"  - {group['heading']!r} -> {dish_names}")
     if not outcome.merged["is_menu"]:
         print("is_menu: false — stopping, nothing to discover bases for.")
         return
@@ -133,8 +139,17 @@ def main() -> None:
             print(f"  - {dish['expanded_from']!r} -> {dish['name']!r}")
 
     bare = _bare_heading_dishes(expanded)
+    seen_keys: dict[str, str] = {}
+    duplicate_names = []
+    for dish in expanded:
+        key = _dedup_key(dish["name"])
+        if key in seen_keys:
+            duplicate_names.append((seen_keys[key], dish["name"]))
+        else:
+            seen_keys[key] = dish["name"]
     print(f"\nDISH COUNT: {len(expanded)}")
     print(f"BARE HEADING DISHES: {len(bare)} {bare}")
+    print(f"DUPLICATE NAMES (after token-sort normalisation): {len(duplicate_names)} {duplicate_names}")
 
     print(f"\nClassifying dishes and mapping bases ({settings.AI_MODEL_KITCHEN})...")
     result = discover_bases(

@@ -120,8 +120,20 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   (`prompts.py`) is a second, dedicated pass over the same file(s) that finds only groups;
   `schemas.ExtractedGroup`/`merge_group_results`; `extraction.run_menu_extraction` runs it per
   page-chunk after the main pass (`MenuExtractionOutcome.groups`, skipped when the chunk isn't a
-  menu); `base_discovery.apply_groups(dishes, groups)` drops the bare leftover and adds the real
-  combined dish(es) via `expand_dish_options`, run after it in `scripts/ai_try_kitchen.py`.
+  menu). Step EK-2c: the group pass now returns each group's own FINAL dish names directly
+  (`dishes: [{name, price}]`, prefix/suffix labels dropped — unreliable word order); `base_discovery.
+  apply_groups` is the single source of truth for a heading both passes found (drops the first
+  pass's own matching expansion), drops a bare choice-word fragment from the same table
+  (`_is_choice_fragment`, e.g. a leftover "Veg" beside a group's own "Fried Rice Veg"), and ends with
+  `dedup_dishes` (merges a dish duplicated in a different word order/casing, e.g. "Gobi Manchurian"
+  vs "Manchurian GOBI"). `expand_dish_options` drops a variant that duplicates its own heading (stops
+  "Gulab Jamun Gulab Jamun"). New sector-knowledge types (`plain_fried_snack`/`dry_masala_fry`/
+  `gravy_thai`/`butter_garlic`/`bread_maida`, all no-base) plus `restaurant_cafe.json`'s
+  `rules.keyword_type_overrides` (`classification.classify_dishes` applies these deterministically
+  after the model, on every call AND every cache hit, so malai/naan-kulcha/Thai-curry/butter-garlic/
+  fries/mutton-fry dishes can't be misclassified by the model) — `CLASSIFY_PROMPT_VERSION` 1->3 (also
+  clarified the fried_starter_tossed/dry wet-vs-dry split after a real run funnelled nearly
+  everything into tossed), `base_discovery.MAPPING_VERSION` 1->2.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/

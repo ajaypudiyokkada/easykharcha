@@ -32,8 +32,20 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
 - "FORCE_BARE_GROUP" (Step EK-2b) returns a BROKEN first pass: a bare "Manchurian" dish with no
   variants at all, standing alone — the designed-menu failure mode the dedicated group pass exists
   to fix. extract_menu_groups for this marker returns the correct group (heading "Manchurian",
-  choices ["Gobi", "Paneer"], suffix) — proves base_discovery.apply_groups drops the bare "Manchurian"
-  leftover and adds the real combined dishes ("Gobi Manchurian", "Paneer Manchurian") instead.
+  dishes "Gobi Manchurian"/"Paneer Manchurian") — proves base_discovery.apply_groups drops the bare
+  "Manchurian" leftover and adds the group's own final dish names instead.
+- "FORCE_DOUBLE_EXPANDED_GROUP" (Step EK-2c) returns a first pass that ALREADY expanded a "Manchurian"
+  heading via its own inline variants (producing "Gobi Manchurian"/"Paneer Manchurian" itself,
+  correctly) — extract_menu_groups for this marker finds the SAME heading independently (dishes
+  "Gobi Manchurian"/"Paneer Manchurian" again). Proves apply_groups' one-source-of-truth rule: the
+  group pass's own dishes win, the first pass's matching expansion is dropped, not duplicated.
+- "FORCE_CHOICE_FRAGMENT_GROUP" (Step EK-2c) returns a first pass with 3 bare choice-word dishes
+  ("Veg", "Egg", "Mixed" — no heading, no variants) plus one unrelated dish ("Something Else"),
+  mimicking a real Kavan bug: the main pass misread a "Fried Rice/Noodles" price table's column
+  labels as standalone dishes. extract_menu_groups for this marker correctly finds the whole group
+  (8 final dishes: Fried Rice/Noodles x Veg/Egg/Chicken/Mixed) — proves base_discovery.apply_groups's
+  _is_choice_fragment drops the 3 bare fragments (never a real dish on their own) while leaving
+  "Something Else" alone.
 """
 
 from django.conf import settings
@@ -91,6 +103,8 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
     force_suffix_group = any(b"FORCE_SUFFIX_GROUP" in blob for blob in blobs)
     force_two_price_group = any(b"FORCE_TWO_PRICE_GROUP" in blob for blob in blobs)
     force_bare_group = any(b"FORCE_BARE_GROUP" in blob for blob in blobs)
+    force_double_expanded_group = any(b"FORCE_DOUBLE_EXPANDED_GROUP" in blob for blob in blobs)
+    force_choice_fragment_group = any(b"FORCE_CHOICE_FRAGMENT_GROUP" in blob for blob in blobs)
     is_menu = not any(b"NOT_A_MENU" in blob for blob in blobs)
 
     def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
@@ -207,6 +221,38 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
                 _MENU_OUTPUT_TOKENS,
                 False,
             )
+        if force_double_expanded_group:
+            dishes = [
+                {
+                    "name": "Manchurian",
+                    "price": 270,
+                    "confidence": 0.9,
+                    "note": "has options",
+                    "variants": ["Gobi", "Paneer"],
+                    "variant_position": "suffix",
+                }
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
+        if force_choice_fragment_group:
+            dishes = [
+                {"name": "Veg", "price": 150, "confidence": 0.9},
+                {"name": "Egg", "price": 170, "confidence": 0.9},
+                {"name": "Mixed", "price": 200, "confidence": 0.9},
+                {"name": "Something Else", "price": 120, "confidence": 0.9},
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
         if force_many_dishes:
             dishes = [
                 {"name": f"Fake Dish {i}", "price": 100 + i, "confidence": 0.9}
@@ -255,15 +301,32 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
 def extract_menu_groups(files: list[dict], business_type: str) -> AiCallResult:
     blobs = [file["data"] for file in files]
     force_bare_group = any(b"FORCE_BARE_GROUP" in blob for blob in blobs)
+    force_double_expanded_group = any(b"FORCE_DOUBLE_EXPANDED_GROUP" in blob for blob in blobs)
+    force_choice_fragment_group = any(b"FORCE_CHOICE_FRAGMENT_GROUP" in blob for blob in blobs)
 
     def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
         groups = []
-        if force_bare_group:
+        if force_bare_group or force_double_expanded_group:
             groups = [
                 {
                     "heading": "Manchurian",
-                    "choices": ["Gobi", "Paneer"],
-                    "position": "suffix",
+                    "dishes": [{"name": "Gobi Manchurian"}, {"name": "Paneer Manchurian"}],
+                }
+            ]
+        elif force_choice_fragment_group:
+            groups = [
+                {
+                    "heading": "Fried Rice/Noodles",
+                    "dishes": [
+                        {"name": "Fried Rice Veg", "price": 150},
+                        {"name": "Fried Rice Egg", "price": 170},
+                        {"name": "Fried Rice Chicken", "price": 190},
+                        {"name": "Fried Rice Mixed", "price": 200},
+                        {"name": "Noodles Veg", "price": 150},
+                        {"name": "Noodles Egg", "price": 170},
+                        {"name": "Noodles Chicken", "price": 190},
+                        {"name": "Noodles Mixed", "price": 200},
+                    ],
                 }
             ]
         return ({"groups": groups}, model, _KITCHEN_INPUT_TOKENS, _KITCHEN_OUTPUT_TOKENS, False)

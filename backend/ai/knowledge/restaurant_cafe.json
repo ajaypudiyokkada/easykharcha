@@ -121,11 +121,60 @@
     "excluded_by_default": ["Ginger-garlic paste"],
     "makhani_min_dishes": 3,
     "no_stocks_tadka_or_seasonings": true,
-    "one_level_only": true
+    "one_level_only": true,
+    "keyword_type_overrides": [
+      {
+        "keywords": ["butter chicken", "makhani", "butter masala"],
+        "type": "gravy_makhani",
+        "family": "makhani",
+        "note": "makhani only for names that genuinely say butter chicken/makhani/butter masala"
+      },
+      {
+        "keywords": ["malai", "tikka", "tandoori", "kebab", "kabab", "seekh"],
+        "type": "grilled_tandoori",
+        "family": "tandoori",
+        "note": "malai dishes (chicken/paneer/broccoli) are marinated-and-grilled, not makhani"
+      },
+      {
+        "keywords": ["thai curry", "green curry", "red curry", "panang", "tom yum"],
+        "type": "gravy_thai",
+        "family": "thai",
+        "note": "Thai curries have their own flavour base, not the Indian onion-tomato one"
+      },
+      {
+        "keywords": ["butter garlic"],
+        "type": "butter_garlic",
+        "family": "butter garlic",
+        "note": "butter-garlic style has no sauce base"
+      },
+      {
+        "keywords": ["naan", "kulcha"],
+        "type": "bread_maida",
+        "family": "maida",
+        "note": "naan/kulcha are maida breads, not atta dough"
+      },
+      {
+        "keywords": ["mutton fry", "chicken fry", "pork fry", "beef fry"],
+        "type": "dry_masala_fry",
+        "family": "dry fry",
+        "note": "a dry masala fry is sauteed in its own spices, no batter"
+      },
+      {
+        "keywords": [
+          "french fries", "finger chips", "plain fries", "peanut masala",
+          "roasted cashew", "roasted peanut", "masala peanut", "cajun aloo"
+        ],
+        "type": "plain_fried_snack",
+        "family": "snack",
+        "note": "a plain fried snack uses fry oil only, no batter"
+      }
+    ]
   },
   "type_rules": {
     "fried_starter_tossed": {"base": "Indo-Chinese sauce base", "grams_per_portion": 40},
     "fried_starter_dry": {"base": "Frying batter", "grams_per_portion": 40},
+    "plain_fried_snack": null,
+    "dry_masala_fry": null,
     "grilled_tandoori": null,
     "veg_starter_snack": {"base": "Frying batter", "grams_per_portion": 40},
     "gravy_nonveg": {
@@ -136,6 +185,8 @@
     "gravy_veg": {"base": "Onion-tomato masala", "grams_per_portion": 180},
     "gravy_makhani": {"base": "Makhani/butter base", "grams_per_portion": 200},
     "gravy_chinese": {"base": "Indo-Chinese sauce base", "grams_per_portion": 80},
+    "gravy_thai": null,
+    "butter_garlic": null,
     "rice_plain": {"base": "Cooked rice", "grams_per_portion": 250},
     "rice_fried": {"base": "Cooked rice", "grams_per_portion": 280},
     "noodles": {"base": "Indo-Chinese sauce base", "grams_per_portion": 80},
@@ -144,6 +195,7 @@
       "grams_per_portion": 60,
       "family_overrides": {"paratha": 100}
     },
+    "bread_maida": null,
     "soup": null,
     "salad": null,
     "dal": null,

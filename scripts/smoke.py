@@ -6004,6 +6004,7 @@ def check_kitchen_base_discovery() -> None:
         apply_groups,
         discover_bases,
         expand_dish_options,
+        map_bases_from_classification,
         sanity_check,
     )
     from ai.knowledge import load_library
@@ -6107,6 +6108,128 @@ def check_kitchen_base_discovery() -> None:
         "the real combined ones, where expand_dish_options alone can't (the first pass never "
         "attached variants)."
     )
+
+    # --- Step EK-2c Fix A: the group pass is the single source of truth — a heading the FIRST pass
+    # already expanded itself (correctly, via its own inline variants) must not be duplicated when
+    # the dedicated group pass independently finds the same heading. ---
+    double_files_meta = [{"media_type": "image/png", "data": b"PNG FORCE_DOUBLE_EXPANDED_GROUP"}]
+    double_raw = ai_fake.extract_menu(double_files_meta, "restaurant_cafe")
+    double_dishes = double_raw.data["sections"][0]["dishes"]
+    double_groups = ai_fake.extract_menu_groups(double_files_meta, "restaurant_cafe").data["groups"]
+    deduped = apply_groups(expand_dish_options(double_dishes), double_groups)
+    deduped_names = sorted(d["name"] for d in deduped)
+    if deduped_names != ["Gobi Manchurian", "Paneer Manchurian"]:
+        fail(
+            "kitchen base discovery: expected the first pass's own expansion of a heading the group "
+            f"pass also found to be dropped (no duplicates), got {deduped_names}"
+        )
+    print(
+        "OK — a heading expanded by both the first pass and the dedicated group pass produces no "
+        "duplicates (the group pass wins)."
+    )
+
+    # --- Step EK-2c: a bare choice-word fragment ("Veg") the first pass read as its own dish, from
+    # the same price table the group pass correctly read as "Fried Rice Veg"/"Noodles Veg"/..., is
+    # dropped — a real Kavan bug, not a hypothetical. ---
+    fragment_files_meta = [{"media_type": "image/png", "data": b"PNG FORCE_CHOICE_FRAGMENT_GROUP"}]
+    fragment_raw = ai_fake.extract_menu(fragment_files_meta, "restaurant_cafe")
+    fragment_dishes = fragment_raw.data["sections"][0]["dishes"]
+    fragment_groups = ai_fake.extract_menu_groups(fragment_files_meta, "restaurant_cafe").data["groups"]
+    fragment_fixed = apply_groups(expand_dish_options(fragment_dishes), fragment_groups)
+    fragment_names = sorted(d["name"] for d in fragment_fixed)
+    expected_fragment_names = sorted(
+        [
+            "Something Else",
+            "Fried Rice Veg",
+            "Fried Rice Egg",
+            "Fried Rice Chicken",
+            "Fried Rice Mixed",
+            "Noodles Veg",
+            "Noodles Egg",
+            "Noodles Chicken",
+            "Noodles Mixed",
+        ]
+    )
+    if fragment_names != expected_fragment_names:
+        fail(
+            "kitchen base discovery: expected the bare 'Veg'/'Egg'/'Mixed' fragments dropped and the "
+            f"8 real Fried Rice/Noodles dishes kept alongside 'Something Else', got {fragment_names}"
+        )
+    print(
+        "OK — a bare choice-word fragment left over from the same table a group covers (e.g. 'Veg') "
+        "is dropped, not left standing alongside the group's own 'Fried Rice Veg'/'Noodles Veg'."
+    )
+
+    # --- expand_dish_options drops a variant that's a self-duplicate of its own heading, so a model
+    # slip never glues the same words onto themselves (e.g. "Gulab Jamun Gulab Jamun"). ---
+    self_dup = expand_dish_options(
+        [{"name": "Gulab Jamun", "variants": ["Gulab Jamun", "Dry Fruit"], "confidence": 0.9}]
+    )
+    self_dup_names = sorted(d["name"] for d in self_dup)
+    if self_dup_names != ["Gulab Jamun"]:
+        fail(
+            "kitchen base discovery: expected a variant equal to its own heading dropped (leaving "
+            f"<2 real variants, so the row passes through unchanged), got {self_dup_names}"
+        )
+    print("OK — a variant that duplicates its own heading is dropped, never glued onto itself.")
+
+    # --- dedup_dishes merges the same dish found twice in a different word order or casing, keeping
+    # the cleaner (non-ALL-CAPS, no-repeated-word) name. ---
+    from ai.base_discovery import dedup_dishes
+
+    messy = [
+        {"name": "GULAB JAMUN GULAB JAMUN", "price": 60},
+        {"name": "Gulab Jamun", "price": 60},
+        {"name": "Manchurian Gobi", "price": 220},
+        {"name": "Gobi MANCHURIAN", "price": 220},
+    ]
+    cleaned = dedup_dishes(messy)
+    cleaned_names = sorted(d["name"] for d in cleaned)
+    if cleaned_names != ["Gulab Jamun", "Manchurian Gobi"]:
+        fail(
+            "kitchen base discovery: expected word-order/casing duplicates merged to their cleaner "
+            f"name, got {cleaned_names}"
+        )
+    print("OK — dedup_dishes merges word-order/casing duplicates, keeping the cleaner name.")
+
+    # --- Step EK-2c Fix D: keyword overrides stop the model misplacing a dish a sector already has a
+    # firm rule for, regardless of what classify_dishes (fake or real) itself returns. ---
+    from ai.classification import classify_dishes
+
+    override_cases = {
+        "Malai Paneer": "grilled_tandoori",
+        "Malai Broccoli": "grilled_tandoori",
+        "Naan": "bread_maida",
+        "Kulcha": "bread_maida",
+        "Thai Green Curry": "gravy_thai",
+        "Butter Garlic Fish": "butter_garlic",
+        "French Fries": "plain_fried_snack",
+        "Mutton Fry": "dry_masala_fry",
+        "Butter Chicken": "gravy_makhani",
+    }
+    override_names = list(override_cases)
+    AiDishTypeCache.objects.filter(
+        dish_name_normalised__in=[n.lower() for n in override_names], sector="restaurant_cafe"
+    ).delete()
+    override_result, _ = classify_dishes([{"name": n} for n in override_names], "restaurant_cafe")
+    for name, expected_type in override_cases.items():
+        got = override_result[name.lower()]["type"]
+        if got != expected_type:
+            fail(f"kitchen base discovery: expected {name!r} overridden to {expected_type!r}, got {got!r}")
+    print(
+        "OK — keyword overrides force malai/naan-kulcha/Thai-curry/butter-garlic/fries/mutton-fry/"
+        "butter-chicken dishes to their correct type regardless of the model's own guess."
+    )
+    override_bases = map_bases_from_classification(
+        [{"name": n} for n in override_names], override_result, library
+    )
+    override_base_names = {b["name"] for b in override_bases}
+    if override_base_names != {"Makhani/butter base"}:
+        fail(
+            "kitchen base discovery: expected only Butter Chicken to map to a base (every other "
+            f"overridden type's type_rule is null), got {override_base_names}"
+        )
+    print("OK — every overridden no-base type maps to no base; only Butter Chicken keeps its makhani base.")
 
     # --- classify-then-map end to end (fake provider) + per-dish-name caching ---
     curry_dishes = ["Chicken Curry", "Chicken Masala", "Chicken Kadai"]
