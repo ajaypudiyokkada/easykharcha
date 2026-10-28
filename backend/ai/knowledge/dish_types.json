@@ -1,0 +1,22 @@
+{
+  "types": [
+    "fried_starter_tossed",
+    "fried_starter_dry",
+    "grilled_tandoori",
+    "veg_starter_snack",
+    "gravy_nonveg",
+    "gravy_veg",
+    "gravy_makhani",
+    "gravy_chinese",
+    "rice_plain",
+    "rice_fried",
+    "noodles",
+    "bread_dough",
+    "soup",
+    "salad",
+    "dal",
+    "beverage",
+    "dessert",
+    "other"
+  ]
+}

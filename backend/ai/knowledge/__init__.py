@@ -17,6 +17,11 @@ EMPTY_LIBRARY: dict = {
         "min_grams_per_portion": 30,
         "excluded_by_default": [],
     },
+    # type (from dish_types.json) -> {"base": <base template name>, "grams_per_portion": N,
+    # "family_overrides": {<family>: N}} | null (no base for that type) — the deterministic mapping
+    # step (base_discovery.map_bases_from_classification) looks a classified dish's type up here
+    # instead of asking the model to invent the mapping itself.
+    "type_rules": {},
 }
 
 
@@ -26,3 +31,13 @@ def load_library(sector: str) -> dict:
         return {**EMPTY_LIBRARY, "sector": sector}
     data = json.loads(path.read_text(encoding="utf-8"))
     return {**EMPTY_LIBRARY, **data}
+
+
+_DISH_TYPES_PATH = _KNOWLEDGE_DIR / "dish_types.json"
+
+
+def load_dish_types() -> list[str]:
+    """The shared, sector-agnostic dish-type taxonomy every classify_dishes call constrains the
+    model to — see dish_types.json. A sector's own type_rules (load_library) decides what each type
+    maps to; the taxonomy itself doesn't vary by sector."""
+    return json.loads(_DISH_TYPES_PATH.read_text(encoding="utf-8"))["types"]

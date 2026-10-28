@@ -21,11 +21,19 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
 - A recipe-suggestion dish name containing "FORCE_NAME_ALIAS" returns the dish keyed "name" instead
   of "dish_name" on the first attempt — proves schemas.py accepts "name" as an alias instead of
   burning a fallback-model retry on it.
+- A menu scan file containing "FORCE_PREFIX_GROUP" returns a "Chicken" heading with variants
+  ["Manchurian", "Chilli", "Pepper", "Lemon"], variant_position "prefix" — proves
+  base_discovery.expand_dish_options builds "Chicken Manchurian" etc (heading first).
+- "FORCE_SUFFIX_GROUP" returns a "Manchurian" heading with variants ["Gobi", "Paneer", "Babycorn",
+  "Mushroom"], variant_position "suffix" — proves expand_dish_options builds "Gobi Manchurian" etc
+  (heading last), never leaving a bare "Manchurian" dish in the expanded output.
+- "FORCE_TWO_PRICE_GROUP" returns a "Sweetcorn Soup" row with variants ["Veg", "Chicken"] priced
+  [120, 150] via variant_prices — proves expand_dish_options gives each expanded dish its own price.
 """
 
 from django.conf import settings
 
-from ..schemas import BaseDiscoveryResult, MenuExtractionResult, RecipeSuggestionsResult
+from ..schemas import DishClassificationResult, MenuExtractionResult, RecipeSuggestionsResult
 from .base import AiCallResult, run_with_fallback
 
 _FAKE_MODEL = "fake-ai-model"
@@ -33,20 +41,31 @@ _MENU_INPUT_TOKENS = 2500
 _MENU_OUTPUT_TOKENS = 1200
 _RECIPE_INPUT_TOKENS = 800
 _RECIPE_OUTPUT_TOKENS = 300
-_KITCHEN_INPUT_TOKENS = 3000
-_KITCHEN_OUTPUT_TOKENS = 900
+_KITCHEN_INPUT_TOKENS = 600
+_KITCHEN_OUTPUT_TOKENS = 400
 
-# Dish-name keyword -> (template name, grams/ml per portion) — a stand-in for the real model's
-# judgement, just enough to exercise the discovery pipeline (option expansion, caching, sanity
-# checks) end to end without a network call. Keys are checked in order, first match wins per dish.
-_KEYWORD_TEMPLATES = [
-    (("manchurian", "chilli", "schezwan", "chinese"), "Indo-Chinese sauce base", 80),
-    (("65", "fry", "crispy", "lollipop"), "Frying batter", 40),
-    (("makhani", "butter"), "Makhani/butter base", 200),
-    (("korma", "white gravy"), "White gravy", 180),
-    (("curry", "masala", "gravy"), "Onion-tomato masala", 200),
-    (("rice",), "Cooked rice", 250),
-    (("roti", "chapathi", "paratha", "naan"), "Atta dough", 70),
+# Dish-name keyword -> (type, family) — a stand-in for the real model's judgement, just enough to
+# exercise classify-then-map end to end without a network call. Checked in order, first match wins.
+_KEYWORD_TYPES = [
+    (("manchurian gravy", "chilli gravy"), "gravy_chinese", "chinese gravy"),
+    (("manchurian", "chilli", "schezwan", "noodles"), "fried_starter_tossed", "manchurian"),
+    (("tandoori", "grill", "kebab", "kabab"), "grilled_tandoori", "tandoori"),
+    (
+        ("65", "fry", "crispy", "lollipop", "pakoda", "finger", "cutlet"),
+        "fried_starter_dry",
+        "fried",
+    ),
+    (("makhani", "butter chicken", "butter paneer", "malai"), "gravy_makhani", "makhani"),
+    (("mutton", "lamb"), "gravy_nonveg", "mutton"),
+    # Checked before the generic "curry"/"masala"/"kadai" catch-all below, so a veg dish that
+    # happens to also say "curry" (e.g. "Paneer Curry") lands on gravy_veg, not gravy_nonveg.
+    (("paneer", "veg kurma", "vegetable curry"), "gravy_veg", "veg curry"),
+    (("chicken curry", "curry", "masala", "kadai"), "gravy_nonveg", "curry"),
+    (("fried rice",), "rice_fried", "fried rice"),
+    (("rice",), "rice_plain", "plain rice"),
+    (("paratha",), "bread_dough", "paratha"),
+    (("roti", "chapathi", "naan"), "bread_dough", "chapathi"),
+    (("soup",), "soup", "soup"),
 ]
 
 
@@ -58,6 +77,9 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
     force_many_dishes = any(b"FORCE_MANY_DISHES" in blob for blob in blobs)
     force_price_variants = any(b"FORCE_PRICE_VARIANTS" in blob for blob in blobs)
     force_slash_variant = any(b"FORCE_SLASH_VARIANT" in blob for blob in blobs)
+    force_prefix_group = any(b"FORCE_PREFIX_GROUP" in blob for blob in blobs)
+    force_suffix_group = any(b"FORCE_SUFFIX_GROUP" in blob for blob in blobs)
+    force_two_price_group = any(b"FORCE_TWO_PRICE_GROUP" in blob for blob in blobs)
     is_menu = not any(b"NOT_A_MENU" in blob for blob in blobs)
 
     def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
@@ -101,6 +123,61 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
                     "confidence": 0.9,
                     "note": "has options",
                     "variants": ["Manchurian", "65"],
+                }
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
+        if force_prefix_group:
+            dishes = [
+                {
+                    "name": "Chicken",
+                    "price": 290,
+                    "confidence": 0.9,
+                    "note": "has options",
+                    "variants": ["Manchurian", "Chilli", "Pepper", "Lemon"],
+                    "variant_position": "prefix",
+                }
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
+        if force_suffix_group:
+            dishes = [
+                {
+                    "name": "Manchurian",
+                    "price": 270,
+                    "confidence": 0.9,
+                    "note": "has options",
+                    "variants": ["Gobi", "Paneer", "Babycorn", "Mushroom"],
+                    "variant_position": "suffix",
+                }
+            ]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
+        if force_two_price_group:
+            dishes = [
+                {
+                    "name": "Sweetcorn Soup",
+                    "price": 120,
+                    "confidence": 0.9,
+                    "note": "has options",
+                    "variants": ["Veg", "Chicken"],
+                    "variant_position": "prefix",
+                    "variant_prices": [120, 150],
                 }
             ]
             return (
@@ -211,55 +288,25 @@ def suggest_recipes(
     )
 
 
-def discover_bases(
-    dishes: list[dict], sector: str, stock_item_names: list[str], library: dict
-) -> AiCallResult:
-    templates_by_name = {t["name"]: t for t in library.get("base_templates", [])}
-    dishes_by_template: dict[str, list[dict]] = {}
-    for dish in dishes:
-        name_lower = dish["name"].lower()
-        for keywords, template_name, grams in _KEYWORD_TEMPLATES:
-            if template_name not in templates_by_name:
+def classify_dishes(dish_names: list[str], sector: str, dish_types: list[str]) -> AiCallResult:
+    dishes = []
+    for name in dish_names:
+        name_lower = name.lower()
+        dish_type, family = "other", ""
+        for keywords, candidate_type, candidate_family in _KEYWORD_TYPES:
+            if candidate_type not in dish_types:
                 continue
             if any(keyword in name_lower for keyword in keywords):
-                dishes_by_template.setdefault(template_name, []).append(
-                    {"dish": dish["name"], "grams_per_portion": grams}
-                )
+                dish_type, family = candidate_type, candidate_family
                 break
-
-    bases = []
-    for template_name, used_by in dishes_by_template.items():
-        if len(used_by) < 3:
-            continue
-        template = templates_by_name[template_name]
-        bases.append(
-            {
-                "name": template["name"],
-                "type": template.get("type", ""),
-                "batch_ingredients": [
-                    {"name": i["name"], "qty": i["qty"], "unit": i["unit"]}
-                    for i in template["formula"]
-                ],
-                "yield_qty": template.get("batch_yield_qty", 1000),
-                "used_by": used_by,
-                "confidence": 0.9,
-                "source": "library",
-                "reason": f"used by {len(used_by)} dishes",
-            }
-        )
+        dishes.append({"name": name, "type": dish_type, "family": family, "confidence": 0.85})
 
     def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
-        return (
-            {"bases": bases},
-            model,
-            _KITCHEN_INPUT_TOKENS,
-            _KITCHEN_OUTPUT_TOKENS,
-            False,
-        )
+        return ({"dishes": dishes}, model, _KITCHEN_INPUT_TOKENS, _KITCHEN_OUTPUT_TOKENS, False)
 
     return run_with_fallback(
         primary_model=settings.AI_MODEL_KITCHEN,
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=get_raw,
-        parse=lambda raw: BaseDiscoveryResult.model_validate(raw).model_dump(),
+        parse=lambda raw: DishClassificationResult.model_validate(raw).model_dump(),
     )

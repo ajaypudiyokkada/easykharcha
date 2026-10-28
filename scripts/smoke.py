@@ -5753,9 +5753,10 @@ def check_ai_flow() -> None:
         )
     print("OK — a multi-page PDF is read in page chunks and merged/deduped, one AiUsage row per chunk.")
 
-    # The owner is already at the 3-business cap (business_id, chunk_business_id, and
-    # incomplete_business_id further below) — every remaining ai/ check reuses one of those three
-    # rather than creating a 4th.
+    # The owner is already at the 3-business cap (signup's own Step F2 auto-created business, plus
+    # business_id and chunk_business_id) — every remaining ai/ check against this owner reuses one of
+    # those two (a fresh signup is used instead, below, once chunk_business_id's own daily scan cap
+    # is also exhausted).
 
     # --- a chunk that overflows max_tokens is retried one page at a time and recovers: the 3-page
     # PDF here is small enough to go as a single whole-document call (no top-level chunking at 3/
@@ -5891,15 +5892,14 @@ def check_ai_flow() -> None:
     print("OK — a short bare number on one side of a slash (a dish style, not a price) survives as a variant.")
 
     # --- a model that stops at max_tokens is flagged incomplete, not silently returned as whole ---
-    status, body, _ = request(
-        "POST",
-        "/businesses/",
-        {"name": "AI Incomplete Biz", "business_type": "restaurant_cafe", "city": "Pune"},
-        token=owner_access,
-    )
-    if status != 201:
-        fail(f"ai flow: incomplete-test business create expected 201, got {status} ({body})")
-    incomplete_business_id = body["id"]
+    # owner_access's businesses (signup's own Step F2 auto-created one, business_id, chunk_business_id)
+    # are all at or near their daily scan cap by now (chunk_business_id alone ran 5 scans above) — a
+    # fresh signup gets a fresh auto-created business with its own untouched daily cap, cheaper than
+    # juggling a 4th business for one existing owner (who's already at the 3-business-per-user cap;
+    # confirmed pre-existing bug, Step C2c/EK-1's STATUS.md notes, when this used to POST a 4th one).
+    incomplete_mobile, incomplete_access, _ = signup_and_login("AI Incomplete Owner")
+    status, body, _ = request("GET", "/me/", token=incomplete_access)
+    incomplete_business_id = body["businesses"][0]["id"]
     maxtok_body, maxtok_content_type = multipart_multi_body(
         [("images", "maxtok.png", make_png(marker=b"FORCE_MAX_TOKENS"), "image/png")]
     )
@@ -5908,14 +5908,14 @@ def check_ai_flow() -> None:
         f"/businesses/{incomplete_business_id}/ai/menu-scans/",
         raw_body=maxtok_body,
         content_type=maxtok_content_type,
-        token=owner_access,
+        token=incomplete_access,
     )
     if status != 202:
         fail(f"ai flow: max-tokens scan create expected 202, got {status} ({body})")
     status, body, _ = request(
         "GET",
         f"/businesses/{incomplete_business_id}/ai/menu-scans/{body['id']}/",
-        token=owner_access,
+        token=incomplete_access,
     )
     if status != 200 or body["status"] != "done" or not body.get("incomplete"):
         fail(f"ai flow: expected a max_tokens stop flagged incomplete, got {status} ({body})")
@@ -5930,14 +5930,14 @@ def check_ai_flow() -> None:
         f"/businesses/{incomplete_business_id}/ai/menu-scans/",
         raw_body=many_body,
         content_type=many_content_type,
-        token=owner_access,
+        token=incomplete_access,
     )
     if status != 202:
         fail(f"ai flow: many-dishes scan create expected 202, got {status} ({body})")
     status, body, _ = request(
         "GET",
         f"/businesses/{incomplete_business_id}/ai/menu-scans/{body['id']}/",
-        token=owner_access,
+        token=incomplete_access,
     )
     if status != 200 or body["status"] != "done":
         fail(f"ai flow: many-dishes scan expected done, got {status} ({body})")
@@ -5981,9 +5981,11 @@ def check_ai_flow() -> None:
 def check_kitchen_base_discovery() -> None:
     """Step EK-1: no network, no API key — direct Django calls (same style as
     check_ai_provider_signature) against backend/ai/knowledge/ and ai/base_discovery.py's pure
-    functions. Covers: the restaurant_cafe library loads with its templates, a base used by only 2
-    dishes is dropped, a formula summing far from its own yield is flagged (not dropped), and a menu
-    line with inline options expands into one dish per option."""
+    functions. Covers: the restaurant_cafe library loads with its templates and type_rules, a base
+    used by only 2 dishes is dropped, a formula summing to more than its own yield is flagged (not
+    dropped), a grouped menu line expands correctly for a prefix heading, a suffix heading and a
+    two-price-column row (never leaving a bare heading dish in the output), and classify-then-map
+    end to end (fake provider) + per-dish-name caching."""
     backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
     sys.path.insert(0, os.path.abspath(backend_dir))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -5991,11 +5993,10 @@ def check_kitchen_base_discovery() -> None:
 
     django.setup()
 
-    from django.conf import settings
-
     from ai.base_discovery import _cache_key, discover_bases, expand_dish_options, sanity_check
     from ai.knowledge import load_library
-    from ai.models import AiKitchenBaseCache
+    from ai.models import AiDishTypeCache, AiKitchenBaseCache
+    from ai.provider import fake as ai_fake
 
     library = load_library("restaurant_cafe")
     if not library["base_templates"]:
@@ -6003,7 +6004,12 @@ def check_kitchen_base_discovery() -> None:
     template_names = {t["name"] for t in library["base_templates"]}
     if "Onion-tomato masala" not in template_names or "Ginger-garlic paste" not in template_names:
         fail(f"kitchen base discovery: expected key templates present, got {template_names}")
-    print(f"OK — the restaurant_cafe knowledge library loads ({len(template_names)} base templates).")
+    if not library.get("type_rules", {}).get("gravy_nonveg"):
+        fail(f"kitchen base discovery: expected a gravy_nonveg type_rule, got {library.get('type_rules')}")
+    print(
+        f"OK — the restaurant_cafe knowledge library loads ({len(template_names)} base templates, "
+        f"{len(library['type_rules'])} type rules)."
+    )
 
     empty_library = load_library("home_business")
     if empty_library["base_templates"]:
@@ -6040,43 +6046,61 @@ def check_kitchen_base_discovery() -> None:
     kept = sanity_check([bad_formula_base], dishes, library["rules"])
     if len(kept) != 1 or not any("1400" in flag for flag in kept[0]["flags"]):
         fail(f"kitchen base discovery: expected the 1,400 g formula flagged (not dropped), got {kept}")
-    print("OK — a formula summing far from its own yield is flagged, not dropped.")
+    print("OK — a formula summing to more than its own yield is flagged, not dropped.")
 
-    expanded = expand_dish_options([{"name": "Chicken (Manchurian/Chilli/Pepper/Lemon)"}])
-    expanded_names = [d["name"] for d in expanded]
-    if expanded_names != ["Chicken Manchurian", "Chicken Chilli", "Chicken Pepper", "Chicken Lemon"]:
-        fail(f"kitchen base discovery: expected 4 expanded dishes, got {expanded_names}")
-    if any(d.get("expanded_from") != "Chicken (Manchurian/Chilli/Pepper/Lemon)" for d in expanded):
-        fail(f"kitchen base discovery: expected expanded_from set on every expanded row, got {expanded}")
-    print("OK — a menu line with inline options expands into one dish per option.")
+    # --- grouped-line extraction + expansion: prefix heading, suffix heading, two-price columns ---
+    def _extracted_dishes(marker: bytes) -> list[dict]:
+        files_meta = [{"media_type": "image/png", "data": b"PNG" + marker}]
+        raw = ai_fake.extract_menu(files_meta, "restaurant_cafe")
+        return raw.data["sections"][0]["dishes"]
 
-    menu_dishes = [
-        {"name": n}
-        for n in [
-            "Chicken Curry",
-            "Mutton Curry",
-            "Paneer Curry",
-            "Veg Manchurian",
-            "Chicken Manchurian",
-            "Gobi Manchurian",
-        ]
-    ]
-    # Cache rows aren't business-scoped (same key shape as AiRecipeCache) — clear this exact dish set
-    # first so a repeat run of this check (or `verify`/`verify:full` run twice) sees a real call, not
-    # a stale cache hit left over from the last time this check ran against the same dev database.
+    prefix_dishes = expand_dish_options(_extracted_dishes(b"FORCE_PREFIX_GROUP"))
+    prefix_names = [d["name"] for d in prefix_dishes]
+    if prefix_names != ["Chicken Manchurian", "Chicken Chilli", "Chicken Pepper", "Chicken Lemon"]:
+        fail(f"kitchen base discovery: expected 4 prefix-expanded dishes, got {prefix_names}")
+    print("OK — a prefix-heading group ('Chicken' + Manchurian/Chilli/...) expands heading-first.")
+
+    suffix_dishes = expand_dish_options(_extracted_dishes(b"FORCE_SUFFIX_GROUP"))
+    suffix_names = [d["name"] for d in suffix_dishes]
+    if suffix_names != ["Gobi Manchurian", "Paneer Manchurian", "Babycorn Manchurian", "Mushroom Manchurian"]:
+        fail(f"kitchen base discovery: expected 4 suffix-expanded dishes, got {suffix_names}")
+    if any(name == "Manchurian" for name in suffix_names):
+        fail("kitchen base discovery: a bare heading-only dish leaked into the suffix expansion")
+    print("OK — a suffix-heading group ('Manchurian' heading after Gobi/Paneer/...) expands heading-last.")
+
+    two_price_dishes = expand_dish_options(_extracted_dishes(b"FORCE_TWO_PRICE_GROUP"))
+    two_price_by_name = {d["name"]: d["price"] for d in two_price_dishes}
+    if two_price_by_name != {"Sweetcorn Soup Veg": 120, "Sweetcorn Soup Chicken": 150}:
+        fail(f"kitchen base discovery: expected per-variant prices, got {two_price_by_name}")
+    print("OK — a two-price-column row (Veg/Chicken) expands into 2 dishes, each with its own price.")
+
+    # --- classify-then-map end to end (fake provider) + per-dish-name caching ---
+    curry_dishes = ["Chicken Curry", "Chicken Masala", "Chicken Kadai"]
+    manchurian_dishes = ["Veg Manchurian", "Chicken Manchurian", "Gobi Manchurian"]
+    menu_dishes = [{"name": n} for n in curry_dishes + manchurian_dishes]
+    # Neither cache is business-scoped (same key shape as AiRecipeCache) — clear both for this exact
+    # dish set first so a repeat run of this check (or `verify`/`verify:full` run twice) sees real
+    # calls, not a stale cache hit left over from the last time this check ran against the same dev
+    # database.
     AiKitchenBaseCache.objects.filter(
         sector="restaurant_cafe", dish_set_hash=_cache_key([d["name"] for d in menu_dishes])
     ).delete()
+    AiDishTypeCache.objects.filter(
+        dish_name_normalised__in=[n.lower() for n in curry_dishes + manchurian_dishes],
+        sector="restaurant_cafe",
+    ).delete()
     result = discover_bases(menu_dishes, "restaurant_cafe", [])
-    base_names = {b["name"] for b in result["bases"]}
-    if "Onion-tomato masala" not in base_names or "Indo-Chinese sauce base" not in base_names:
-        fail(f"kitchen base discovery: expected the fake provider's canned bases, got {base_names}")
-    if result["usage"] is None or result["usage"]["model"] != settings.AI_MODEL_KITCHEN:
-        fail(f"kitchen base discovery: expected a real (uncached) call on the first run, got {result['usage']}")
-    print("OK — end-to-end discovery (fake provider) finds the expected library bases for this menu.")
+    bases_by_name = {b["name"]: b for b in result["bases"]}
+    if set(bases_by_name) != {"Onion-tomato masala", "Indo-Chinese sauce base"}:
+        fail(f"kitchen base discovery: expected exactly these 2 rule-mapped bases, got {set(bases_by_name)}")
+    if len(bases_by_name["Onion-tomato masala"]["used_by"]) != 3:
+        fail(f"kitchen base discovery: expected 3 curry dishes mapped, got {bases_by_name['Onion-tomato masala']}")
+    if not result["usage"]:
+        fail("kitchen base discovery: expected a real (uncached) classification call on the first run")
+    print("OK — classify-then-map (fake provider) maps curry dishes and Manchurian dishes to their rule-based bases.")
 
     cached_result = discover_bases(menu_dishes, "restaurant_cafe", [])
-    if cached_result["usage"] is not None:
+    if cached_result["usage"]:
         fail(f"kitchen base discovery: expected a cache hit on the same dish set, got {cached_result['usage']}")
     print("OK — the same dish set on a repeat call is a cache hit (no model call, no new usage).")
 

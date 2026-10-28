@@ -95,13 +95,24 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   superuser-only, read-only), urls.py. `management/commands/run_ai_jobs.py` (the `worker` service's
   poll loop — Step C2c: a per-job try/except marks a crash `failed` instead of dying, a heartbeat log
   every 5 minutes, start/per-job id+outcome logging, 10-minute stuck-`reading` recovery).
-  Step EK-1: `knowledge/` (plain `<sector>.json` base-template + portion-default + rule files,
-  `load_library()` — empty-but-same-shape fallback for a sector with no file), `base_discovery.py`
-  (`expand_dish_options` — inline "Chicken (A/B/C)" option lines -> one dish per option, no model
-  call; `discover_bases` — library-first model call, cached by `AiKitchenBaseCache` keyed on sector +
-  normalised dish-name-set hash + `prompts.BASE_DISCOVERY_PROMPT_VERSION`, `sanity_check` drops a
-  base under the sector's min-dishes rule and flags (never silently fixes) a formula far from its own
-  yield or an implausible per-portion amount); `AI_MODEL_KITCHEN` env (default claude-haiku-5-5,
+  Step EK-1/EK-2: `knowledge/` (plain `<sector>.json` base-template + portion-default + rule +
+  `type_rules` files, `dish_types.json`'s shared sector-agnostic taxonomy, `load_library()`/
+  `load_dish_types()` — empty-but-same-shape fallback for a sector with no file). `base_discovery.py`:
+  `expand_dish_options` — a dish's own `variants`/`variant_position`("prefix"/"suffix")/
+  `variant_prices` (schemas.ExtractedDish, Step EK-2) builds the real combined name(s) and per-variant
+  price, no model call, covers both an inline "Chicken (A/B/C)" line and a heading-plus-separate-
+  choices group (e.g. a "MANCHURIAN" heading over "Gobi/Paneer/..."); `discover_bases` — EK-2
+  replaced the old free-form model-mapping with classify-then-map: `classification.py`'s
+  `classify_dishes` (model picks only a type + family per dish, batched ~60/call, cached per dish
+  name in `AiDishTypeCache` keyed on sector + `prompts.CLASSIFY_PROMPT_VERSION`) then
+  `map_bases_from_classification` looks the base + grams/ml per portion up deterministically from
+  the sector's `type_rules` (a `family_overrides` entry, e.g. mutton 220g, wins over the type's own
+  default) — the model never invents a base/formula/quantity; `sanity_check` drops a base under the
+  sector's min-dishes rule and flags (never silently fixes) a formula summing to MORE than its own
+  yield (under-filling is expected now that water is removed from every template, noted in each
+  template's own `notes` instead) or an implausible per-portion amount. Final per-menu mapping result
+  cached by `AiKitchenBaseCache` keyed on sector + normalised dish-name-set hash +
+  `base_discovery.MAPPING_VERSION`. `AI_MODEL_KITCHEN` env (default claude-haiku-5-5,
   `AI_MODEL_FALLBACK` same as the other two calls); `AiUsageKind.KITCHEN_BASE_DISCOVERY`. No endpoint
   or screen yet — `scripts/ai_try_kitchen.py` is the only caller today, proved against real menus.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
