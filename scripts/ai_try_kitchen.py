@@ -97,25 +97,23 @@ def main() -> None:
         if "expanded_from" in dish:
             print(f"  - {dish['expanded_from']!r} -> {dish['name']!r}")
 
-    print(f"\nRunning base discovery ({settings.AI_MODEL_KITCHEN})...")
+    print(f"\nClassifying dishes and mapping bases ({settings.AI_MODEL_KITCHEN})...")
     result = discover_bases(
-        expanded, args.business_type, [], discover_fn=anthropic_provider.discover_bases
+        expanded, args.business_type, [], classify_fn=anthropic_provider.classify_dishes
     )
     usage = result["usage"]
-    if usage is None:
+    kitchen_input = sum(u["input_tokens"] for u in usage)
+    kitchen_output = sum(u["output_tokens"] for u in usage)
+    if not usage:
         print("(cache hit — no model call made)")
     else:
-        kitchen_cost = _cost(usage["input_tokens"], usage["output_tokens"])
-        fallback_note = " [fallback model]" if usage["used_fallback"] else ""
-        print(
-            f"Model: {usage['model']}{fallback_note} — {usage['input_tokens']} in / "
-            f"{usage['output_tokens']} out (~{kitchen_cost})"
-        )
-        if usage["truncated"]:
+        for call in usage:
+            fallback_note = " [fallback model]" if call["used_fallback"] else ""
             print(
-                "WARNING: hit max_tokens — the bases list below may be missing real bases, "
-                "not a correct 'none found'."
+                f"  batch: {call['model']}{fallback_note} — {call['input_tokens']} in / "
+                f"{call['output_tokens']} out"
             )
+        print(f"Classification total: {kitchen_input} in / {kitchen_output} out (~{_cost(kitchen_input, kitchen_output)})")
 
     bases = result["bases"]
     print(f"\n{len(bases)} base(s) found:")
@@ -123,27 +121,28 @@ def main() -> None:
         ingredients = ", ".join(
             f"{i['name']} {i['qty']:g}{i['unit']}" for i in base["batch_ingredients"]
         )
+        by_family: dict[str, int] = {}
+        for use in base["used_by"]:
+            by_family[use.get("family", "")] = by_family.get(use.get("family", ""), 0) + 1
+        family_summary = ", ".join(f"{fam or '(none)'}: {n}" for fam, n in sorted(by_family.items()))
         print(
             f"\n- {base['name']} ({base.get('type', '')}, {base['source']}, "
             f"confidence {base['confidence']:.2f}, yield {base['yield_qty']:g})"
         )
         print(f"  formula: {ingredients}")
         print(f"  reason: {base.get('reason', '')}")
-        print(f"  used by {len(base['used_by'])} dishes:")
+        print(f"  used by {len(base['used_by'])} dishes — by family: {family_summary}")
         for use in base["used_by"][:15]:
-            print(f"    - {use['dish']}: {use['grams_per_portion']:g} g/ml per portion")
+            print(f"    - {use['dish']}: {use['grams_per_portion']:g} g/ml per portion ({use.get('family', '')})")
         if len(base["used_by"]) > 15:
             print(f"    ... and {len(base['used_by']) - 15} more")
         if base.get("flags"):
             print(f"  FLAGS: {'; '.join(base['flags'])}")
 
-    total_cost = menu_cost
-    if usage is not None:
-        total_cost = _cost(
-            outcome.total_input_tokens + usage["input_tokens"],
-            outcome.total_output_tokens + usage["output_tokens"],
-        )
-    print(f"\nTotal cost (menu read + base discovery): ~{total_cost}")
+    total_cost = _cost(
+        outcome.total_input_tokens + kitchen_input, outcome.total_output_tokens + kitchen_output
+    )
+    print(f"\nTotal cost (menu read + classification): ~{total_cost}")
 
 
 if __name__ == "__main__":

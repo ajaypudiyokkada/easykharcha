@@ -600,6 +600,41 @@ not built yet.
   truncated` flag now surfaces this to the caller, same gap scanning's `incomplete` flag covers for
   menu reading). No endpoint/screen yet — EK-2/EK-3 own the confirm-and-create-real-Base flow.
 
+- **Step EK-2 — Grouped-line extraction fix + classify-then-map (backend only, docs/BASES_PLAN.md).**
+  Fixed a real pre-existing bug first: `check_ai_flow`'s own `owner_access` user was created via
+  `signup_and_login` (which, Step F2, already auto-creates 1 business) and then explicitly created 3
+  more, hitting the 3-business-per-user cap on the 4th — `npm run verify -- --area ai` had been
+  unable to complete since Step C1 shipped. Fixed by reusing `chunk_business_id` where its own daily
+  scan cap allowed, and a fresh signup (its own untouched business/cap) for the two checks that
+  didn't fit. `schemas.ExtractedDish` gained `variant_position`("prefix"/"suffix")/`variant_prices` —
+  the menu prompt now also recognises a heading-plus-separate-choices group (e.g. a "MANCHURIAN"
+  heading over "Gobi/Paneer/Babycorn/Mushroom", or two price columns like a Veg/Chicken soup), never
+  just a bare heading dish; `base_discovery.expand_dish_options` rewritten to build real dish names
+  (and per-variant prices) from these fields instead of re-parsing the name string with its own regex.
+  Replaced EK-1's free-form "ask the model for the whole base mapping" with classify-then-map: new
+  `classification.py`'s `classify_dishes` has the model pick only a type (from `knowledge/
+  dish_types.json`'s fixed taxonomy) + a family tag per dish, batched ~60/call and cached per dish
+  name (`AiDishTypeCache`, reusable across menus/businesses in the same sector, unlike the per-menu
+  `AiKitchenBaseCache`); `base_discovery.map_bases_from_classification` then looks the base and grams/
+  ml per portion up deterministically from the sector's new `type_rules` (`family_overrides` for
+  e.g. mutton 220g vs the type's 200g default) — the model never invents a formula or quantity anymore.
+  `sanity_check`'s formula check now only flags OVER-yield (water removed from every template formula,
+  noted in each template's own `notes` instead, so under-filling is expected, not an error).
+  `used_by` rows carry a `family` tag so the owner can act on "all N Manchurian-type dishes" as a
+  group (flagged as a simplification vs. true nested grouping — ran out of time for that). Real-run
+  results (`scripts/ai_try_kitchen.py`, ~$0.16 total for both menus this step): FOMO (192 dishes, no
+  bare-heading names) hit its sauce-base (38 vs ≥28 target) and batter (37 vs ≥28) targets and got
+  fried rice right at 280g vs plain rice at 250g, but kept a 3rd makhani dish (Malai Paneer) the task
+  expected classified elsewhere — only 2 genuine butter-style dishes, not 3. **Kavan missed its
+  targets**: extraction returned 100 dishes (target ≥130, down from EK-1's 102-103) and — despite the
+  new prompt and schema support, proved working via smoke tests and on FOMO — this real run still
+  returned bare "Manchurian"/"Chilli"/"Pepper" dishes with no heading/variants structure at all
+  (sauce base 18 vs ≥25 target, batter 24 vs ≥30), suggesting the model didn't recognise that
+  specific menu's group layout rather than a schema/code bug. EK-3 should retry Kavan a few times to
+  see if this is call-to-call variance or a layout the prompt genuinely doesn't cover, and decide
+  whether a nested used_by grouping (vs. the flat `family` tag) is worth doing before the confirm
+  screen.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

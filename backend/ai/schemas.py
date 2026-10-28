@@ -57,6 +57,14 @@ class ExtractedDish(BaseModel):
     kind: Literal["dish", "addon"] = "dish"
     note: str = ""
     variants: list[str] = Field(default_factory=list)
+    # Step EK-2: which side of each variant the dish's own printed name/heading sits on when
+    # building the real combined dish name — "prefix" (default): name + " " + variant, e.g.
+    # "Chicken" + "Manchurian" -> "Chicken Manchurian". "suffix": variant + " " + name, e.g. a
+    # "MANCHURIAN" heading with choices "Gobi"/"Paneer" listed as/below it -> "Gobi Manchurian".
+    variant_position: Literal["prefix", "suffix"] = "prefix"
+    # Only set when variants carry genuinely different prices (e.g. a Veg/Non-veg soup with two
+    # price columns) — same length and order as variants; None means every variant shares `price`.
+    variant_prices: list[float] | None = None
 
     @field_validator("name")
     @classmethod
@@ -84,6 +92,13 @@ class ExtractedDish(BaseModel):
     def _clean_variants(cls, value: list[str]) -> list[str]:
         cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
         return [v for v in cleaned if v and not _is_price_like(v)][:MAX_VARIANTS_PER_DISH]
+
+    @field_validator("variant_prices")
+    @classmethod
+    def _clean_variant_prices(cls, value: list[float] | None) -> list[float] | None:
+        if not value:
+            return None
+        return [p for p in value[:MAX_VARIANTS_PER_DISH] if p is not None and p >= 0] or None
 
 
 class ExtractedSection(BaseModel):
@@ -233,55 +248,26 @@ class RecipeSuggestionsResult(BaseModel):
     dishes: list[DishRecipeSuggestion] = Field(default_factory=list)
 
 
-MAX_BASES_PER_MENU = 20
-MAX_BATCH_INGREDIENTS_PER_BASE = 30
-MAX_USED_BY_PER_BASE = 400
+MAX_DISHES_PER_CLASSIFY_CALL = 80
+MAX_FAMILY_LENGTH = 40
 MAX_REASON_LENGTH = 120
 
 
-class SuggestedBaseIngredient(BaseModel):
+class DishClassification(BaseModel):
+    """Step EK-2: the model's ONLY job in base discovery now — pick a type (validated against the
+    sector's taxonomy by classification.py, not here, since the taxonomy is sector-agnostic and
+    loaded from JSON rather than hardcoded) and a short family/style tag (e.g. "manchurian",
+    "mutton", "paratha"). Everything downstream (which base, how many grams/ml per portion) is
+    looked up deterministically from backend/ai/knowledge/<sector>.json's type_rules — never
+    invented by the model."""
+
     name: str
-    qty: float
-    unit: Literal["g", "ml"]
-
-    @field_validator("name")
-    @classmethod
-    def _clean_name(cls, value: str) -> str:
-        return _clean_text(value, MAX_NAME_LENGTH)
-
-    @field_validator("qty")
-    @classmethod
-    def _non_negative_qty(cls, value: float) -> float:
-        return max(0.0, value)
-
-
-class SuggestedBaseUse(BaseModel):
-    dish: str
-    grams_per_portion: float
-
-    @field_validator("dish")
-    @classmethod
-    def _clean_dish(cls, value: str) -> str:
-        return _clean_text(value, MAX_NAME_LENGTH)
-
-    @field_validator("grams_per_portion")
-    @classmethod
-    def _non_negative_grams(cls, value: float) -> float:
-        return max(0.0, value)
-
-
-class SuggestedBase(BaseModel):
-    name: str
-    type: str = ""
-    batch_ingredients: list[SuggestedBaseIngredient] = Field(default_factory=list)
-    yield_qty: float = 1000
-    used_by: list[SuggestedBaseUse] = Field(default_factory=list)
+    type: str
+    family: str = ""
     confidence: float = 0.5
-    source: Literal["library", "custom"] = "library"
+    # Only meaningful when the model deliberately moved a dish away from its most obvious type —
+    # kept for a future review screen, never required.
     reason: str = ""
-    # Populated by base_discovery.py's deterministic sanity checks, run AFTER this schema validates —
-    # never set by the model itself.
-    flags: list[str] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -293,6 +279,11 @@ class SuggestedBase(BaseModel):
     def _clean_type(cls, value: str) -> str:
         return _clean_text(value, MAX_NAME_LENGTH)
 
+    @field_validator("family")
+    @classmethod
+    def _clean_family(cls, value: str) -> str:
+        return _clean_text(value, MAX_FAMILY_LENGTH).lower()
+
     @field_validator("reason")
     @classmethod
     def _clean_reason(cls, value: str) -> str:
@@ -303,26 +294,11 @@ class SuggestedBase(BaseModel):
     def _clamp_confidence(cls, value: float) -> float:
         return _clamp_unit(value)
 
-    @field_validator("yield_qty")
+
+class DishClassificationResult(BaseModel):
+    dishes: list[DishClassification] = Field(default_factory=list)
+
+    @field_validator("dishes")
     @classmethod
-    def _positive_yield(cls, value: float) -> float:
-        return value if value and value > 0 else 1000.0
-
-    @field_validator("batch_ingredients")
-    @classmethod
-    def _cap_ingredients(cls, value: list) -> list:
-        return value[:MAX_BATCH_INGREDIENTS_PER_BASE]
-
-    @field_validator("used_by")
-    @classmethod
-    def _cap_used_by(cls, value: list) -> list:
-        return value[:MAX_USED_BY_PER_BASE]
-
-
-class BaseDiscoveryResult(BaseModel):
-    bases: list[SuggestedBase] = Field(default_factory=list)
-
-    @field_validator("bases")
-    @classmethod
-    def _cap_bases(cls, value: list) -> list:
-        return value[:MAX_BASES_PER_MENU]
+    def _cap_dishes(cls, value: list) -> list:
+        return value[:MAX_DISHES_PER_CLASSIFY_CALL]

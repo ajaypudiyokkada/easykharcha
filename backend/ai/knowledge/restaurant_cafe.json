@@ -23,10 +23,9 @@
         {"name": "Cashew", "qty": 120, "unit": "g"},
         {"name": "Butter", "qty": 100, "unit": "g"},
         {"name": "Cream", "qty": 80, "unit": "ml"},
-        {"name": "Spices", "qty": 20, "unit": "g"},
-        {"name": "Water", "qty": 80, "unit": "ml"}
+        {"name": "Spices", "qty": 20, "unit": "g"}
       ],
-      "notes": "Only suggest when 3 or more dishes genuinely need a butter/makhani-style gravy"
+      "notes": "Only suggest when 3 or more dishes genuinely need a butter/makhani-style gravy. Water is not a stock item — the rest of the 1,000 g batch (about 80 g) is water, topped up at cooking time, not listed as an ingredient."
     },
     {
       "name": "White gravy",
@@ -54,10 +53,9 @@
         {"name": "Ketchup", "qty": 150, "unit": "ml"},
         {"name": "Vinegar", "qty": 50, "unit": "ml"},
         {"name": "Garlic", "qty": 100, "unit": "g"},
-        {"name": "Sugar", "qty": 30, "unit": "g"},
-        {"name": "Water", "qty": 170, "unit": "ml"}
+        {"name": "Sugar", "qty": 30, "unit": "g"}
       ],
-      "notes": "Manchurian/chilli/schezwan-style gravies and tossed dishes"
+      "notes": "Manchurian/chilli/schezwan-style gravies and tossed dishes. Water is not a stock item — the rest of the 1,000 ml batch (about 170 ml) is water, topped up at cooking time, not listed as an ingredient."
     },
     {
       "name": "Frying batter",
@@ -67,20 +65,18 @@
         {"name": "Cornflour", "qty": 400, "unit": "g"},
         {"name": "Maida", "qty": 200, "unit": "g"},
         {"name": "Eggs", "qty": 150, "unit": "g"},
-        {"name": "Salt", "qty": 15, "unit": "g"},
-        {"name": "Water", "qty": 235, "unit": "ml"}
+        {"name": "Salt", "qty": 15, "unit": "g"}
       ],
-      "notes": "Starter/Indo-Chinese fry coating (eggs: about 3 pieces)"
+      "notes": "Starter/Indo-Chinese fry coating (eggs: about 3 pieces). Water is not a stock item — the rest of the 1,000 g batch (about 235 g) is water, topped up at mixing time, not listed as an ingredient."
     },
     {
       "name": "Cooked rice",
       "type": "staple",
       "batch_yield_qty": 1000,
       "formula": [
-        {"name": "Basmati rice (raw)", "qty": 400, "unit": "g"},
-        {"name": "Water", "qty": 600, "unit": "ml"}
+        {"name": "Basmati rice (raw)", "qty": 400, "unit": "g"}
       ],
-      "notes": "Raw basmati expands roughly 2.5x on cooking"
+      "notes": "Raw basmati expands roughly 2.5x on cooking. Water is not a stock item — the rest of the 1,000 g cooked weight (about 600 ml) is cooking water, not listed as an ingredient."
     },
     {
       "name": "Atta dough",
@@ -88,11 +84,10 @@
       "batch_yield_qty": 1000,
       "formula": [
         {"name": "Atta", "qty": 620, "unit": "g"},
-        {"name": "Water", "qty": 340, "unit": "ml"},
         {"name": "Oil", "qty": 30, "unit": "ml"},
         {"name": "Salt", "qty": 10, "unit": "g"}
       ],
-      "notes": "Chapathi/paratha dough"
+      "notes": "Chapathi/paratha dough. Water is not a stock item — the rest of the 1,000 g dough (about 340 ml) is water, topped up at kneading time, not listed as an ingredient."
     },
     {
       "name": "Ginger-garlic paste",
@@ -127,5 +122,33 @@
     "makhani_min_dishes": 3,
     "no_stocks_tadka_or_seasonings": true,
     "one_level_only": true
+  },
+  "type_rules": {
+    "fried_starter_tossed": {"base": "Indo-Chinese sauce base", "grams_per_portion": 40},
+    "fried_starter_dry": {"base": "Frying batter", "grams_per_portion": 40},
+    "grilled_tandoori": null,
+    "veg_starter_snack": {"base": "Frying batter", "grams_per_portion": 40},
+    "gravy_nonveg": {
+      "base": "Onion-tomato masala",
+      "grams_per_portion": 200,
+      "family_overrides": {"mutton": 220}
+    },
+    "gravy_veg": {"base": "Onion-tomato masala", "grams_per_portion": 180},
+    "gravy_makhani": {"base": "Makhani/butter base", "grams_per_portion": 200},
+    "gravy_chinese": {"base": "Indo-Chinese sauce base", "grams_per_portion": 80},
+    "rice_plain": {"base": "Cooked rice", "grams_per_portion": 250},
+    "rice_fried": {"base": "Cooked rice", "grams_per_portion": 280},
+    "noodles": {"base": "Indo-Chinese sauce base", "grams_per_portion": 80},
+    "bread_dough": {
+      "base": "Atta dough",
+      "grams_per_portion": 60,
+      "family_overrides": {"paratha": 100}
+    },
+    "soup": null,
+    "salad": null,
+    "dal": null,
+    "beverage": null,
+    "dessert": null,
+    "other": null
   }
 }

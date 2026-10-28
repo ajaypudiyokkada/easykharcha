@@ -95,9 +95,10 @@ class AiRecipeCache(models.Model):
 
 
 class AiKitchenBaseCache(models.Model):
-    """Step EK-1: caches a base-discovery result by (sector, the menu's own normalised dish-name set,
-    prompt_version) — unlike AiRecipeCache, this is per-menu (a specific set of dishes), not
-    per-dish, since which bases a menu needs depends on the whole dish list together. Stores only the
+    """Step EK-1/EK-2: caches the final, deterministically-mapped bases result for a menu by
+    (sector, the menu's own normalised dish-name set, prompt_version) — unlike AiRecipeCache or
+    AiDishTypeCache below, this is per-menu (a specific set of dishes), not per-dish, since which
+    bases actually clear the 3-dish rule depends on the whole dish list together. Stores only the
     generic suggestion (base formulas/used-by), never a business id."""
 
     sector = models.CharField(max_length=32)
@@ -116,3 +117,27 @@ class AiKitchenBaseCache(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sector} bases ({self.dish_set_hash[:8]})"
+
+
+class AiDishTypeCache(models.Model):
+    """Step EK-2: caches classify_dishes's per-dish result by (dish_name_normalised, sector,
+    prompt_version) — a dish's kitchen-prep type doesn't depend on what else is on the menu (unlike
+    AiKitchenBaseCache above), so this is reusable across every menu/business in the same sector,
+    same shape as AiRecipeCache. Stores only the generic classification, never a business id."""
+
+    dish_name_normalised = models.CharField(max_length=80)
+    sector = models.CharField(max_length=32)
+    prompt_version = models.PositiveSmallIntegerField(default=1)
+    result = models.JSONField()
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dish_name_normalised", "sector", "prompt_version"],
+                name="unique_ai_dish_type_cache_key",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.dish_name_normalised} ({self.sector})"

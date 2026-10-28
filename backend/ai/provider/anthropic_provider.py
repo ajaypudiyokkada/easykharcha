@@ -6,15 +6,14 @@ import anthropic
 from django.conf import settings
 
 from .. import prompts
-from ..schemas import BaseDiscoveryResult, MenuExtractionResult, RecipeSuggestionsResult
+from ..schemas import DishClassificationResult, MenuExtractionResult, RecipeSuggestionsResult
 from .base import AiCallResult, run_with_fallback
 from .errors import AiProviderCallError
 
 _REQUEST_TIMEOUT_SECONDS = 60.0
 _MAX_TOKENS_MENU = 8000
 _MAX_TOKENS_RECIPE = 4000
-# A large menu's bases can each carry a long used_by list (every matching dish) — needs more room
-# than the recipe call's per-dish response.
+# A batch of ~60-80 dishes each needing a type/family/confidence echoed back needs real room.
 _MAX_TOKENS_KITCHEN = 8000
 
 # Models that default to adaptive extended thinking reject a forced tool_choice ("tool" or "any") —
@@ -121,21 +120,19 @@ def suggest_recipes(
     )
 
 
-def discover_bases(
-    dishes: list[dict], sector: str, stock_item_names: list[str], library: dict
-) -> AiCallResult:
-    messages = prompts.kitchen_messages(dishes, sector, stock_item_names, library)
-    tool = prompts.kitchen_tool()
+def classify_dishes(dish_names: list[str], sector: str, dish_types: list[str]) -> AiCallResult:
+    messages = prompts.classify_messages(dish_names, sector, dish_types)
+    tool = prompts.classify_tool(dish_types)
 
     return run_with_fallback(
         primary_model=settings.AI_MODEL_KITCHEN,
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=lambda _attempt, model: _get_raw(
             model=model,
-            system=prompts.KITCHEN_SYSTEM_PROMPT,
+            system=prompts.CLASSIFY_SYSTEM_PROMPT,
             messages=messages,
             tool=tool,
             max_tokens=_MAX_TOKENS_KITCHEN,
         ),
-        parse=lambda raw: BaseDiscoveryResult.model_validate(raw).model_dump(),
+        parse=lambda raw: DishClassificationResult.model_validate(raw).model_dump(),
     )
