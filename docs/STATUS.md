@@ -635,6 +635,21 @@ not built yet.
   whether a nested used_by grouping (vs. the flat `family` tag) is worth doing before the confirm
   screen.
 
+- **Step EK-2d — A dish can use two bases (batter + sauce).** A dish got exactly one type before,
+  so Chicken Chilli (battered AND sauce-tossed) could only map to batter OR sauce — the model's own
+  pick swung wildly run to run (Kavan batter 14-20, FOMO batter 11-15/sauce 44-54, see EK-2c below).
+  `DishClassification` gained an optional model-reported `secondary_type`; new deterministic
+  `restaurant_cafe.json.rules.two_base_starter_rule` + `base_discovery._secondary_types_for` ADD
+  whichever of fried_starter_dry/fried_starter_tossed isn't already the primary type to a dish naming
+  both a protein/veg (chicken/fish/prawn/paneer/gobi/mushroom/baby corn) and a frying style (chilli/
+  manchurian/65/pepper/lollipop/wings/finger/pakoda/fry) — model-independent, so run-to-run variance
+  on this split can't starve either base; never touches a dish whose primary type already has no base
+  (fries/nuts/mutton-fry/tandoori/soups/Thai unaffected). `map_bases_from_classification`'s new
+  `add_mapping` dedups so a dish is never double-listed within the same base. New golden smoke case:
+  Chicken Chilli/Gobi Manchurian/Prawn Pepper map to both batter and sauce; fries/soup/Thai curry map
+  to neither. Real-run proof (`scripts/ai_try_kitchen.py`, 1 run each, ~$0.20 total): Kavan batter 40/
+  sauce 45 (target 28-45/28-55 ✓), FOMO batter 41/sauce 54 (✓, right at the sauce ceiling), 0
+  duplicates and 0 bare headings both menus, no fries/soup/Thai dish in any base either menu.
 - **Step EK-2c — Remove duplicate expansion, fix names/splits, refine types.** Two real bugs fixed:
   (1) the first pass's own inline-variant expansion and the dedicated group pass could both expand
   the same heading, producing duplicates/garbled names ("Gobi Manchurian/65 65") — `apply_groups` is

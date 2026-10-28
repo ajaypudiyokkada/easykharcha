@@ -170,33 +170,71 @@ def _cache_key(dish_names: list[str]) -> str:
     return hashlib.sha256("|".join(normalised).encode("utf-8")).hexdigest()
 
 
+def _secondary_types_for(name: str, primary_type: str, rules: dict) -> list[str]:
+    """Step EK-2d Fix B: deterministic, model-independent — a dish naming both a protein/veg AND a
+    frying style (chilli, manchurian, 65, pepper, lollipop, wings, finger, pakoda, fry) is battered
+    AND tossed in sauce in a real kitchen, but the model's classify_dishes can only pick one primary
+    type. Whichever of the pair (fried_starter_dry/fried_starter_tossed) ISN'T the primary gets added
+    as well — regardless of what the model said, so run-to-run model variance on this split can't
+    starve either base. Never fires for a type outside this pair (fries/nuts/mutton-fry/tandoori/
+    soups/Thai keep their own no-base types untouched)."""
+    rule = rules.get("two_base_starter_rule")
+    if not rule or primary_type not in rule.get("add_bases_for_types", []):
+        return []
+    name_norm = normalise(name)
+    has_protein = any(kw in name_norm for kw in rule["protein_keywords"])
+    has_style = any(kw in name_norm for kw in rule["style_keywords"])
+    if not (has_protein and has_style):
+        return []
+    return [t for t in rule["add_bases_for_types"] if t != primary_type]
+
+
 def map_bases_from_classification(
     dishes: list[dict], classifications: dict[str, dict], library: dict
 ) -> list[dict]:
     """The deterministic replacement for the old model-driven mapping (EK-1): for every dish, look
-    its classified type up in the sector's type_rules to find the one base it uses and how many
+    its classified type up in the sector's type_rules to find the base(s) it uses and how many
     grams/ml per portion (a family_overrides entry, e.g. "mutton": 220, wins over the type's own
-    default). Never asks the model to invent a base, a formula, or a quantity — only which type a
-    dish is. A type with no rule (null in type_rules, or missing) contributes no base."""
+    default). Never asks the model to invent a base, a formula, or a quantity — only which type(s) a
+    dish is. A type with no rule (null in type_rules, or missing) contributes no base. Step EK-2d: a
+    dish can map to up to 2 bases now — its primary type, PLUS classification.py's optional
+    model-reported `secondary_type` and/or _secondary_types_for's deterministic addition (a fried
+    starter genuinely using both a batter and a sauce base) — never more than the 2 real bases the
+    fried_starter_dry/fried_starter_tossed pair can contribute."""
     type_rules = library.get("type_rules", {})
     templates_by_name = {t["name"]: t for t in library.get("base_templates", [])}
     excluded = set(library.get("rules", {}).get("excluded_by_default", []))
+    rules = library.get("rules", {})
 
     groups: dict[str, list[dict]] = {}
+
+    def add_mapping(name: str, dish_type: str, family: str) -> None:
+        rule = type_rules.get(dish_type)
+        if not rule:
+            return
+        base_name = rule["base"]
+        if base_name in excluded or base_name not in templates_by_name:
+            return
+        bucket = groups.setdefault(base_name, [])
+        if any(entry["dish"] == name for entry in bucket):
+            return  # already mapped to this same base via another type — never double-list a dish
+        grams = rule.get("family_overrides", {}).get(family, rule["grams_per_portion"])
+        bucket.append({"dish": name, "grams_per_portion": grams, "family": family or dish_type})
+
     for dish in dishes:
         name = dish["name"]
         info = classifications.get(normalise(name), {"type": "other", "family": ""})
-        rule = type_rules.get(info["type"])
-        if not rule:
-            continue
-        base_name = rule["base"]
-        if base_name in excluded or base_name not in templates_by_name:
-            continue
+        primary_type = info["type"]
         family = (info.get("family") or "").lower()
-        grams = rule.get("family_overrides", {}).get(family, rule["grams_per_portion"])
-        groups.setdefault(base_name, []).append(
-            {"dish": name, "grams_per_portion": grams, "family": family or info["type"]}
-        )
+
+        add_mapping(name, primary_type, family)
+
+        secondary_type = (info.get("secondary_type") or "").strip()
+        if secondary_type and secondary_type != primary_type:
+            add_mapping(name, secondary_type, family)
+
+        for extra_type in _secondary_types_for(name, primary_type, rules):
+            add_mapping(name, extra_type, family)
 
     bases = []
     for base_name, used_by in groups.items():
