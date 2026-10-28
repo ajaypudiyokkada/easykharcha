@@ -6,13 +6,16 @@ import anthropic
 from django.conf import settings
 
 from .. import prompts
-from ..schemas import MenuExtractionResult, RecipeSuggestionsResult
+from ..schemas import BaseDiscoveryResult, MenuExtractionResult, RecipeSuggestionsResult
 from .base import AiCallResult, run_with_fallback
 from .errors import AiProviderCallError
 
 _REQUEST_TIMEOUT_SECONDS = 60.0
 _MAX_TOKENS_MENU = 8000
 _MAX_TOKENS_RECIPE = 4000
+# A large menu's bases can each carry a long used_by list (every matching dish) — needs more room
+# than the recipe call's per-dish response.
+_MAX_TOKENS_KITCHEN = 8000
 
 # Models that default to adaptive extended thinking reject a forced tool_choice ("tool" or "any") —
 # the API returns a 400 ("tool_choice: type ... are not supported for this model"), since forcing an
@@ -115,4 +118,24 @@ def suggest_recipes(
             max_tokens=_MAX_TOKENS_RECIPE,
         ),
         parse=lambda raw: RecipeSuggestionsResult.model_validate(raw).model_dump(),
+    )
+
+
+def discover_bases(
+    dishes: list[dict], sector: str, stock_item_names: list[str], library: dict
+) -> AiCallResult:
+    messages = prompts.kitchen_messages(dishes, sector, stock_item_names, library)
+    tool = prompts.kitchen_tool()
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_KITCHEN,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=prompts.KITCHEN_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_KITCHEN,
+        ),
+        parse=lambda raw: BaseDiscoveryResult.model_validate(raw).model_dump(),
     )

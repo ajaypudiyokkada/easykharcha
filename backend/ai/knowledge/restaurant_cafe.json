@@ -1,0 +1,131 @@
+{
+  "sector": "restaurant_cafe",
+  "base_templates": [
+    {
+      "name": "Onion-tomato masala",
+      "type": "curry_base",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Onion", "qty": 450, "unit": "g"},
+        {"name": "Tomato", "qty": 400, "unit": "g"},
+        {"name": "Oil", "qty": 90, "unit": "ml"},
+        {"name": "Cashew", "qty": 40, "unit": "g"},
+        {"name": "Spices", "qty": 20, "unit": "g"}
+      ],
+      "notes": "Workhorse curry gravy — chicken/mutton/veg/paneer curries"
+    },
+    {
+      "name": "Makhani/butter base",
+      "type": "curry_base",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Tomato", "qty": 600, "unit": "g"},
+        {"name": "Cashew", "qty": 120, "unit": "g"},
+        {"name": "Butter", "qty": 100, "unit": "g"},
+        {"name": "Cream", "qty": 80, "unit": "ml"},
+        {"name": "Spices", "qty": 20, "unit": "g"},
+        {"name": "Water", "qty": 80, "unit": "ml"}
+      ],
+      "notes": "Only suggest when 3 or more dishes genuinely need a butter/makhani-style gravy"
+    },
+    {
+      "name": "White gravy",
+      "type": "curry_base",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Onion", "qty": 500, "unit": "g"},
+        {"name": "Curd", "qty": 150, "unit": "g"},
+        {"name": "Cashew", "qty": 150, "unit": "g"},
+        {"name": "Cream", "qty": 100, "unit": "ml"},
+        {"name": "Oil", "qty": 50, "unit": "ml"},
+        {"name": "Spices", "qty": 50, "unit": "g"}
+      ],
+      "notes": "Korma/white-gravy style curries"
+    },
+    {
+      "name": "Indo-Chinese sauce base",
+      "type": "sauce_base",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Dark soy sauce", "qty": 150, "unit": "ml"},
+        {"name": "Light soy sauce", "qty": 100, "unit": "ml"},
+        {"name": "Red chilli sauce", "qty": 150, "unit": "ml"},
+        {"name": "Green chilli sauce", "qty": 100, "unit": "ml"},
+        {"name": "Ketchup", "qty": 150, "unit": "ml"},
+        {"name": "Vinegar", "qty": 50, "unit": "ml"},
+        {"name": "Garlic", "qty": 100, "unit": "g"},
+        {"name": "Sugar", "qty": 30, "unit": "g"},
+        {"name": "Water", "qty": 170, "unit": "ml"}
+      ],
+      "notes": "Manchurian/chilli/schezwan-style gravies and tossed dishes"
+    },
+    {
+      "name": "Frying batter",
+      "type": "batter",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Cornflour", "qty": 400, "unit": "g"},
+        {"name": "Maida", "qty": 200, "unit": "g"},
+        {"name": "Eggs", "qty": 150, "unit": "g"},
+        {"name": "Salt", "qty": 15, "unit": "g"},
+        {"name": "Water", "qty": 235, "unit": "ml"}
+      ],
+      "notes": "Starter/Indo-Chinese fry coating (eggs: about 3 pieces)"
+    },
+    {
+      "name": "Cooked rice",
+      "type": "staple",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Basmati rice (raw)", "qty": 400, "unit": "g"},
+        {"name": "Water", "qty": 600, "unit": "ml"}
+      ],
+      "notes": "Raw basmati expands roughly 2.5x on cooking"
+    },
+    {
+      "name": "Atta dough",
+      "type": "staple",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Atta", "qty": 620, "unit": "g"},
+        {"name": "Water", "qty": 340, "unit": "ml"},
+        {"name": "Oil", "qty": 30, "unit": "ml"},
+        {"name": "Salt", "qty": 10, "unit": "g"}
+      ],
+      "notes": "Chapathi/paratha dough"
+    },
+    {
+      "name": "Ginger-garlic paste",
+      "type": "paste",
+      "batch_yield_qty": 1000,
+      "formula": [
+        {"name": "Ginger", "qty": 450, "unit": "g"},
+        {"name": "Garlic", "qty": 450, "unit": "g"},
+        {"name": "Oil", "qty": 50, "unit": "ml"},
+        {"name": "Salt", "qty": 20, "unit": "g"}
+      ],
+      "notes": "A seasoning paste, not a batch recipe — excluded_by_default in rules below"
+    }
+  ],
+  "portion_defaults": [
+    {"dish_type": "meat_fish_starter", "main_g": 150, "batter_g": 40, "sauce_ml": 40, "fry_oil_ml": 40},
+    {"dish_type": "veg_starter", "main_g": 150, "paneer_g": 120, "potato_g": 200},
+    {"dish_type": "chicken_curry", "chicken_g": 180, "curry_base_g": 200, "oil_ml": 15},
+    {"dish_type": "mutton_curry", "mutton_g": 200, "curry_base_g": 220},
+    {"dish_type": "veg_paneer_curry", "main_g_min": 120, "main_g_max": 180, "curry_base_g": 180},
+    {"dish_type": "chinese_gravy", "main_g": 100, "sauce_base_ml": 80, "cornflour_g": 10},
+    {"dish_type": "rice_plate", "rice_g": 250},
+    {"dish_type": "fried_rice_plate", "rice_g": 280},
+    {"dish_type": "soup", "soup_ml": 250},
+    {"dish_type": "chapathi", "dough_g": 60},
+    {"dish_type": "paratha", "dough_g": 100}
+  ],
+  "rules": {
+    "min_dishes_to_suggest_base": 3,
+    "min_grams_per_portion": 30,
+    "excluded_by_default": ["Ginger-garlic paste"],
+    "makhani_min_dishes": 3,
+    "no_stocks_tadka_or_seasonings": true,
+    "one_level_only": true
+  }
+}

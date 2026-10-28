@@ -583,6 +583,23 @@ not built yet.
   `setup/4.tsx`'s own dish form still doesn't pass `bases` (pre-existing gap, not this step's
   scope); the coverage banner's destination list isn't sorted by revenue.
 
+- **Step EK-1 — Knowledge library + base-discovery skill (backend only, docs/BASES_PLAN.md).** New
+  `backend/ai/knowledge/` (plain `<sector>.json` files — restaurant_cafe ships 8 base templates,
+  portion defaults, and rules; any other sector falls back to an empty-but-same-shape library) and
+  `ai/base_discovery.py`: `expand_dish_options` (deterministic, e.g. "Chicken (Manchurian/Chilli)" ->
+  2 dishes) and `discover_bases` (library-first model call via new `AI_MODEL_KITCHEN`, cached by
+  sector + dish-name-set hash, deterministic `sanity_check` afterward drops a base under the min-
+  dishes rule and flags — never silently fixes — an off formula or implausible per-portion amount).
+  New `scripts/ai_try_kitchen.py`, proved against real menus: Kavan found 5 bases (onion-tomato
+  masala 8 dishes, Indo-Chinese sauce 10, frying batter 14, cooked rice 8, atta dough 6; correctly
+  no makhani or ginger-garlic); FOMO (199 dishes after expansion) found 6, including makhani (4
+  dishes — genuinely used there, unlike Kavan). The first prompt draft under-enumerated (found only
+  1 base on a 100+ dish menu) until told explicitly to go through every template rather than stop
+  after the first good match; also bumped `_MAX_TOKENS_KITCHEN` 4000->8000 after it silently returned
+  zero bases (a max_tokens truncation that still parsed as valid-but-empty — the result's `usage.
+  truncated` flag now surfaces this to the caller, same gap scanning's `incomplete` flag covers for
+  menu reading). No endpoint/screen yet — EK-2/EK-3 own the confirm-and-create-real-Base flow.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

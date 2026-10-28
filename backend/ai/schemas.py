@@ -231,3 +231,98 @@ class DishRecipeSuggestion(BaseModel):
 
 class RecipeSuggestionsResult(BaseModel):
     dishes: list[DishRecipeSuggestion] = Field(default_factory=list)
+
+
+MAX_BASES_PER_MENU = 20
+MAX_BATCH_INGREDIENTS_PER_BASE = 30
+MAX_USED_BY_PER_BASE = 400
+MAX_REASON_LENGTH = 120
+
+
+class SuggestedBaseIngredient(BaseModel):
+    name: str
+    qty: float
+    unit: Literal["g", "ml"]
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("qty")
+    @classmethod
+    def _non_negative_qty(cls, value: float) -> float:
+        return max(0.0, value)
+
+
+class SuggestedBaseUse(BaseModel):
+    dish: str
+    grams_per_portion: float
+
+    @field_validator("dish")
+    @classmethod
+    def _clean_dish(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("grams_per_portion")
+    @classmethod
+    def _non_negative_grams(cls, value: float) -> float:
+        return max(0.0, value)
+
+
+class SuggestedBase(BaseModel):
+    name: str
+    type: str = ""
+    batch_ingredients: list[SuggestedBaseIngredient] = Field(default_factory=list)
+    yield_qty: float = 1000
+    used_by: list[SuggestedBaseUse] = Field(default_factory=list)
+    confidence: float = 0.5
+    source: Literal["library", "custom"] = "library"
+    reason: str = ""
+    # Populated by base_discovery.py's deterministic sanity checks, run AFTER this schema validates —
+    # never set by the model itself.
+    flags: list[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("type")
+    @classmethod
+    def _clean_type(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("reason")
+    @classmethod
+    def _clean_reason(cls, value: str) -> str:
+        return _clean_text(value, MAX_REASON_LENGTH)
+
+    @field_validator("confidence")
+    @classmethod
+    def _clamp_confidence(cls, value: float) -> float:
+        return _clamp_unit(value)
+
+    @field_validator("yield_qty")
+    @classmethod
+    def _positive_yield(cls, value: float) -> float:
+        return value if value and value > 0 else 1000.0
+
+    @field_validator("batch_ingredients")
+    @classmethod
+    def _cap_ingredients(cls, value: list) -> list:
+        return value[:MAX_BATCH_INGREDIENTS_PER_BASE]
+
+    @field_validator("used_by")
+    @classmethod
+    def _cap_used_by(cls, value: list) -> list:
+        return value[:MAX_USED_BY_PER_BASE]
+
+
+class BaseDiscoveryResult(BaseModel):
+    bases: list[SuggestedBase] = Field(default_factory=list)
+
+    @field_validator("bases")
+    @classmethod
+    def _cap_bases(cls, value: list) -> list:
+        return value[:MAX_BASES_PER_MENU]

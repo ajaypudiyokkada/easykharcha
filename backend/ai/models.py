@@ -45,6 +45,7 @@ class MenuScan(models.Model):
 class AiUsageKind(models.TextChoices):
     MENU_SCAN = "menu_scan", "menu_scan"
     RECIPE_SUGGESTION = "recipe_suggestion", "recipe_suggestion"
+    KITCHEN_BASE_DISCOVERY = "kitchen_base_discovery", "kitchen_base_discovery"
 
 
 class AiUsage(models.Model):
@@ -53,7 +54,7 @@ class AiUsage(models.Model):
     AI_PRICE_IN_PER_MTOK/AI_PRICE_OUT_PER_MTOK, so it stays correct even if those prices change later."""
 
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="ai_usage")
-    kind = models.CharField(max_length=20, choices=AiUsageKind.choices)
+    kind = models.CharField(max_length=24, choices=AiUsageKind.choices)
     model = models.CharField(max_length=60)
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
@@ -91,3 +92,27 @@ class AiRecipeCache(models.Model):
 
     def __str__(self) -> str:
         return f"{self.dish_name_normalised} ({self.business_type})"
+
+
+class AiKitchenBaseCache(models.Model):
+    """Step EK-1: caches a base-discovery result by (sector, the menu's own normalised dish-name set,
+    prompt_version) — unlike AiRecipeCache, this is per-menu (a specific set of dishes), not
+    per-dish, since which bases a menu needs depends on the whole dish list together. Stores only the
+    generic suggestion (base formulas/used-by), never a business id."""
+
+    sector = models.CharField(max_length=32)
+    dish_set_hash = models.CharField(max_length=64)
+    prompt_version = models.PositiveSmallIntegerField(default=1)
+    result = models.JSONField()
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sector", "dish_set_hash", "prompt_version"],
+                name="unique_ai_kitchen_base_cache_key",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.sector} bases ({self.dish_set_hash[:8]})"

@@ -216,6 +216,8 @@ BUSINESS_SETTINGS_RANGES = {
 ANTHROPIC_API_KEY = env.str("ANTHROPIC_API_KEY", default="")
 AI_MODEL_MENU = env.str("AI_MODEL_MENU", default="claude-haiku-5-5")
 AI_MODEL_RECIPE = env.str("AI_MODEL_RECIPE", default="claude-haiku-5-5")
+# Step EK-1: kitchen-base discovery (backend/ai/base_discovery.py) — same tier as menu/recipe calls.
+AI_MODEL_KITCHEN = env.str("AI_MODEL_KITCHEN", default="claude-haiku-5-5")
 # Tried once, only when the first call's result fails schema validation — see ai/provider/base.py.
 AI_MODEL_FALLBACK = env.str("AI_MODEL_FALLBACK", default="claude-sonnet-5-5")
 AI_FAKE = env.bool("AI_FAKE", default=DEBUG)

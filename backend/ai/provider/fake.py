@@ -25,7 +25,7 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
 
 from django.conf import settings
 
-from ..schemas import MenuExtractionResult, RecipeSuggestionsResult
+from ..schemas import BaseDiscoveryResult, MenuExtractionResult, RecipeSuggestionsResult
 from .base import AiCallResult, run_with_fallback
 
 _FAKE_MODEL = "fake-ai-model"
@@ -33,6 +33,21 @@ _MENU_INPUT_TOKENS = 2500
 _MENU_OUTPUT_TOKENS = 1200
 _RECIPE_INPUT_TOKENS = 800
 _RECIPE_OUTPUT_TOKENS = 300
+_KITCHEN_INPUT_TOKENS = 3000
+_KITCHEN_OUTPUT_TOKENS = 900
+
+# Dish-name keyword -> (template name, grams/ml per portion) — a stand-in for the real model's
+# judgement, just enough to exercise the discovery pipeline (option expansion, caching, sanity
+# checks) end to end without a network call. Keys are checked in order, first match wins per dish.
+_KEYWORD_TEMPLATES = [
+    (("manchurian", "chilli", "schezwan", "chinese"), "Indo-Chinese sauce base", 80),
+    (("65", "fry", "crispy", "lollipop"), "Frying batter", 40),
+    (("makhani", "butter"), "Makhani/butter base", 200),
+    (("korma", "white gravy"), "White gravy", 180),
+    (("curry", "masala", "gravy"), "Onion-tomato masala", 200),
+    (("rice",), "Cooked rice", 250),
+    (("roti", "chapathi", "paratha", "naan"), "Atta dough", 70),
+]
 
 
 def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
@@ -193,4 +208,58 @@ def suggest_recipes(
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=get_raw,
         parse=lambda raw: RecipeSuggestionsResult.model_validate(raw).model_dump(),
+    )
+
+
+def discover_bases(
+    dishes: list[dict], sector: str, stock_item_names: list[str], library: dict
+) -> AiCallResult:
+    templates_by_name = {t["name"]: t for t in library.get("base_templates", [])}
+    dishes_by_template: dict[str, list[dict]] = {}
+    for dish in dishes:
+        name_lower = dish["name"].lower()
+        for keywords, template_name, grams in _KEYWORD_TEMPLATES:
+            if template_name not in templates_by_name:
+                continue
+            if any(keyword in name_lower for keyword in keywords):
+                dishes_by_template.setdefault(template_name, []).append(
+                    {"dish": dish["name"], "grams_per_portion": grams}
+                )
+                break
+
+    bases = []
+    for template_name, used_by in dishes_by_template.items():
+        if len(used_by) < 3:
+            continue
+        template = templates_by_name[template_name]
+        bases.append(
+            {
+                "name": template["name"],
+                "type": template.get("type", ""),
+                "batch_ingredients": [
+                    {"name": i["name"], "qty": i["qty"], "unit": i["unit"]}
+                    for i in template["formula"]
+                ],
+                "yield_qty": template.get("batch_yield_qty", 1000),
+                "used_by": used_by,
+                "confidence": 0.9,
+                "source": "library",
+                "reason": f"used by {len(used_by)} dishes",
+            }
+        )
+
+    def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        return (
+            {"bases": bases},
+            model,
+            _KITCHEN_INPUT_TOKENS,
+            _KITCHEN_OUTPUT_TOKENS,
+            False,
+        )
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_KITCHEN,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=get_raw,
+        parse=lambda raw: BaseDiscoveryResult.model_validate(raw).model_dump(),
     )

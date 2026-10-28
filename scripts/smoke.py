@@ -5978,6 +5978,109 @@ def check_ai_flow() -> None:
     print("OK — AI service resumes once usage is back under the monthly cap.")
 
 
+def check_kitchen_base_discovery() -> None:
+    """Step EK-1: no network, no API key — direct Django calls (same style as
+    check_ai_provider_signature) against backend/ai/knowledge/ and ai/base_discovery.py's pure
+    functions. Covers: the restaurant_cafe library loads with its templates, a base used by only 2
+    dishes is dropped, a formula summing far from its own yield is flagged (not dropped), and a menu
+    line with inline options expands into one dish per option."""
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    from django.conf import settings
+
+    from ai.base_discovery import _cache_key, discover_bases, expand_dish_options, sanity_check
+    from ai.knowledge import load_library
+    from ai.models import AiKitchenBaseCache
+
+    library = load_library("restaurant_cafe")
+    if not library["base_templates"]:
+        fail("kitchen base discovery: expected restaurant_cafe library to have base templates")
+    template_names = {t["name"] for t in library["base_templates"]}
+    if "Onion-tomato masala" not in template_names or "Ginger-garlic paste" not in template_names:
+        fail(f"kitchen base discovery: expected key templates present, got {template_names}")
+    print(f"OK — the restaurant_cafe knowledge library loads ({len(template_names)} base templates).")
+
+    empty_library = load_library("home_business")
+    if empty_library["base_templates"]:
+        fail(f"kitchen base discovery: expected an empty library for home_business, got {empty_library}")
+    print("OK — a sector with no knowledge file falls back to an empty library, same shape.")
+
+    dishes = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+    two_dish_base = {
+        "name": "Two-dish base",
+        "batch_ingredients": [{"name": "Onion", "qty": 1000, "unit": "g"}],
+        "yield_qty": 1000,
+        "used_by": [
+            {"dish": "A", "grams_per_portion": 100},
+            {"dish": "B", "grams_per_portion": 100},
+        ],
+        "flags": [],
+    }
+    kept = sanity_check([two_dish_base], dishes, library["rules"])
+    if kept:
+        fail(f"kitchen base discovery: expected a base used by only 2 dishes dropped, got {kept}")
+    print("OK — a base used by fewer dishes than the sector's rule requires is dropped.")
+
+    bad_formula_base = {
+        "name": "Bad formula base",
+        "batch_ingredients": [{"name": "Onion", "qty": 1400, "unit": "g"}],
+        "yield_qty": 1000,
+        "used_by": [
+            {"dish": "A", "grams_per_portion": 100},
+            {"dish": "B", "grams_per_portion": 100},
+            {"dish": "C", "grams_per_portion": 100},
+        ],
+        "flags": [],
+    }
+    kept = sanity_check([bad_formula_base], dishes, library["rules"])
+    if len(kept) != 1 or not any("1400" in flag for flag in kept[0]["flags"]):
+        fail(f"kitchen base discovery: expected the 1,400 g formula flagged (not dropped), got {kept}")
+    print("OK — a formula summing far from its own yield is flagged, not dropped.")
+
+    expanded = expand_dish_options([{"name": "Chicken (Manchurian/Chilli/Pepper/Lemon)"}])
+    expanded_names = [d["name"] for d in expanded]
+    if expanded_names != ["Chicken Manchurian", "Chicken Chilli", "Chicken Pepper", "Chicken Lemon"]:
+        fail(f"kitchen base discovery: expected 4 expanded dishes, got {expanded_names}")
+    if any(d.get("expanded_from") != "Chicken (Manchurian/Chilli/Pepper/Lemon)" for d in expanded):
+        fail(f"kitchen base discovery: expected expanded_from set on every expanded row, got {expanded}")
+    print("OK — a menu line with inline options expands into one dish per option.")
+
+    menu_dishes = [
+        {"name": n}
+        for n in [
+            "Chicken Curry",
+            "Mutton Curry",
+            "Paneer Curry",
+            "Veg Manchurian",
+            "Chicken Manchurian",
+            "Gobi Manchurian",
+        ]
+    ]
+    # Cache rows aren't business-scoped (same key shape as AiRecipeCache) — clear this exact dish set
+    # first so a repeat run of this check (or `verify`/`verify:full` run twice) sees a real call, not
+    # a stale cache hit left over from the last time this check ran against the same dev database.
+    AiKitchenBaseCache.objects.filter(
+        sector="restaurant_cafe", dish_set_hash=_cache_key([d["name"] for d in menu_dishes])
+    ).delete()
+    result = discover_bases(menu_dishes, "restaurant_cafe", [])
+    base_names = {b["name"] for b in result["bases"]}
+    if "Onion-tomato masala" not in base_names or "Indo-Chinese sauce base" not in base_names:
+        fail(f"kitchen base discovery: expected the fake provider's canned bases, got {base_names}")
+    if result["usage"] is None or result["usage"]["model"] != settings.AI_MODEL_KITCHEN:
+        fail(f"kitchen base discovery: expected a real (uncached) call on the first run, got {result['usage']}")
+    print("OK — end-to-end discovery (fake provider) finds the expected library bases for this menu.")
+
+    cached_result = discover_bases(menu_dishes, "restaurant_cafe", [])
+    if cached_result["usage"] is not None:
+        fail(f"kitchen base discovery: expected a cache hit on the same dish set, got {cached_result['usage']}")
+    print("OK — the same dish set on a repeat call is a cache hit (no model call, no new usage).")
+
+
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
@@ -6174,6 +6277,7 @@ ALL_CHECKS = [
     check_pincode_geo_flow,
     check_ai_provider_signature,
     check_ai_flow,
+    check_kitchen_base_discovery,
     check_admin_delete_flow,
 ]
 
@@ -6204,7 +6308,7 @@ AREA_CHECKS: dict[str, list] = {
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
     "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
     "reports": [check_reports_flow],
-    "ai": [check_ai_provider_signature, check_ai_flow],
+    "ai": [check_ai_provider_signature, check_ai_flow, check_kitchen_base_discovery],
     "admin": [check_admin_delete_flow],
 }
 
