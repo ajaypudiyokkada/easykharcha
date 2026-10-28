@@ -94,7 +94,16 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   always resizes/re-encodes photos before upload), admin.py (`MenuScanAdmin`/`AiUsageAdmin`,
   superuser-only, read-only), urls.py. `management/commands/run_ai_jobs.py` (the `worker` service's
   poll loop — Step C2c: a per-job try/except marks a crash `failed` instead of dying, a heartbeat log
-  every 5 minutes, start/per-job id+outcome logging, 10-minute stuck-`reading` recovery)
+  every 5 minutes, start/per-job id+outcome logging, 10-minute stuck-`reading` recovery).
+  Step EK-1: `knowledge/` (plain `<sector>.json` base-template + portion-default + rule files,
+  `load_library()` — empty-but-same-shape fallback for a sector with no file), `base_discovery.py`
+  (`expand_dish_options` — inline "Chicken (A/B/C)" option lines -> one dish per option, no model
+  call; `discover_bases` — library-first model call, cached by `AiKitchenBaseCache` keyed on sector +
+  normalised dish-name-set hash + `prompts.BASE_DISCOVERY_PROMPT_VERSION`, `sanity_check` drops a
+  base under the sector's min-dishes rule and flags (never silently fixes) a formula far from its own
+  yield or an implausible per-portion amount); `AI_MODEL_KITCHEN` env (default claude-haiku-5-5,
+  `AI_MODEL_FALLBACK` same as the other two calls); `AiUsageKind.KITCHEN_BASE_DISCOVERY`. No endpoint
+  or screen yet — `scripts/ai_try_kitchen.py` is the only caller today, proved against real menus.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/

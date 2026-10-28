@@ -14,6 +14,7 @@ from .models import AiUsage, AiUsageKind
 DAILY_PAGES_PER_BUSINESS = 20
 DAILY_RECIPE_DISHES_PER_BUSINESS = 60
 MAX_DISHES_PER_RECIPE_CALL = 15
+DAILY_KITCHEN_DISHES_PER_BUSINESS = 400
 
 _WINDOW_SECONDS = 86400
 
@@ -44,6 +45,13 @@ def check_daily_recipe_limit(business_id: int, dish_count: int) -> bool:
     today = timezone.localdate().isoformat()
     return _hit_n(
         f"ai_recipe_dishes:{business_id}:{today}", dish_count, DAILY_RECIPE_DISHES_PER_BUSINESS
+    )
+
+
+def check_daily_kitchen_limit(business_id: int, dish_count: int) -> bool:
+    today = timezone.localdate().isoformat()
+    return _hit_n(
+        f"ai_kitchen_dishes:{business_id}:{today}", dish_count, DAILY_KITCHEN_DISHES_PER_BUSINESS
     )
 
 

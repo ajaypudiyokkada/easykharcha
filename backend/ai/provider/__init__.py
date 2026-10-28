@@ -25,3 +25,9 @@ def suggest_recipes(
     dish_names: list[str], business_type: str, stock_items: list[tuple[str, str]]
 ) -> AiCallResult:
     return _provider().suggest_recipes(dish_names, business_type, stock_items)
+
+
+def discover_bases(
+    dishes: list[dict], sector: str, stock_item_names: list[str], library: dict
+) -> AiCallResult:
+    return _provider().discover_bases(dishes, sector, stock_item_names, library)
