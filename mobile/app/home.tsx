@@ -6,6 +6,7 @@ import type { Alert, AlertListResponse } from '../src/api/alerts';
 import type { PurchaseListResponse } from '../src/api/purchases';
 import type { TodayStatus } from '../src/api/counts';
 import type { SaleListResponse } from '../src/api/sales';
+import type { ReportsSummary } from '../src/api/reports';
 import type { LowStockListResponse, SellItem } from '../src/api/stock';
 import type { WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
@@ -308,6 +309,7 @@ function OwnerHome() {
   const [salesSummary, setSalesSummary] = useState<SaleListResponse['summary'] | null>(null);
   const [needsIngredientsCount, setNeedsIngredientsCount] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [recipeCoveragePct, setRecipeCoveragePct] = useState<string | null>(null);
   const [today, setToday] = useState<TodayStatus | null>(null);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [purchaseSheetVisible, setPurchaseSheetVisible] = useState(false);
@@ -324,6 +326,7 @@ function OwnerHome() {
   const canRecordSales = can(permissions, 'sales.create');
   const canSeeAlerts = can(permissions, 'alerts.view');
   const canSeeLowStock = can(permissions, 'stock.low_stock_view');
+  const canSeeReports = can(permissions, 'reports.view');
   const timezone = business.timezone;
   const isOwner = business.role === 'owner';
 
@@ -360,11 +363,25 @@ function OwnerHome() {
         .then((response) => setLowStockCount(response.results.length))
         .catch(() => {});
     }
+    if (canSeeReports) {
+      authedFetch<ReportsSummary>(`/businesses/${business.id}/reports/summary/?period=30d`)
+        .then((response) => setRecipeCoveragePct(response.recipe_coverage_pct))
+        .catch(() => {});
+    }
     authedFetch<TodayStatus>(`/businesses/${business.id}/today/`)
       .then(setToday)
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business.id, canSeePurchases, canSeeSales, canSeeAlerts, canSeeLowStock, isOwner, timezone]);
+  }, [
+    business.id,
+    canSeePurchases,
+    canSeeSales,
+    canSeeAlerts,
+    canSeeLowStock,
+    canSeeReports,
+    isOwner,
+    timezone,
+  ]);
 
   useEffect(() => {
     loadToday();
@@ -529,6 +546,24 @@ function OwnerHome() {
             <View style={styles.entryMain}>
               <Body style={styles.attentionTitle}>{s.lowStockTitle(lowStockCount)}</Body>
               <Small style={styles.entryMeta}>{s.lowStockBody}</Small>
+            </View>
+            <Icon name="chevronRight" size={20} colour={colours.muted} />
+          </Pressable>
+        ) : null}
+
+        {canSeeReports && recipeCoveragePct !== null ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={s.recipeCoverageTitle(recipeCoveragePct)}
+            style={styles.setupCard}
+            onPress={() => router.push('/settings/sell?filter=needs_ingredients')}
+          >
+            <View style={styles.setupIcon}>
+              <Icon name="reports" size={20} colour={colours.card} />
+            </View>
+            <View style={styles.entryMain}>
+              <Body style={styles.attentionTitle}>{s.recipeCoverageTitle(recipeCoveragePct)}</Body>
+              <Small style={styles.entryMeta}>{s.recipeCoverageBody}</Small>
             </View>
             <Icon name="chevronRight" size={20} colour={colours.muted} />
           </Pressable>

@@ -1,14 +1,14 @@
-import { Redirect } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import type { Base } from '../../src/api/bases';
-import type { StockItem } from '../../src/api/stock';
-import { useAuth } from '../../src/auth/AuthContext';
-import { can } from '../../src/auth/permissions';
-import { BaseSheet } from '../../src/screens/BaseSheet';
-import { strings } from '../../src/strings';
-import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
+import type { Base } from '../../../src/api/bases';
+import type { StockItem } from '../../../src/api/stock';
+import { useAuth } from '../../../src/auth/AuthContext';
+import { can } from '../../../src/auth/permissions';
+import { BaseSheet } from '../../../src/screens/BaseSheet';
+import { strings } from '../../../src/strings';
+import { colours, fonts, radii, spacing } from '../../../src/theme/tokens';
 import {
   AppShell,
   Body,
@@ -22,12 +22,13 @@ import {
   Small,
   TextField,
   Toast,
-} from '../../src/ui';
-import { HOME_CONTENT_WIDTH } from '../../src/ui/constants';
+} from '../../../src/ui';
+import { HOME_CONTENT_WIDTH } from '../../../src/ui/constants';
 
 const bs = strings.settings.bases;
 
 export default function BasesSettings() {
+  const router = useRouter();
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
@@ -127,6 +128,9 @@ export default function BasesSettings() {
             setToast(message);
             load();
           }}
+          onDeleted={() => {
+            setCreating(false);
+          }}
         />
       ) : null}
       {editingBase ? (
@@ -140,6 +144,15 @@ export default function BasesSettings() {
             setEditingBase(null);
             setToast(message);
             load();
+          }}
+          onDeleted={(message) => {
+            setEditingBase(null);
+            setToast(message);
+            load();
+          }}
+          onViewUsedIn={(base) => {
+            setEditingBase(null);
+            router.push({ pathname: '/settings/bases/[id]', params: { id: String(base.id) } });
           }}
         />
       ) : null}

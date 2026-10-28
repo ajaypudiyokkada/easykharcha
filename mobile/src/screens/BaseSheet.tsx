@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { Base } from '../api/bases';
 import { ApiError } from '../api/client';
@@ -14,8 +14,8 @@ import {
 } from '../forms/BaseRecipeForm';
 import { validateBaseDraft } from '../forms/validateBase';
 import { strings } from '../strings';
-import { Banner, Button, Sheet } from '../ui';
-import { spacing } from '../theme/tokens';
+import { Banner, Button, ConfirmDialog, Sheet, Small } from '../ui';
+import { colours, fonts, spacing } from '../theme/tokens';
 
 const bs = strings.settings.bases;
 
@@ -23,10 +23,13 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onSaved: (message: string) => void;
+  onDeleted: (message: string) => void;
   /** null = create a new base; set = edit this one. */
   editingBase: Base | null;
   existingBases: Base[];
   stockItems: StockItem[] | null;
+  /** Owner-only navigation to this base's "Used in" screen — undefined hides the link. */
+  onViewUsedIn?: (base: Base) => void;
 };
 
 /** Create/edit sheet for one batch recipe ("base") — Settings' "Things you make in batches"
@@ -35,9 +38,11 @@ export function BaseSheet({
   visible,
   onClose,
   onSaved,
+  onDeleted,
   editingBase,
   existingBases,
   stockItems,
+  onViewUsedIn,
 }: Props) {
   const { authedFetch, businesses } = useAuth();
   const business = businesses[0];
@@ -46,12 +51,15 @@ export function BaseSheet({
   const [errors, setErrors] = useState<ReturnType<typeof validateBaseDraft>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     setDraft(editingBase ? baseToDraft(editingBase) : EMPTY_BASE_DRAFT);
     setErrors({});
     setFormError(null);
+    setDeleteVisible(false);
     // Only re-seed when the sheet opens or what it's editing changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editingBase?.id]);
@@ -100,6 +108,27 @@ export function BaseSheet({
     }
   }
 
+  async function handleDelete() {
+    if (!business || !editingBase) return;
+    setDeleting(true);
+    try {
+      const inUse = editingBase.used_in.length > 0;
+      await authedFetch(`/businesses/${business.id}/bases/${editingBase.id}/`, {
+        method: 'DELETE',
+        body: inUse ? { confirm_unlink: true } : undefined,
+      });
+      setDeleteVisible(false);
+      onDeleted(bs.deletedToast);
+    } catch (err) {
+      setDeleteVisible(false);
+      mapError(err);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const usedInCount = editingBase?.used_in.length ?? 0;
+
   return (
     <Sheet
       visible={visible}
@@ -119,7 +148,40 @@ export function BaseSheet({
           stockItems={stockItems}
         />
       </View>
+
+      {editingBase && onViewUsedIn ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => onViewUsedIn(editingBase)}
+          style={styles.usedInLink}
+        >
+          <Small style={styles.usedInLinkText}>
+            {bs.usedInCount(usedInCount)} · {bs.usedInLink}
+          </Small>
+        </Pressable>
+      ) : null}
+
       <Button label={bs.save} variant="primary" onPress={handleSave} loading={saving} />
+
+      {editingBase ? (
+        <Button
+          label={bs.deleteButton}
+          variant="primary"
+          colour={colours.danger}
+          onPress={() => setDeleteVisible(true)}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        visible={deleteVisible}
+        title={bs.deleteConfirmTitle}
+        body={usedInCount > 0 ? bs.deleteInUseMessage(usedInCount) : bs.deleteConfirmBody}
+        confirmLabel={bs.deleteConfirmButton}
+        cancelLabel={bs.cancel}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteVisible(false)}
+        confirmLoading={deleting}
+      />
     </Sheet>
   );
 }
@@ -130,5 +192,14 @@ const styles = StyleSheet.create({
   },
   formWrap: {
     marginBottom: spacing.lg,
+  },
+  usedInLink: {
+    minHeight: 44,
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  usedInLinkText: {
+    color: colours.primary,
+    fontFamily: fonts.bodyExtraBold,
   },
 });

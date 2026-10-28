@@ -88,4 +88,7 @@ export type ReportsSummary = {
   price_trend: PriceTrend;
   sales_vs_cost: SalesVsCost;
   biggest_gaps: BiggestGaps;
+  /** Step 45b1c2b (docs/BASES_PLAN.md sec 5, Decision 5): revenue-weighted, business-level —
+   * Home's "Recipes cover X% of your sales" banner. null when there were no sales in the window. */
+  recipe_coverage_pct: string | null;
 };

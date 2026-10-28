@@ -8,12 +8,14 @@ import { strings } from '../strings';
 import { Banner, Body, Button, Icon, Small, TextField, Toggle } from '../ui';
 import { MIN_TOUCH_TARGET } from '../ui/constants';
 import { colours, fonts, radii, spacing } from '../theme/tokens';
+import { displayQuantity, parseDecimalInput } from '../units';
 import { groupItems } from './groupItems';
 import { defaultEntryUnit, QuantityInput } from './QuantityInput';
 import { emptyStockItemDraft, StockItemForm, type StockItemDraft } from './StockItemForm';
 
 const sd = strings.dishForm;
 const s3 = strings.setup.step3;
+const bs = strings.settings.bases;
 
 let nextRowKey = 0;
 
@@ -101,6 +103,26 @@ export function basesPayload(draft: DishDraft): { base: number; quantity: string
     base: row.baseId as number,
     quantity: row.amount.trim().replace(',', '.'),
   }));
+}
+
+/** Step 45b1c2b (docs/BASES_PLAN.md sec 5): "This dish uses about 90 g onion, ... through the
+ * base" — the raw ingredients one portion's worth of `amount` (the base's own batch unit, g/ml)
+ * actually works out to, mirroring base_expansion.py's contribution formula
+ * (`quantity * (quantity_per_1000 / batch_yield_qty)`) client-side for display only; nothing here
+ * is sent to the server. Returns null until the row has a base picked and a valid amount typed. */
+export function baseRawEquivalentNote(base: Base | null, amount: string): string | null {
+  if (!base || base.ingredients.length === 0) return null;
+  const portionAmount = parseDecimalInput(amount);
+  if (portionAmount === null || portionAmount <= 0) return null;
+  const batchYield = Number(base.batch_yield_qty);
+  if (!Number.isFinite(batchYield) || batchYield <= 0) return null;
+
+  const parts = base.ingredients.map((ingredient) => {
+    const raw = portionAmount * (Number(ingredient.quantity_per_1000) / batchYield);
+    const [qty, unit] = displayQuantity(raw, base.unit);
+    return `${qty} ${unit} ${ingredient.stock_item_name}`;
+  });
+  return bs.rawEquivalentNote(parts.join(', '));
 }
 
 function newRowKey(): string {
@@ -464,6 +486,7 @@ export function DishRecipeForm({
           {value.bases.map((row) => {
             const base = row.baseId !== null ? basesById.get(row.baseId) : null;
             const unitLabel = base?.unit ?? 'g';
+            const rawNote = baseRawEquivalentNote(base ?? null, row.amount);
             return (
               <View key={row.key} style={styles.ingredientRow}>
                 <View style={styles.ingredientHead}>
@@ -484,6 +507,7 @@ export function DishRecipeForm({
                   placeholder={sd.amountPlaceholder}
                   keyboardType="decimal-pad"
                 />
+                {rawNote ? <Small style={styles.introText}>{rawNote}</Small> : null}
               </View>
             );
           })}

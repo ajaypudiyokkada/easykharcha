@@ -559,6 +559,30 @@ not built yet.
   `deleteButton`/`deleteConfirmTitle`/`deleteInUseMessage`/`deleteConfirmButton` copy in
   `strings.ts` already exist for it.
 
+- **Step 45b1c2b — Base delete UI, the base's own Used-in screen, the dish-form raw-equivalent
+  note, Home's coverage banner, and the 320-1280px responsive audit Step 44v1 owed.** `BaseSheet`
+  gained a Delete button (Owner-only, in-use or not) wired to the existing `DELETE
+  .../bases/<id>/` 409-then-`confirm_unlink` endpoint, with a "Used in N dishes. Deleting removes
+  it from them." confirm dialog when in use. New `settings/bases/[id].tsx` ("Used in") lists the
+  dishes using a base (search/add via `PUT .../bases/<id>/used-in/`, edit grams, remove a dish);
+  `settings/bases.tsx` moved to `settings/bases/index.tsx` to make room for it. `DishRecipeForm`
+  shows a raw-equivalent note under each base line ("This dish uses about 90 g Onion, 80 g
+  Tomato, ... through the base"), computed client-side from the base's own formula (mirrors
+  `base_expansion.py`'s contribution math, nothing sent to the server). Home gained a "Recipes
+  cover X% of your sales" banner (Owner/Manager via `reports.view`, reusing
+  `reports/summary/?period=30d`'s existing `recipe_coverage_pct` — no new backend endpoint),
+  tapping it opens `/settings/sell?filter=needs_ingredients` (not revenue-sorted — reusing the
+  existing needs-ingredients filter was judged enough for this step rather than adding a new
+  sorted-by-revenue read). `flow.mjs`'s `bases` scenario extended to cover delete-while-in-use,
+  the Used-in screen, the raw-equivalent note and the coverage banner; `responsive_check.mjs`
+  gained `settings-bases`, `base-used-in`, `stock-low-stock` routes and a `sheet-edit-base` sheet,
+  plus `buildOwnerSession` now also creates a base, links it to a dish, and sets a stock item's
+  low-stock threshold — all 6 screens this step covers (bases list, base sheet, base Used-in,
+  dish form's base picker via `sheet-edit-sell-item`, the threshold section via
+  `sheet-edit-stock-item`, `stock-low-stock`) pass clean at every width. **Still owed**:
+  `setup/4.tsx`'s own dish form still doesn't pass `bases` (pre-existing gap, not this step's
+  scope); the coverage banner's destination list isn't sorted by revenue.
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every
