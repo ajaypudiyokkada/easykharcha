@@ -6299,6 +6299,162 @@ def check_kitchen_base_discovery() -> None:
     print("OK — the same dish set on a repeat call is a cache hit (no model call, no new usage).")
 
 
+def check_recipe_composer_flow() -> None:
+    """Step EK-3: recipe_composer.py's best-seller picker, per-family recipe composer and ingredient
+    resolver — no network, fake provider, direct Django calls (same style as
+    check_kitchen_base_discovery). Covers: a family's recipe never repeats its base's own
+    ingredients; the resolver merges Onion/Onions/Onion Chopped, matches an existing stock item,
+    proposes new items with a unit family and low-stock category, and records "used in"; more than
+    25 families on one menu is capped at 25 AI calls; a silly per-portion quantity is replaced by the
+    default; suggest_setup never writes to StockItem/SellItem/Base/Recipe tables."""
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    from accounts.models import User
+    from businesses.models import Business
+    from stock.models import Base, SellItem, StockItem
+
+    from ai.recipe_composer import (
+        MAX_FAMILIES_PER_MENU,
+        _merge_key,
+        build_families,
+        compose_family_recipes,
+        resolve_ingredients,
+        suggest_setup,
+    )
+
+    # --- a family's recipe excludes the base's own ingredients ---
+    manchurian_family = {
+        "name": "Manchurian family",
+        "type": "fried_starter_tossed",
+        "dishes": ["Chicken Manchurian", "Gobi Manchurian"],
+    }
+    sauce_base = {
+        "name": "Indo-Chinese sauce base",
+        "batch_ingredients": [
+            {"name": "Garlic", "qty": 100, "unit": "g"},
+            {"name": "Dark soy sauce", "qty": 150, "unit": "ml"},
+        ],
+        "used_by": [
+            {"dish": "Chicken Manchurian", "grams_per_portion": 40},
+            {"dish": "Gobi Manchurian", "grams_per_portion": 40},
+        ],
+    }
+    composed = compose_family_recipes([manchurian_family], [sauce_base], "restaurant_cafe", [])
+    if composed["usage"] and composed["usage"][0]["used_fallback"]:
+        fail(f"recipe composer: expected no fallback on a clean fake call, got {composed['usage']}")
+    family_result = composed["families"][0]
+    if family_result["bases_used"] != [{"base": "Indo-Chinese sauce base", "grams_per_portion": 40}]:
+        fail(f"recipe composer: expected the deterministic base/grams looked up, got {family_result['bases_used']}")
+    if "Garlic" not in family_result["excluded_base_ingredients"]:
+        fail(f"recipe composer: expected Garlic excluded (base-covered), got {family_result['excluded_base_ingredients']}")
+    ingredient_names = {i["name"] for i in family_result["ingredients"]}
+    if "Garlic" in ingredient_names:
+        fail("recipe composer: expected the base's own Garlic NOT repeated in the family's own ingredients")
+    print("OK — a family recipe looks its base grams up deterministically and never repeats the base's own ingredients.")
+
+    # --- a silly per-portion quantity is replaced by the default, not trusted ---
+    silly_family = {
+        "name": "FORCE_SILLY_QTY family",
+        "type": "gravy_nonveg",
+        "dishes": ["Chicken Curry"],
+    }
+    silly_result = compose_family_recipes([silly_family], [], "restaurant_cafe", [])["families"][0]
+    if silly_result["main_item"]["qty"] != 150.0 or not silly_result["corrections"]:
+        fail(f"recipe composer: expected a 50,000 g quantity corrected to the default, got {silly_result}")
+    print("OK — an implausible per-portion quantity is replaced by the default and flagged, not trusted.")
+
+    # --- cap: a menu with 40 families makes at most 25 AI calls ---
+    many_families = build_families(
+        [{"name": f"Dish {i}"} for i in range(40)],
+        {f"dish {i}": {"type": "gravy_nonveg" if i % 2 else "rice_fried", "family": f"fam{i}"} for i in range(40)},
+    )
+    if len(many_families) != 40:
+        fail(f"recipe composer: expected 40 distinct families from 40 distinct family tags, got {len(many_families)}")
+    capped_composed = compose_family_recipes(many_families, [], "restaurant_cafe", [])
+    if len(capped_composed["families"]) != MAX_FAMILIES_PER_MENU:
+        fail(f"recipe composer: expected exactly {MAX_FAMILIES_PER_MENU} families after capping, got {len(capped_composed['families'])}")
+    if len(capped_composed["usage"]) > MAX_FAMILIES_PER_MENU:
+        fail(f"recipe composer: expected at most {MAX_FAMILIES_PER_MENU} AI calls, got {len(capped_composed['usage'])}")
+    total_dishes_after_cap = sum(len(f["dishes"]) for f in capped_composed["families"])
+    if total_dishes_after_cap != 40:
+        fail(f"recipe composer: expected no dish lost while merging families down to the cap, got {total_dishes_after_cap}")
+    print(f"OK — 40 families on one menu merge down to {MAX_FAMILIES_PER_MENU}, at most {MAX_FAMILIES_PER_MENU} AI calls, no dish lost.")
+
+    # --- merge key: Onion/Onions/Onion Chopped collide; Peas/Oil (short words) don't over-merge ---
+    if _merge_key("Onion") != _merge_key("Onions") or _merge_key("Onion") != _merge_key("Onion Chopped"):
+        fail("recipe composer: expected Onion/Onions/Onion Chopped to share one merge key")
+    if _merge_key("Peas") == _merge_key("Oil"):
+        fail("recipe composer: expected Peas and Oil to stay distinct")
+    print("OK — the ingredient merge key collapses Onion/Onions/Onion Chopped without over-merging short names.")
+
+    # --- resolver: matches an existing stock item, proposes new ones with unit/category, "used in" ---
+    tag = __import__("uuid").uuid4().hex[:8]
+    mobile = __import__("random").choice("6789") + "".join(
+        __import__("random").choices("0123456789", k=9)
+    )
+    owner = User.objects.create_user(mobile=mobile, name=f"EK3 Owner {tag}", password="x")
+    business = Business.objects.create(
+        name=f"EK3 Biz {tag}", business_type="restaurant_cafe", city="Pune", created_by=owner
+    )
+    StockItem.objects.create(
+        business=business, created_by=owner, name="Onion", unit="g", unit_family="weight"
+    )
+    before_stock_count = StockItem.objects.filter(business=business).count()
+    before_sell_count = SellItem.objects.filter(business=business).count()
+    before_base_count = Base.objects.filter(business=business).count()
+
+    family_results = [
+        {
+            "name": "Curry family",
+            "type": "gravy_nonveg",
+            "dishes": ["Chicken Curry"],
+            "main_item": {"name": "Chicken", "unit": "g", "qty": 180.0},
+            "ingredients": [{"name": "Onions", "unit": "g"}, {"name": "Tomato Chopped", "unit": "g"}],
+            "minor_ingredients": [{"name": "Salt", "unit": "g"}],
+        }
+    ]
+    resolved = resolve_ingredients(family_results, [], business)
+    matched_names = {m["stock_item_name"] for m in resolved["matched"]}
+    if "Onion" not in matched_names:
+        fail(f"recipe composer: expected 'Onions' matched to the existing 'Onion' stock item, got {resolved['matched']}")
+    onion_match = next(m for m in resolved["matched"] if m["stock_item_name"] == "Onion")
+    if "Curry family" not in onion_match["used_in"]:
+        fail(f"recipe composer: expected the matched Onion's used_in to name the family, got {onion_match}")
+    new_names = {n["name"] for n in resolved["new"]}
+    if not {"Chicken", "Tomato Chopped", "Salt"} <= new_names:
+        fail(f"recipe composer: expected Chicken/Tomato Chopped/Salt proposed as new, got {new_names}")
+    for new_item in resolved["new"]:
+        if not new_item["unit_family"] or not new_item["low_stock_category"] or not new_item["used_in"]:
+            fail(f"recipe composer: expected every new ingredient to carry a unit family, category and used_in, got {new_item}")
+    print("OK — the resolver merges near-duplicate names, matches an existing stock item, and proposes new ones with a unit family, low-stock category and used_in.")
+
+    # --- suggest_setup never writes to StockItem/SellItem/Base tables ---
+    dishes = [
+        {"name": "Chicken Curry"}, {"name": "Chicken Masala"}, {"name": "Chicken Kadai"},
+        {"name": "Gobi Manchurian"}, {"name": "Chicken Manchurian"}, {"name": "Veg Manchurian"},
+    ]
+    suggest_setup(dishes, "restaurant_cafe", business)
+    after_stock_count = StockItem.objects.filter(business=business).count()
+    after_sell_count = SellItem.objects.filter(business=business).count()
+    after_base_count = Base.objects.filter(business=business).count()
+    if (after_stock_count, after_sell_count, after_base_count) != (
+        before_stock_count,
+        before_sell_count,
+        before_base_count,
+    ):
+        fail(
+            "recipe composer: expected suggest_setup to write nothing to StockItem/SellItem/Base, "
+            f"got {before_stock_count}->{after_stock_count} stock, {before_sell_count}->{after_sell_count} sell, "
+            f"{before_base_count}->{after_base_count} base"
+        )
+    print("OK — suggest_setup proposes but never writes to StockItem/SellItem/Base — nothing applied until a later step.")
+
+
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
@@ -6496,6 +6652,7 @@ ALL_CHECKS = [
     check_ai_provider_signature,
     check_ai_flow,
     check_kitchen_base_discovery,
+    check_recipe_composer_flow,
     check_admin_delete_flow,
 ]
 
@@ -6526,7 +6683,12 @@ AREA_CHECKS: dict[str, list] = {
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
     "onboarding": [check_auth_flow, check_business_flow, check_pincode_geo_flow],
     "reports": [check_reports_flow],
-    "ai": [check_ai_provider_signature, check_ai_flow, check_kitchen_base_discovery],
+    "ai": [
+        check_ai_provider_signature,
+        check_ai_flow,
+        check_kitchen_base_discovery,
+        check_recipe_composer_flow,
+    ],
     "admin": [check_admin_delete_flow],
 }
 

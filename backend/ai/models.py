@@ -46,6 +46,9 @@ class AiUsageKind(models.TextChoices):
     MENU_SCAN = "menu_scan", "menu_scan"
     RECIPE_SUGGESTION = "recipe_suggestion", "recipe_suggestion"
     KITCHEN_BASE_DISCOVERY = "kitchen_base_discovery", "kitchen_base_discovery"
+    # Step EK-3: recipe_composer.py's best-seller pick (one call/menu) and per-family recipe calls.
+    SETUP_BEST_SELLERS = "setup_best_sellers", "setup_best_sellers"
+    SETUP_FAMILY_RECIPE = "setup_family_recipe", "setup_family_recipe"
 
 
 class AiUsage(models.Model):
@@ -141,3 +144,28 @@ class AiDishTypeCache(models.Model):
 
     def __str__(self) -> str:
         return f"{self.dish_name_normalised} ({self.sector})"
+
+
+class AiFamilyRecipeCache(models.Model):
+    """Step EK-3: caches recipe_composer.compose_family_recipes's per-family result by (sector,
+    family_hash — a hash of the normalised family name + its member dishes' normalised names,
+    prompt_version) — a family's recipe shape doesn't depend on which business asked for it, same
+    per-dish-set-but-generic spirit as AiKitchenBaseCache. Stores only the generic suggestion
+    (ingredient names/quantities), never a business id."""
+
+    sector = models.CharField(max_length=32)
+    family_hash = models.CharField(max_length=64)
+    prompt_version = models.PositiveSmallIntegerField(default=1)
+    result = models.JSONField()
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sector", "family_hash", "prompt_version"],
+                name="unique_ai_family_recipe_cache_key",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.sector} family recipe ({self.family_hash[:8]})"

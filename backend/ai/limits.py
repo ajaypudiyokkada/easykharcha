@@ -15,6 +15,9 @@ DAILY_PAGES_PER_BUSINESS = 20
 DAILY_RECIPE_DISHES_PER_BUSINESS = 60
 MAX_DISHES_PER_RECIPE_CALL = 15
 DAILY_KITCHEN_DISHES_PER_BUSINESS = 400
+# Step EK-3: a family-recipe AI call per family (recipe_composer.MAX_FAMILIES_PER_MENU caps a single
+# menu at 25 already) — this is the per-business daily ceiling across however many menus/retries.
+DAILY_SETUP_FAMILIES_PER_BUSINESS = 100
 
 _WINDOW_SECONDS = 86400
 
@@ -52,6 +55,13 @@ def check_daily_kitchen_limit(business_id: int, dish_count: int) -> bool:
     today = timezone.localdate().isoformat()
     return _hit_n(
         f"ai_kitchen_dishes:{business_id}:{today}", dish_count, DAILY_KITCHEN_DISHES_PER_BUSINESS
+    )
+
+
+def check_daily_setup_limit(business_id: int, family_count: int) -> bool:
+    today = timezone.localdate().isoformat()
+    return _hit_n(
+        f"ai_setup_families:{business_id}:{today}", family_count, DAILY_SETUP_FAMILIES_PER_BUSINESS
     )
 
 
