@@ -416,17 +416,26 @@ class BestSellersResult(BaseModel):
 MAX_FAMILY_MEMBERS_WITH_OVERRIDE = 40
 
 
-class FamilyMemberQuantity(BaseModel):
-    """Step EK-3: one family member whose main-item quantity differs from the family's own
-    main_item_qty default (e.g. prawn 120 g vs the family's chicken 150 g) — a member not listed
-    here just uses the family default."""
+class FamilyMemberRecipe(BaseModel):
+    """Step EK-3b Fix A: every member dish of a family gets its OWN main item — a family's "main
+    item" is only a label now, never a single shared ingredient (Gobi Pepper uses Gobi, Chicken
+    Pepper uses Chicken, a Veg Fried Rice-style member may use none at all). main_item_name empty
+    (or main_item_qty 0) means this dish genuinely has no single defining main item/protein — 0 is
+    "not used", never an error to be replaced by a default (Fix C)."""
 
     dish_name: str
-    main_item_qty: float
+    main_item_name: str = ""
+    main_item_unit: Literal["g", "ml", "pieces"] = "g"
+    main_item_qty: float = 0.0
 
     @field_validator("dish_name")
     @classmethod
     def _clean_dish_name(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("main_item_name")
+    @classmethod
+    def _clean_main_item_name(cls, value: str) -> str:
         return _clean_text(value, MAX_NAME_LENGTH)
 
     @field_validator("main_item_qty")
@@ -437,10 +446,7 @@ class FamilyMemberQuantity(BaseModel):
 
 class FamilyRecipeSuggestion(BaseModel):
     portion_label: str = ""
-    main_item_name: str
-    main_item_unit: Literal["g", "ml", "pieces"]
-    main_item_qty: float
-    member_quantities: list[FamilyMemberQuantity] = Field(default_factory=list)
+    members: list[FamilyMemberRecipe] = Field(default_factory=list)
     ingredients: list[IngredientSuggestion] = Field(default_factory=list)
     minor_ingredients: list[IngredientSuggestion] = Field(default_factory=list)
 
@@ -449,19 +455,9 @@ class FamilyRecipeSuggestion(BaseModel):
     def _clean_portion_label(cls, value: str) -> str:
         return _clean_text(value, MAX_PORTION_LABEL_LENGTH)
 
-    @field_validator("main_item_name")
+    @field_validator("members")
     @classmethod
-    def _clean_main_item_name(cls, value: str) -> str:
-        return _clean_text(value, MAX_NAME_LENGTH)
-
-    @field_validator("main_item_qty")
-    @classmethod
-    def _non_negative_main_qty(cls, value: float) -> float:
-        return max(0.0, value)
-
-    @field_validator("member_quantities")
-    @classmethod
-    def _cap_member_quantities(cls, value: list) -> list:
+    def _cap_members(cls, value: list) -> list:
         return value[:MAX_FAMILY_MEMBERS_WITH_OVERRIDE]
 
     @field_validator("ingredients")

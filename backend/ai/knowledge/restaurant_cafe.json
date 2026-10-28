@@ -64,10 +64,10 @@
       "formula": [
         {"name": "Cornflour", "qty": 400, "unit": "g"},
         {"name": "Maida", "qty": 200, "unit": "g"},
-        {"name": "Eggs", "qty": 150, "unit": "g"},
+        {"name": "Egg", "qty": 3, "unit": "pieces"},
         {"name": "Salt", "qty": 15, "unit": "g"}
       ],
-      "notes": "Starter/Indo-Chinese fry coating (eggs: about 3 pieces). Water is not a stock item — the rest of the 1,000 g batch (about 235 g) is water, topped up at mixing time, not listed as an ingredient."
+      "notes": "Starter/Indo-Chinese fry coating (eggs always tracked in pieces, never grams). Water is not a stock item — the rest of the 1,000 g batch is water, topped up at mixing time, not listed as an ingredient."
     },
     {
       "name": "Cooked rice",
@@ -121,6 +121,16 @@
     "tandoori chicken", "kebab", "seekh", "masala dosa", "gulab jamun", "ice cream", "naan",
     "butter naan", "kadai", "dal makhani", "paneer tikka", "momos", "soup", "lassi", "mocktail"
   ],
+  "ingredient_aliases": {
+    "Capsicum": ["capsicum", "bell pepper", "green capsicum", "green bell pepper"],
+    "Black pepper": ["black pepper", "pepper powder", "coarse black pepper", "coarse pepper", "crushed black pepper"],
+    "Cumin seeds": ["cumin seeds", "cumin", "jeera"],
+    "Cooking oil": ["cooking oil", "refined oil", "vegetable oil", "sunflower oil", "oil for frying"],
+    "Curry leaves": ["curry leaves", "curry leaf"],
+    "Breadcrumbs": ["breadcrumbs", "bread crumbs"],
+    "Basmati rice": ["basmati rice", "rice"],
+    "Egg": ["egg", "eggs"]
+  },
   "rules": {
     "min_dishes_to_suggest_base": 3,
     "min_grams_per_portion": 30,

@@ -7,6 +7,7 @@ schemas.py validation and this module's own sanity rules before being trusted; n
 that wasn't in the dish list or a sector's own knowledge library."""
 
 import hashlib
+import re
 from decimal import Decimal
 
 from django.conf import settings
@@ -22,7 +23,10 @@ from .prompts import FAMILY_RECIPE_PROMPT_VERSION
 from .provider import compose_family_recipe as provider_compose_family_recipe
 from .provider import pick_best_sellers as provider_pick_best_sellers
 
-MAX_FAMILIES_PER_MENU = 25
+# Step EK-3b Fix B: raised from 25 — a family-recipe call costs about Rs 0.2, so the real limit is
+# how many genuinely distinct recipe shapes a menu has, not AI spend. _merge_small_families still
+# merges same-type families first whenever the cap is actually hit.
+MAX_FAMILIES_PER_MENU = 60
 MIN_BEST_SELLERS = 8
 MAX_BEST_SELLERS = 12
 MIN_BEST_SELLER_CATEGORIES = 4
@@ -55,9 +59,33 @@ _CATEGORY_BY_TYPE = {
     "dessert": "dessert",
 }
 
+# Step EK-3b Fix C: these ranges are deliberately generous — a real whole-item portion (a whole
+# tandoori chicken, a big thali rice mound) can legitimately be large; the point is only to catch a
+# genuinely broken number (e.g. 50,000 g), never a real-but-big one (e.g. 1,000 g).
 _MIN_QTY_BY_UNIT = {"g": 5.0, "ml": 5.0, "pieces": 1.0}
-_MAX_QTY_BY_UNIT = {"g": 600.0, "ml": 600.0, "pieces": 20.0}
+_MAX_QTY_BY_UNIT = {"g": 1500.0, "ml": 1000.0, "pieces": 20.0}
 _DEFAULT_QTY_BY_UNIT = {"g": 150.0, "ml": 150.0, "pieces": 1.0}
+
+# Step EK-3b Fix A: a dish named with one of these must never get a meat/fish/prawn main item, and
+# the other way round — a mismatch (whichever side the model got wrong) is dropped, never trusted.
+_VEG_MARKERS = {"veg", "egg", "paneer", "gobi", "mushroom"}
+_PROTEIN_MARKERS = {"chicken", "fish", "pork", "mutton", "prawn"}
+
+
+def _has_marker(text: str, markers: set[str]) -> bool:
+    norm = normalise(text)
+    return any(re.search(rf"\b{re.escape(m)}\b", norm) for m in markers)
+
+
+def _main_item_mismatch(dish_name: str, main_item_name: str) -> bool:
+    if not main_item_name:
+        return False
+    dish_is_veg = _has_marker(dish_name, _VEG_MARKERS)
+    dish_is_protein = _has_marker(dish_name, _PROTEIN_MARKERS)
+    item_is_veg = _has_marker(main_item_name, _VEG_MARKERS)
+    item_is_protein = _has_marker(main_item_name, _PROTEIN_MARKERS)
+    return (dish_is_veg and item_is_protein) or (dish_is_protein and item_is_veg)
+
 
 # Prep-descriptor words stripped before merging two ingredient names as "the same thing" (Onion vs
 # Onion Chopped) — never strips a word that changes what the ingredient actually is.
@@ -76,32 +104,37 @@ _DESCRIPTOR_WORDS = {
     "paste",
 }
 
+# Step EK-3b Fix E: a short, reviewed, whole-word keyword table (not substring matching — "cabbage"
+# must never match "bag", see _keyword_hit below) across four categories, checked in this priority
+# order by _guess_low_stock_category: packaging/cleaning first (only packaging words belong there),
+# then perishable, then fresh/semi-perishable, then dry staples (also the final fallback).
 _PERISHABLE_KEYWORDS = {
-    "milk",
-    "cream",
-    "paneer",
-    "curd",
-    "yogurt",
-    "fish",
-    "prawn",
+    "meat",
     "chicken",
     "mutton",
+    "fish",
+    "prawn",
     "egg",
+    "milk",
+    "curd",
+    "yogurt",
+    "paneer",
+    "cream",
     "butter",
-    "onion",
-    "tomato",
+    "ginger",
+    "garlic",
+    "bread",
     "coriander",
     "mint",
     "lettuce",
-    "cabbage",
     "capsicum",
     "gobi",
     "mushroom",
-    "potato",
     "lemon",
     "curry leaves",
     "spinach",
 }
+_FRESH_SEMI_KEYWORDS = {"carrot", "cabbage", "onion", "potato", "coconut", "tomato"}
 _DRY_STAPLE_KEYWORDS = {
     "rice",
     "atta",
@@ -119,8 +152,17 @@ _DRY_STAPLE_KEYWORDS = {
     "dal",
     "besan",
     "sooji",
+    "tea",
+    "coffee",
 }
 _PACKAGING_KEYWORDS = {"box", "bag", "napkin", "foil", "container", "cleaning", "tissue", "wrap"}
+
+
+def _keyword_hit(norm: str, keywords: set[str]) -> bool:
+    """Whole-word match only — Fix E's real bug was substring matching (e.g. "cabbage" matching the
+    packaging keyword "bag" mid-word, "ginger"/"garlic"/"carrot" never being in any perishable/fresh
+    list at all and silently falling through to dry_staples)."""
+    return any(re.search(rf"\b{re.escape(kw)}\b", norm) for kw in keywords)
 
 
 def category_for_type(dish_type: str) -> str:
@@ -299,14 +341,23 @@ def _merge_small_families(families: list[dict], cap: int) -> list[dict]:
     return families
 
 
-def _sanitise_qty(qty: float, unit: str) -> tuple[float, bool]:
-    """Returns (qty, was_corrected). An implausible amount for its unit falls back to a flat
-    default rather than trusting the model — F: never show a number outside sensible range."""
+def _sanitise_main_item_qty(name: str, unit: str, qty: float) -> tuple[str, float, str | None]:
+    """Returns (unit, qty, correction_message_or_None). Fix C: qty<=0 is handled by the caller before
+    this is ever called — 0 means "not used", never an error. Only a genuinely implausible NONZERO
+    amount for its unit falls back to the library default, and every fallback is reported in
+    corrections — never silently. Eggs are always tracked in pieces, whatever unit the model gave."""
+    if _has_marker(name, {"egg"}):
+        unit = "pieces"
     low = _MIN_QTY_BY_UNIT.get(unit, 0.0)
     high = _MAX_QTY_BY_UNIT.get(unit, float("inf"))
     if low <= qty <= high:
-        return qty, False
-    return _DEFAULT_QTY_BY_UNIT.get(unit, qty), True
+        return unit, qty, None
+    default = _DEFAULT_QTY_BY_UNIT.get(unit, qty)
+    return (
+        unit,
+        default,
+        f"{name}: {qty:g} {unit} per portion looked wrong, used the default {default:g} instead",
+    )
 
 
 def _base_ingredient_names_for_family(family_dishes: list[str], bases: list[dict]) -> list[str]:
@@ -340,12 +391,16 @@ def compose_family_recipes(
     compose_fn=None,
 ) -> dict:
     """One AI call per family (cached by (sector, family-members-hash) so a repeated family on a
-    repeat run never pays twice), returning [{"name", "type", "dishes", "portion_label",
-    "main_item": {...}, "member_overrides": [...], "bases_used": [...], "ingredients": [...],
-    "minor_ingredients": [...], "corrections": [...]}]. Caps at MAX_FAMILIES_PER_MENU, merging the
-    smallest families first. `bases` is base_discovery.discover_bases's own result — used only to
-    look up each family's already-known base-grams-per-portion (deterministic, never asked of the
-    model again) and which ingredient names to tell the model not to repeat."""
+    repeat run never pays twice), returning [{"name", "type", "dishes", "portion_label", "members":
+    [{"dish_name", "main_item_name", "main_item_unit", "qty"}, ...], "bases_used": [...],
+    "ingredients": [...], "minor_ingredients": [...], "excluded_base_ingredients": [...],
+    "corrections": [...], "flags": [...]}]. Fix A: every family dish gets its own members entry — a
+    family's "main item" is only a label, each member can use a different one (or none: empty
+    main_item_name/0 qty). Caps at MAX_FAMILIES_PER_MENU, merging the smallest families first.
+    `bases` is base_discovery.discover_bases's own result — used only to look up each family's
+    already-known base-grams-per-portion (deterministic, never asked of the model again) and which
+    ingredient names to tell the model not to repeat (and to strip out again afterward, in case the
+    model repeats one anyway — Fix D's final pass)."""
     capped = _merge_small_families(families, MAX_FAMILIES_PER_MENU)
     sector = business_type
 
@@ -371,6 +426,7 @@ def compose_family_recipes(
 
     for family in capped:
         excluded = _base_ingredient_names_for_family(family["dishes"], bases)
+        excluded_keys = {_merge_key(n) for n in excluded}
         cache_key = _family_cache_key(sector, family["name"], family["dishes"])
         cached = AiFamilyRecipeCache.objects.filter(
             sector=sector, family_hash=cache_key, prompt_version=FAMILY_RECIPE_PROMPT_VERSION
@@ -403,30 +459,74 @@ def compose_family_recipes(
                 defaults={"result": recipe},
             )
 
-        corrections = []
-        main_qty, corrected = _sanitise_qty(recipe["main_item_qty"], recipe["main_item_unit"])
-        if corrected:
-            corrections.append(
-                f"{recipe['main_item_name']}: {recipe['main_item_qty']:g} {recipe['main_item_unit']} "
-                f"per portion looked wrong, used the default {main_qty:g} instead"
+        corrections: list[str] = []
+        flags: list[str] = []
+        family_dish_norms = {normalise(d) for d in family["dishes"]}
+        seen_members: set[str] = set()
+        members = []
+        for member in recipe.get("members", []):
+            dish_name = member["dish_name"]
+            dish_norm = normalise(dish_name)
+            if dish_norm not in family_dish_norms or dish_norm in seen_members:
+                continue  # never trust a member name the family doesn't actually contain, or a repeat
+            seen_members.add(dish_norm)
+
+            main_name = member.get("main_item_name") or ""
+            main_unit = member.get("main_item_unit") or "g"
+            main_qty = member.get("main_item_qty") or 0.0
+
+            if main_name and main_qty > 0 and _main_item_mismatch(dish_name, main_name):
+                flags.append(
+                    f'check this: "{dish_name}" was given "{main_name}" as its main item, which '
+                    "looks like the wrong veg/non-veg match — dropped"
+                )
+                main_name, main_qty = "", 0.0
+
+            if not main_name or main_qty <= 0:
+                members.append(
+                    {"dish_name": dish_name, "main_item_name": "", "main_item_unit": "", "qty": 0.0}
+                )
+                continue
+
+            fixed_unit, fixed_qty, correction = _sanitise_main_item_qty(
+                main_name, main_unit, main_qty
+            )
+            if correction:
+                corrections.append(correction)
+            members.append(
+                {
+                    "dish_name": dish_name,
+                    "main_item_name": main_name,
+                    "main_item_unit": fixed_unit,
+                    "qty": fixed_qty,
+                }
             )
 
-        member_overrides = []
-        for member in recipe.get("member_quantities", []):
-            if normalise(member["dish_name"]) not in {normalise(d) for d in family["dishes"]}:
-                continue  # never trust a member name the family doesn't actually contain
-            qty, member_corrected = _sanitise_qty(member["main_item_qty"], recipe["main_item_unit"])
-            if member_corrected:
-                corrections.append(
-                    f"{member['dish_name']}: {member['main_item_qty']:g} {recipe['main_item_unit']} "
-                    f"per portion looked wrong, used the default {qty:g} instead"
+        # Fix A: never silently drop a member dish the model's response forgot about — record it as
+        # having no main item rather than inventing one.
+        for dish_name in family["dishes"]:
+            if normalise(dish_name) not in seen_members:
+                members.append(
+                    {"dish_name": dish_name, "main_item_name": "", "main_item_unit": "", "qty": 0.0}
                 )
-            member_overrides.append({"dish_name": member["dish_name"], "qty": qty})
 
         bases_used = {}
         for dish_name in family["dishes"]:
             for entry in base_grams_by_dish_and_base.get(normalise(dish_name), []):
                 bases_used.setdefault(entry["base"], entry["grams_per_portion"])
+
+        # Fix D: a final deterministic pass — never trust the model to have actually left base-covered
+        # ingredients out, even though it was told to.
+        ingredients = [
+            ing
+            for ing in recipe.get("ingredients", [])
+            if _merge_key(ing["name"]) not in excluded_keys
+        ]
+        minor_ingredients = [
+            ing
+            for ing in recipe.get("minor_ingredients", [])
+            if _merge_key(ing["name"]) not in excluded_keys
+        ]
 
         results.append(
             {
@@ -434,19 +534,15 @@ def compose_family_recipes(
                 "type": family["type"],
                 "dishes": family["dishes"],
                 "portion_label": recipe.get("portion_label", ""),
-                "main_item": {
-                    "name": recipe["main_item_name"],
-                    "unit": recipe["main_item_unit"],
-                    "qty": main_qty,
-                },
-                "member_overrides": member_overrides,
+                "members": members,
                 "bases_used": [
                     {"base": name, "grams_per_portion": g} for name, g in bases_used.items()
                 ],
-                "ingredients": recipe.get("ingredients", []),
-                "minor_ingredients": recipe.get("minor_ingredients", []),
+                "ingredients": ingredients,
+                "minor_ingredients": minor_ingredients,
                 "excluded_base_ingredients": excluded,
                 "corrections": corrections,
+                "flags": flags,
             }
         )
 
@@ -464,12 +560,12 @@ def _merge_key(name: str) -> str:
 
 def _guess_low_stock_category(name: str) -> str:
     norm = normalise(name)
-    if any(kw in norm for kw in _PACKAGING_KEYWORDS):
+    if _keyword_hit(norm, _PACKAGING_KEYWORDS):
         return "packaging_cleaning"
-    if any(kw in norm for kw in _PERISHABLE_KEYWORDS):
+    if _keyword_hit(norm, _PERISHABLE_KEYWORDS):
         return "perishable"
-    if any(kw in norm for kw in _DRY_STAPLE_KEYWORDS):
-        return "dry_staples"
+    if _keyword_hit(norm, _FRESH_SEMI_KEYWORDS):
+        return "fresh_semi"
     return "dry_staples"
 
 
@@ -477,26 +573,89 @@ def _unit_family_guess(unit: str) -> str:
     return unit_family(unit)
 
 
-def resolve_ingredients(family_results: list[dict], bases: list[dict], business=None) -> dict:
-    """Collects every ingredient across the family recipes' main items + ingredients +
-    minor_ingredients, plus every base's own batch ingredients, merges near-duplicate names, and
-    matches each merged ingredient to an existing StockItem (fuzzy, business-scoped) or proposes it
-    as new. Returns {"matched": [...], "new": [...]}; every entry carries `used_in` (dish/base
-    names)."""
+# Step EK-3b Fix D: strips a bracketed or comma-trailing descriptor, e.g. "Capsicum (green ...)" or
+# "Cabbage, shredded" -> "Capsicum"/"Cabbage".
+_BRACKETED = re.compile(r"\s*\([^()]*\)\s*")
+_COMMA_DESCRIPTOR = re.compile(r"\s*,.*$")
+_COOKED = re.compile(r"\bcooked\b")
+
+
+def _strip_descriptors(name: str) -> str:
+    stripped = _COMMA_DESCRIPTOR.sub("", _BRACKETED.sub(" ", name)).strip()
+    return " ".join(stripped.split()) or name
+
+
+def _is_cooked_derived(name: str) -> bool:
+    """A dish/family's own ingredient list sometimes names the COOKED form of something a base
+    already produces (e.g. "Cooked basmati rice", "Basmati rice (cooked base)") — that's the base's
+    own output, not a raw ingredient to buy, so it's dropped entirely rather than proposed as a new
+    stock item. Checked on the raw name, before bracket-stripping, since the giveaway word is
+    sometimes only inside the bracket."""
+    norm = normalise(name)
+    return bool(_COOKED.search(norm)) and "rice" in norm
+
+
+def _build_alias_lookup(sector: str) -> dict[str, str]:
+    """normalised alias phrase -> canonical display name, from the sector's own knowledge library
+    (e.g. "capsicum"/"bell pepper"/"green capsicum" all -> "Capsicum"). A sector with no library (or
+    no aliases) returns an empty lookup — canonicalisation becomes a no-op, never an error."""
+    aliases = load_library(sector).get("ingredient_aliases", {})
+    lookup: dict[str, str] = {}
+    for canonical, variants in aliases.items():
+        for variant in variants:
+            lookup[normalise(variant)] = canonical
+    return lookup
+
+
+def _canonical_ingredient_name(name: str, alias_lookup: dict[str, str]) -> str:
+    """Fix D: merges near-duplicate ingredient names (capsicum/bell pepper, black pepper variants,
+    cumin/jeera, cooking/refined/vegetable oil, case/plural/bracket/comma-descriptor differences) to
+    one canonical display name via the sector's alias table — deliberately narrow phrases only in
+    the general (substring) lookup, so e.g. "oil" alone never substring-matches inside "Coconut oil"/
+    "Mustard oil" and sweeps them in too. A bare "Oil" with nothing else in the name (the real-world
+    case: a model naming plain frying oil, not a specialty oil) is the one EXACT-match-only
+    exception, checked before the substring pass can ever see it."""
+    cleaned = _strip_descriptors(name)
+    norm = normalise(cleaned)
+    if norm == "oil":
+        return "Cooking oil"
+    if norm in alias_lookup:
+        return alias_lookup[norm]
+    for phrase in sorted(alias_lookup, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(phrase)}\b", norm):
+            return alias_lookup[phrase]
+    return cleaned
+
+
+def resolve_ingredients(
+    family_results: list[dict], bases: list[dict], business=None, sector: str = ""
+) -> dict:
+    """Collects every ingredient across the family recipes' per-member main items + shared
+    ingredients + minor_ingredients, plus every base's own batch ingredients, canonicalises and
+    merges near-duplicate names (Fix D), and matches each merged ingredient to an existing StockItem
+    (fuzzy, business-scoped) or proposes it as new. Returns {"matched": [...], "new": [...]}; every
+    entry carries `used_in` (dish/base names)."""
+    alias_lookup = _build_alias_lookup(sector)
     raw: dict[str, dict] = {}  # merge key -> {"display_name", "unit", "used_in": set()}
 
     def _add(name: str, unit: str, used_in: str) -> None:
-        key = _merge_key(name)
-        entry = raw.setdefault(key, {"display_name": name, "unit": unit, "used_in": set()})
+        if not name or _is_cooked_derived(name):
+            return
+        canonical = _canonical_ingredient_name(name, alias_lookup)
+        if _has_marker(canonical, {"egg"}):
+            unit = "pieces"  # eggs are always tracked in pieces, whatever unit the source gave
+        key = _merge_key(canonical)
+        entry = raw.setdefault(key, {"display_name": canonical, "unit": unit, "used_in": set()})
         entry["used_in"].add(used_in)
         # Prefer the shorter/cleaner display name once we have a choice between variants.
-        if len(name) < len(entry["display_name"]):
-            entry["display_name"] = name
+        if len(canonical) < len(entry["display_name"]):
+            entry["display_name"] = canonical
 
     for family in family_results:
         dish_label = family["name"]
-        main = family["main_item"]
-        _add(main["name"], main["unit"], dish_label)
+        for member in family["members"]:
+            if member["qty"] and member["main_item_name"]:
+                _add(member["main_item_name"], member["main_item_unit"], dish_label)
         for ing in family["ingredients"]:
             _add(ing["name"], ing["unit"], dish_label)
         for ing in family["minor_ingredients"]:
@@ -584,7 +743,7 @@ def suggest_setup(
     family_data = compose_family_recipes(
         families, bases, sector, stock_items, business, compose_fn=compose_fn
     )
-    ingredients = resolve_ingredients(family_data["families"], bases, business)
+    ingredients = resolve_ingredients(family_data["families"], bases, business, sector=sector)
 
     all_usage = (
         classify_usage + bases_data["usage"] + best_sellers_data["usage"] + family_data["usage"]
