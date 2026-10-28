@@ -180,6 +180,69 @@ def merge_menu_results(chunk_results: list[dict]) -> tuple[dict, bool]:
     return {"is_menu": is_menu, "sections": kept_sections}, hit_cap
 
 
+MAX_GROUPS_PER_SCAN = 40
+MAX_CHOICES_PER_GROUP = 12
+
+
+class ExtractedGroup(BaseModel):
+    """Step EK-2b: one heading-plus-choices group found by the dedicated group pass
+    (prompts.GROUP_SYSTEM_PROMPT) — same shape as ExtractedDish's own variant fields, so
+    base_discovery.apply_groups can feed it straight through expand_dish_options."""
+
+    heading: str
+    choices: list[str] = Field(default_factory=list)
+    position: Literal["prefix", "suffix"] = "prefix"
+    price: float | None = None
+    prices: list[float] | None = None
+
+    @field_validator("heading")
+    @classmethod
+    def _clean_heading(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("choices")
+    @classmethod
+    def _clean_choices(cls, value: list[str]) -> list[str]:
+        cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
+        return [v for v in cleaned if v and not _is_price_like(v)][:MAX_CHOICES_PER_GROUP]
+
+    @field_validator("price")
+    @classmethod
+    def _non_negative_price(cls, value: float | None) -> float | None:
+        return None if value is None or value < 0 else value
+
+    @field_validator("prices")
+    @classmethod
+    def _clean_prices(cls, value: list[float] | None) -> list[float] | None:
+        if not value:
+            return None
+        return [p for p in value[:MAX_CHOICES_PER_GROUP] if p is not None and p >= 0] or None
+
+
+class GroupExtractionResult(BaseModel):
+    groups: list[ExtractedGroup] = Field(default_factory=list)
+
+    def sanitized(self) -> dict:
+        kept = []
+        for group in self.groups:
+            if not group.heading or len(group.choices) < 2 or len(kept) >= MAX_GROUPS_PER_SCAN:
+                continue
+            kept.append(group.model_dump())
+        return {"groups": kept}
+
+
+def merge_group_results(chunk_results: list[dict]) -> list[dict]:
+    """Combines one sanitized() groups dict per chunk into one de-duplicated list, by normalised
+    heading — the same group can be found again in a neighbouring page-chunk's overlap."""
+    by_heading: dict[str, dict] = {}
+    for result in chunk_results:
+        for group in result.get("groups", []):
+            key = normalise(group["heading"])
+            if key not in by_heading:
+                by_heading[key] = group
+    return list(by_heading.values())
+
+
 class IngredientSuggestion(BaseModel):
     name: str
     amount: float

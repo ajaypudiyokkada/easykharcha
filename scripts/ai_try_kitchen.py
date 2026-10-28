@@ -27,7 +27,7 @@ django.setup()
 
 from django.conf import settings  # noqa: E402
 
-from ai.base_discovery import discover_bases, expand_dish_options  # noqa: E402
+from ai.base_discovery import apply_groups, discover_bases, expand_dish_options  # noqa: E402
 from ai.extraction import run_menu_extraction  # noqa: E402
 from ai.provider import anthropic_provider  # noqa: E402
 from businesses.models import BusinessType  # noqa: E402
@@ -39,6 +39,31 @@ _MEDIA_TYPE_BY_SUFFIX = {
     ".webp": "image/webp",
     ".pdf": "application/pdf",
 }
+
+
+# Step EK-2b measurement only (not production logic) — a dish name that's just one of these generic
+# style/heading words on its own is almost certainly a leftover bare heading, not a real dish.
+_LIKELY_BARE_HEADING_WORDS = {
+    "manchurian",
+    "chilli",
+    "chili",
+    "pepper",
+    "schezwan",
+    "sichuan",
+    "chutney",
+    "masala",
+    "gravy",
+    "roast",
+    "dry",
+    "noodles",
+    "soup",
+    "65",
+    "lollipop",
+}
+
+
+def _bare_heading_dishes(dishes: list[dict]) -> list[str]:
+    return [d["name"] for d in dishes if d["name"].strip().lower() in _LIKELY_BARE_HEADING_WORDS]
 
 
 def _cost(input_tokens: int, output_tokens: int) -> str:
@@ -71,19 +96,25 @@ def main() -> None:
     print(f"Reading {args.menu_file} as {args.business_type}...")
     files = [{"media_type": media_type, "data": args.menu_file.read_bytes()}]
     outcome = run_menu_extraction(
-        files, args.business_type, extract_fn=anthropic_provider.extract_menu
+        files,
+        args.business_type,
+        extract_fn=anthropic_provider.extract_menu,
+        extract_groups_fn=anthropic_provider.extract_menu_groups,
     )
     menu_cost = _cost(outcome.total_input_tokens, outcome.total_output_tokens)
     print(
         f"Menu extraction: {outcome.total_input_tokens} in / {outcome.total_output_tokens} out "
         f"(~{menu_cost}), {len(outcome.calls)} call(s)"
     )
+    print(f"Groups found (dedicated pass): {len(outcome.groups)}")
+    for group in outcome.groups:
+        print(f"  - {group['heading']!r} + {group['choices']} ({group['position']})")
     if not outcome.merged["is_menu"]:
         print("is_menu: false — stopping, nothing to discover bases for.")
         return
 
     raw_dishes = [
-        {"name": dish["name"]}
+        {"name": dish["name"], "variants": dish.get("variants") or []}
         for section in outcome.merged["sections"]
         for dish in section["dishes"]
         if dish.get("kind", "dish") != "addon"
@@ -91,11 +122,19 @@ def main() -> None:
     print(f"\n{len(raw_dishes)} dishes (addons excluded) before option expansion")
 
     expanded = expand_dish_options(raw_dishes)
+    expanded = apply_groups(expanded, outcome.groups)
     expanded_count = sum(1 for d in expanded if "expanded_from" in d)
-    print(f"{len(expanded)} dishes after option expansion ({expanded_count} came from an expanded line)")
+    print(
+        f"{len(expanded)} dishes after option expansion + group pass "
+        f"({expanded_count} came from an expanded line)"
+    )
     for dish in expanded:
         if "expanded_from" in dish:
             print(f"  - {dish['expanded_from']!r} -> {dish['name']!r}")
+
+    bare = _bare_heading_dishes(expanded)
+    print(f"\nDISH COUNT: {len(expanded)}")
+    print(f"BARE HEADING DISHES: {len(bare)} {bare}")
 
     print(f"\nClassifying dishes and mapping bases ({settings.AI_MODEL_KITCHEN})...")
     result = discover_bases(

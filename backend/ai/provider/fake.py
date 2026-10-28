@@ -29,11 +29,21 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
   (heading last), never leaving a bare "Manchurian" dish in the expanded output.
 - "FORCE_TWO_PRICE_GROUP" returns a "Sweetcorn Soup" row with variants ["Veg", "Chicken"] priced
   [120, 150] via variant_prices — proves expand_dish_options gives each expanded dish its own price.
+- "FORCE_BARE_GROUP" (Step EK-2b) returns a BROKEN first pass: a bare "Manchurian" dish with no
+  variants at all, standing alone — the designed-menu failure mode the dedicated group pass exists
+  to fix. extract_menu_groups for this marker returns the correct group (heading "Manchurian",
+  choices ["Gobi", "Paneer"], suffix) — proves base_discovery.apply_groups drops the bare "Manchurian"
+  leftover and adds the real combined dishes ("Gobi Manchurian", "Paneer Manchurian") instead.
 """
 
 from django.conf import settings
 
-from ..schemas import DishClassificationResult, MenuExtractionResult, RecipeSuggestionsResult
+from ..schemas import (
+    DishClassificationResult,
+    GroupExtractionResult,
+    MenuExtractionResult,
+    RecipeSuggestionsResult,
+)
 from .base import AiCallResult, run_with_fallback
 
 _FAKE_MODEL = "fake-ai-model"
@@ -80,6 +90,7 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
     force_prefix_group = any(b"FORCE_PREFIX_GROUP" in blob for blob in blobs)
     force_suffix_group = any(b"FORCE_SUFFIX_GROUP" in blob for blob in blobs)
     force_two_price_group = any(b"FORCE_TWO_PRICE_GROUP" in blob for blob in blobs)
+    force_bare_group = any(b"FORCE_BARE_GROUP" in blob for blob in blobs)
     is_menu = not any(b"NOT_A_MENU" in blob for blob in blobs)
 
     def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
@@ -187,6 +198,15 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
                 _MENU_OUTPUT_TOKENS,
                 False,
             )
+        if force_bare_group:
+            dishes = [{"name": "Manchurian", "price": 270, "confidence": 0.9}]
+            return (
+                {"is_menu": True, "sections": [{"name": "Menu", "dishes": dishes}]},
+                model,
+                _MENU_INPUT_TOKENS,
+                _MENU_OUTPUT_TOKENS,
+                False,
+            )
         if force_many_dishes:
             dishes = [
                 {"name": f"Fake Dish {i}", "price": 100 + i, "confidence": 0.9}
@@ -229,6 +249,30 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=get_raw,
         parse=lambda raw: MenuExtractionResult.model_validate(raw).sanitized(),
+    )
+
+
+def extract_menu_groups(files: list[dict], business_type: str) -> AiCallResult:
+    blobs = [file["data"] for file in files]
+    force_bare_group = any(b"FORCE_BARE_GROUP" in blob for blob in blobs)
+
+    def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        groups = []
+        if force_bare_group:
+            groups = [
+                {
+                    "heading": "Manchurian",
+                    "choices": ["Gobi", "Paneer"],
+                    "position": "suffix",
+                }
+            ]
+        return ({"groups": groups}, model, _KITCHEN_INPUT_TOKENS, _KITCHEN_OUTPUT_TOKENS, False)
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_MENU,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=get_raw,
+        parse=lambda raw: GroupExtractionResult.model_validate(raw).sanitized(),
     )
 
 

@@ -635,6 +635,25 @@ not built yet.
   whether a nested used_by grouping (vs. the flat `family` tag) is worth doing before the confirm
   screen.
 
+- **Step EK-2b — Grouped-line extraction works on designed menus (Kavan).** Attempt A (of the task's
+  two allowed): a dedicated second pass (`extract_menu_groups`/`GROUP_SYSTEM_PROMPT`, new
+  `ai/schemas.ExtractedGroup`) re-reads the same file(s), focused only on heading-plus-choices
+  groups — fixes the real failure: a designed, multi-column menu (headings/choices/prices on separate
+  lines) still left a bare "Manchurian"-style dish with no variants from the combined EK-2 pass alone.
+  New `base_discovery.apply_groups(dishes, groups)` drops that bare leftover and adds the real
+  combined dish(es) via the existing `expand_dish_options`; wired into `extraction.
+  run_menu_extraction` itself (one extra AiUsage row per page-chunk — `check_ai_flow`'s chunk/retry
+  call-count assertions updated to match, new `FORCE_BARE_GROUP` smoke case proves `apply_groups`).
+  Real-run results (`scripts/ai_try_kitchen.py`): Kavan, 3 runs — 168/172/169 dishes (target >=125),
+  0 bare heading dishes every run, sauce base 59 dishes/batter 41 dishes (both well past the >=25/
+  >=30 target). FOMO regression (1 run): 225 dishes, 0 bare headings, sauce 43/batter 42 (both past
+  the >=28 target); makhani still maps 3 dishes (target <=2) — Malai Paneer is the extra one, the
+  same pre-existing classifier quirk EK-2 already found ("malai" groups it with butter-chicken/
+  paneer-butter-masala under `gravy_makhani`), unrelated to and unchanged by this step. Total real-run
+  cost ~$0.24 across all 4 runs. `npm run verify -- --area ai`'s own "python" isn't the project venv
+  in this shell — ran `.venv/Scripts/python.exe scripts/smoke.py --area ai` directly instead
+  (pre-existing environment quirk, confirmed unrelated to this step).
+
 ## Permission table
 
 `backend/businesses/permissions.py` is the one place roles map to permission strings — every

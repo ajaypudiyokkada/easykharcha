@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import pypdf
 
 from . import provider
-from .schemas import merge_menu_results
+from .schemas import merge_group_results, merge_menu_results
 
 PDF_PAGES_PER_CHUNK = 3
 
@@ -34,6 +34,9 @@ class MenuExtractionOutcome:
     total_input_tokens: int
     total_output_tokens: int
     calls: list[ExtractionCall] = field(default_factory=list)
+    # Step EK-2b: heading-plus-choices groups found by the dedicated second pass (see
+    # run_group_extraction below) — [] when the menu had none, or wasn't a menu at all.
+    groups: list[dict] = field(default_factory=list)
 
 
 def _pdf_page_count(data: bytes) -> int:
@@ -63,12 +66,14 @@ def _split_pdf_pages(data: bytes) -> list[bytes]:
 
 
 def run_menu_extraction(
-    files: list[dict], business_type: str, *, extract_fn=None
+    files: list[dict], business_type: str, *, extract_fn=None, extract_groups_fn=None
 ) -> MenuExtractionOutcome:
     """extract_fn defaults to provider.extract_menu (AI_FAKE-aware dispatch, what the real job path
     wants); the script passes anthropic_provider.extract_menu directly to always hit the real API
-    regardless of AI_FAKE."""
+    regardless of AI_FAKE. extract_groups_fn works the same way for provider.extract_menu_groups
+    (Step EK-2b's dedicated group-finding pass, run after the main dish pass, over the same file(s))."""
     extract = extract_fn or provider.extract_menu
+    extract_groups = extract_groups_fn or provider.extract_menu_groups
 
     if (
         len(files) == 1
@@ -127,6 +132,25 @@ def run_menu_extraction(
     merged, hit_cap = merge_menu_results(chunk_results)
     incomplete = incomplete or hit_cap
 
+    groups: list[dict] = []
+    if merged["is_menu"]:
+        group_chunk_results = []
+        for index, call_files in enumerate(calls_plan, start=1):
+            gresult = extract_groups(call_files, business_type)
+            calls.append(
+                ExtractionCall(
+                    label=f"chunk {index} groups",
+                    model=gresult.model,
+                    input_tokens=gresult.input_tokens,
+                    output_tokens=gresult.output_tokens,
+                    truncated=gresult.truncated,
+                )
+            )
+            total_input_tokens += gresult.input_tokens
+            total_output_tokens += gresult.output_tokens
+            group_chunk_results.append(gresult.data)
+        groups = merge_group_results(group_chunk_results)
+
     return MenuExtractionOutcome(
         merged=merged,
         incomplete=incomplete,
@@ -134,6 +158,7 @@ def run_menu_extraction(
         total_input_tokens=total_input_tokens,
         total_output_tokens=total_output_tokens,
         calls=calls,
+        groups=groups,
     )
 
 

@@ -21,6 +21,10 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
     return _provider().extract_menu(files, business_type)
 
 
+def extract_menu_groups(files: list[dict], business_type: str) -> AiCallResult:
+    return _provider().extract_menu_groups(files, business_type)
+
+
 def suggest_recipes(
     dish_names: list[str], business_type: str, stock_items: list[tuple[str, str]]
 ) -> AiCallResult:
