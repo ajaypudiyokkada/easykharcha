@@ -6,7 +6,12 @@ import anthropic
 from django.conf import settings
 
 from .. import prompts
-from ..schemas import DishClassificationResult, MenuExtractionResult, RecipeSuggestionsResult
+from ..schemas import (
+    DishClassificationResult,
+    GroupExtractionResult,
+    MenuExtractionResult,
+    RecipeSuggestionsResult,
+)
 from .base import AiCallResult, run_with_fallback
 from .errors import AiProviderCallError
 
@@ -97,6 +102,24 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
             max_tokens=_MAX_TOKENS_MENU,
         ),
         parse=lambda raw: MenuExtractionResult.model_validate(raw).sanitized(),
+    )
+
+
+def extract_menu_groups(files: list[dict], business_type: str) -> AiCallResult:
+    messages = prompts.menu_messages(files, business_type)
+    tool = prompts.group_tool()
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_MENU,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=prompts.GROUP_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_MENU,
+        ),
+        parse=lambda raw: GroupExtractionResult.model_validate(raw).sanitized(),
     )
 
 

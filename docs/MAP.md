@@ -115,6 +115,13 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   `base_discovery.MAPPING_VERSION`. `AI_MODEL_KITCHEN` env (default claude-haiku-5-5,
   `AI_MODEL_FALLBACK` same as the other two calls); `AiUsageKind.KITCHEN_BASE_DISCOVERY`. No endpoint
   or screen yet — `scripts/ai_try_kitchen.py` is the only caller today, proved against real menus.
+  Step EK-2b: a designed, multi-column menu still left a bare heading dish (e.g. just "Manchurian")
+  from the combined pass alone — new `extract_menu_groups`/`GROUP_SYSTEM_PROMPT`/`group_tool()`
+  (`prompts.py`) is a second, dedicated pass over the same file(s) that finds only groups;
+  `schemas.ExtractedGroup`/`merge_group_results`; `extraction.run_menu_extraction` runs it per
+  page-chunk after the main pass (`MenuExtractionOutcome.groups`, skipped when the chunk isn't a
+  menu); `base_discovery.apply_groups(dishes, groups)` drops the bare leftover and adds the real
+  combined dish(es) via `expand_dish_options`, run after it in `scripts/ai_try_kitchen.py`.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/

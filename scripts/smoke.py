@@ -5747,12 +5747,14 @@ def check_ai_flow() -> None:
     usage_after = _ai_sql_read_one(
         "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (chunk_business_id,)
     )[0]
-    if usage_after - usage_before != 2:
+    # Step EK-2b: 2 chunks for 4 pages at 3/chunk, each now making 2 calls (the dish pass plus the
+    # dedicated group pass) — 4 AiUsage rows, not 2.
+    if usage_after - usage_before != 4:
         fail(
-            "ai flow: expected one AiUsage row per PDF page-chunk (2 chunks for 4 pages at 3/chunk), "
-            f"got {usage_after - usage_before}"
+            "ai flow: expected one AiUsage row per PDF page-chunk per pass (2 chunks x 2 passes for "
+            f"4 pages at 3/chunk), got {usage_after - usage_before}"
         )
-    print("OK — a multi-page PDF is read in page chunks and merged/deduped, one AiUsage row per chunk.")
+    print("OK — a multi-page PDF is read in page chunks and merged/deduped, one AiUsage row per chunk per pass.")
 
     # The owner is already at the 3-business cap (signup's own Step F2 auto-created business, plus
     # business_id and chunk_business_id) — every remaining ai/ check against this owner reuses one of
@@ -5791,10 +5793,13 @@ def check_ai_flow() -> None:
     retry_usage_after = _ai_sql_read_one(
         "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (chunk_business_id,)
     )[0]
-    if retry_usage_after - retry_usage_before != 4:
+    # Step EK-2b: the group pass runs once per entry in the original (pre-retry) chunk plan — 1 more
+    # call here, since the whole 3-page doc was one chunk — on top of the dish pass's own 4 (1
+    # overflowing chunk call + 3 page retries).
+    if retry_usage_after - retry_usage_before != 5:
         fail(
-            "ai flow: expected 4 AiUsage rows (1 overflowing chunk call + 3 page retries), "
-            f"got {retry_usage_after - retry_usage_before}"
+            "ai flow: expected 5 AiUsage rows (1 overflowing chunk call + 3 page retries + 1 group "
+            f"pass call), got {retry_usage_after - retry_usage_before}"
         )
     print("OK — a chunk that overflows max_tokens is retried one page at a time and recovers.")
 
@@ -5994,7 +5999,13 @@ def check_kitchen_base_discovery() -> None:
 
     django.setup()
 
-    from ai.base_discovery import _cache_key, discover_bases, expand_dish_options, sanity_check
+    from ai.base_discovery import (
+        _cache_key,
+        apply_groups,
+        discover_bases,
+        expand_dish_options,
+        sanity_check,
+    )
     from ai.knowledge import load_library
     from ai.models import AiDishTypeCache, AiKitchenBaseCache
     from ai.provider import fake as ai_fake
@@ -6074,6 +6085,28 @@ def check_kitchen_base_discovery() -> None:
     if two_price_by_name != {"Sweetcorn Soup Veg": 120, "Sweetcorn Soup Chicken": 150}:
         fail(f"kitchen base discovery: expected per-variant prices, got {two_price_by_name}")
     print("OK — a two-price-column row (Veg/Chicken) expands into 2 dishes, each with its own price.")
+
+    # --- Step EK-2b: the dedicated group pass fixes a designed-menu bare-heading leftover that
+    # expand_dish_options alone can't, since the first pass never attached variants to it at all. ---
+    bare_files_meta = [{"media_type": "image/png", "data": b"PNG FORCE_BARE_GROUP"}]
+    bare_raw = ai_fake.extract_menu(bare_files_meta, "restaurant_cafe")
+    bare_dishes = bare_raw.data["sections"][0]["dishes"]
+    bare_names = [d["name"] for d in bare_dishes]
+    if bare_names != ["Manchurian"]:
+        fail(f"kitchen base discovery: expected the broken bare-heading canned menu, got {bare_names}")
+    bare_groups = ai_fake.extract_menu_groups(bare_files_meta, "restaurant_cafe").data["groups"]
+    fixed_dishes = apply_groups(expand_dish_options(bare_dishes), bare_groups)
+    fixed_names = sorted(d["name"] for d in fixed_dishes)
+    if fixed_names != ["Gobi Manchurian", "Paneer Manchurian"]:
+        fail(
+            "kitchen base discovery: expected the group pass to drop the bare 'Manchurian'/'Gobi'/"
+            f"'Paneer' leftovers and add the real combined dishes, got {fixed_names}"
+        )
+    print(
+        "OK — the dedicated group pass drops a designed-menu's leftover bare heading dishes and adds "
+        "the real combined ones, where expand_dish_options alone can't (the first pass never "
+        "attached variants)."
+    )
 
     # --- classify-then-map end to end (fake provider) + per-dish-name caching ---
     curry_dishes = ["Chicken Curry", "Chicken Masala", "Chicken Kadai"]

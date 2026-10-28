@@ -58,6 +58,48 @@ def expand_dish_options(dishes: list[dict]) -> list[dict]:
     return expanded
 
 
+def apply_groups(dishes: list[dict], groups: list[dict]) -> list[dict]:
+    """Step EK-2b: runs AFTER expand_dish_options, using the dedicated group pass's output
+    (extraction.MenuExtractionOutcome.groups) as a safety net for a designed, multi-column menu
+    where the combined single pass still left a bare heading dish standing alone (e.g. just
+    "Manchurian", with no variants of its own) instead of attaching its choices to it. For every
+    discovered group: drops any dish in the list whose name matches the group's heading with no
+    variants (the broken leftover), then adds the group's real combined dishes (built the same way
+    expand_dish_options builds them) unless a clean first-pass expansion already produced them.
+    Deterministic, no model call. A menu with no groups passes through unchanged."""
+    if not groups:
+        return dishes
+
+    group_heading_norms = {normalise(g["heading"]) for g in groups}
+    kept = [
+        dish
+        for dish in dishes
+        if not (
+            normalise(dish["name"]) in group_heading_norms and len(dish.get("variants") or []) < 2
+        )
+    ]
+    existing_names = {normalise(dish["name"]) for dish in kept}
+
+    as_dish_rows = [
+        {
+            "name": group["heading"],
+            "price": group.get("price"),
+            "confidence": 0.8,
+            "variants": group.get("choices", []),
+            "variant_position": group.get("position", "prefix"),
+            "variant_prices": group.get("prices"),
+        }
+        for group in groups
+    ]
+    for row in expand_dish_options(as_dish_rows):
+        key = normalise(row["name"])
+        if key in existing_names:
+            continue
+        existing_names.add(key)
+        kept.append(row)
+    return kept
+
+
 def _cache_key(dish_names: list[str]) -> str:
     normalised = sorted({normalise(name) for name in dish_names})
     return hashlib.sha256("|".join(normalised).encode("utf-8")).hexdigest()
