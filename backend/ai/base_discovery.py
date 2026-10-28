@@ -19,8 +19,10 @@ from .matching import normalise
 from .models import AiKitchenBaseCache, AiUsageKind
 
 # Bumped whenever map_bases_from_classification's logic or a sector's type_rules changes meaningfully
-# — part of the per-menu cache key, same role as prompts.py's *_PROMPT_VERSION constants.
-MAPPING_VERSION = 1
+# — part of the per-menu cache key, same role as prompts.py's *_PROMPT_VERSION constants. Step EK-2c
+# bumped 1->2: new types (plain_fried_snack/dry_masala_fry/gravy_thai/butter_garlic/bread_maida) and
+# keyword_type_overrides change which bases a given dish set maps to.
+MAPPING_VERSION = 2
 
 _OVERFILL_TOLERANCE = 0.15
 _MAX_PORTION_GRAMS = 600
@@ -39,14 +41,17 @@ def expand_dish_options(dishes: list[dict]) -> list[dict]:
     heading). `variant_prices`, when present, gives each expanded dish its own price instead of the
     row's single price. Deterministic, no model call. Each expanded row carries `expanded_from` (the
     original heading text) so a future review screen can flag it. A dish with fewer than 2 variants
-    passes through unchanged — it is never left in the output named only by its bare heading."""
+    passes through unchanged — it is never left in the output named only by its bare heading. A
+    variant that normalises the same as the heading itself is dropped before combining (a model slip
+    that would otherwise glue the same words onto themselves, e.g. "Gulab Jamun Gulab Jamun")."""
     expanded = []
     for dish in dishes:
-        variants = [v for v in (dish.get("variants") or []) if v]
+        heading = _TRAILING_PAREN.sub("", dish.get("name", "")).strip() or dish.get("name", "")
+        heading_norm = normalise(heading)
+        variants = [v for v in (dish.get("variants") or []) if v and normalise(v) != heading_norm]
         if len(variants) < 2:
             expanded.append(dish)
             continue
-        heading = _TRAILING_PAREN.sub("", dish.get("name", "")).strip() or dish.get("name", "")
         position = dish.get("variant_position") or "prefix"
         variant_prices = dish.get("variant_prices")
         for index, option in enumerate(variants):
@@ -58,46 +63,106 @@ def expand_dish_options(dishes: list[dict]) -> list[dict]:
     return expanded
 
 
+_PUNCT = re.compile(r"[^\w\s]")
+
+
+def _dedup_key(name: str) -> str:
+    """lowercase, strip punctuation, sort the UNIQUE tokens — so "Gobi Manchurian" and "Manchurian
+    Gobi" (the same dish built by two different passes in the opposite word order) collide on the
+    same key, and so does a doubled-up name like "Gulab Jamun Gulab Jamun" against "Gulab Jamun"."""
+    return " ".join(sorted(set(_PUNCT.sub(" ", name.lower()).split())))
+
+
+def _name_cleanliness_score(name: str) -> float:
+    """Lower is cleaner — used by dedup_dishes to pick which of two matching rows' names to keep."""
+    score = len(name) * 0.01
+    words = name.split()
+    score += 5 * sum(
+        1 for w in words if len(w) > 1 and w.isupper()
+    )  # an ALL-CAPS word, whole or partial
+    lowered = [w.lower() for w in words]
+    if any(a == b for a, b in zip(lowered, lowered[1:], strict=False)):
+        score += 20  # "GULAB JAMUN GULAB JAMUN" — the same word (or phrase) repeated back to back
+    return score
+
+
+def dedup_dishes(dishes: list[dict]) -> list[dict]:
+    """Fix A: one source of truth downstream of expand_dish_options/apply_groups — merges any two
+    rows that are the same dish once normalised and word-order-independent (duplicates between the
+    first pass's own expansion and the dedicated group pass, or within either one alone), keeping
+    whichever row's name is cleaner (not all-caps, no back-to-back repeated word) and that row's own
+    price. Order-preserving: a merged dish keeps its first occurrence's position."""
+    best_by_key: dict[str, dict] = {}
+    order: list[str] = []
+    for dish in dishes:
+        key = _dedup_key(dish["name"])
+        if key not in best_by_key:
+            best_by_key[key] = dish
+            order.append(key)
+            continue
+        current = best_by_key[key]
+        if _name_cleanliness_score(dish["name"]) < _name_cleanliness_score(current["name"]):
+            best_by_key[key] = {**current, **dish}
+    return [best_by_key[key] for key in order]
+
+
+def _is_choice_fragment(name: str, group_dish_token_sets: list[set[str]]) -> bool:
+    """A standalone dish the first pass emitted that's really just one choice-word from a group it
+    didn't recognise as a group at all (e.g. a bare "Veg" row beside a "Fried Rice/Noodles" table
+    that the dedicated group pass correctly read as "Fried Rice Veg"/"Noodles Veg"/...) — true when
+    its own name's tokens are a proper subset of 2+ of that SAME group's own final dish names, the
+    signature of a column label the first pass misread as its own dish."""
+    tokens = set(normalise(name).split())
+    if not tokens:
+        return False
+    return sum(1 for dish_tokens in group_dish_token_sets if tokens < dish_tokens) >= 2
+
+
 def apply_groups(dishes: list[dict], groups: list[dict]) -> list[dict]:
-    """Step EK-2b: runs AFTER expand_dish_options, using the dedicated group pass's output
-    (extraction.MenuExtractionOutcome.groups) as a safety net for a designed, multi-column menu
-    where the combined single pass still left a bare heading dish standing alone (e.g. just
-    "Manchurian", with no variants of its own) instead of attaching its choices to it. For every
-    discovered group: drops any dish in the list whose name matches the group's heading with no
-    variants (the broken leftover), then adds the group's real combined dishes (built the same way
-    expand_dish_options builds them) unless a clean first-pass expansion already produced them.
-    Deterministic, no model call. A menu with no groups passes through unchanged."""
+    """Step EK-2b/EK-2c: runs AFTER expand_dish_options, using the dedicated group pass's output
+    (extraction.MenuExtractionOutcome.groups, prompts.GROUP_SYSTEM_PROMPT) as the SINGLE source of
+    truth for any heading it recognised — the group pass now returns the final combined dish names
+    directly (e.g. heading "MANCHURIAN" -> dishes ["Gobi Manchurian", "Paneer Manchurian"]), not a
+    prefix/suffix label to recombine. For every discovered group: drops every dish the first pass
+    already produced for that same heading (whether it was a broken bare leftover like just
+    "Manchurian", or a clean-looking expansion built from the row's own `variants` — the group pass
+    found the same heading independently, so keeping both would duplicate it); drops any standalone
+    choice-word fragment left over from the SAME table (_is_choice_fragment, e.g. a bare "Veg" row
+    beside a Fried Rice/Noodles price table); then adds the group's own dish rows. A final
+    dedup_dishes pass catches anything still duplicated (word-order or casing differences) across the
+    two passes or within either one alone. Deterministic, no model call. A menu with no groups still
+    runs through dedup_dishes."""
     if not groups:
-        return dishes
+        return dedup_dishes(dishes)
 
     group_heading_norms = {normalise(g["heading"]) for g in groups}
     kept = [
         dish
         for dish in dishes
-        if not (
-            normalise(dish["name"]) in group_heading_norms and len(dish.get("variants") or []) < 2
-        )
+        if normalise(dish.get("expanded_from") or dish["name"]) not in group_heading_norms
     ]
-    existing_names = {normalise(dish["name"]) for dish in kept}
+    for group in groups:
+        group_dish_token_sets = [
+            set(normalise(gd["name"]).split()) for gd in group.get("dishes", [])
+        ]
+        kept = [d for d in kept if not _is_choice_fragment(d["name"], group_dish_token_sets)]
 
-    as_dish_rows = [
-        {
-            "name": group["heading"],
-            "price": group.get("price"),
-            "confidence": 0.8,
-            "variants": group.get("choices", []),
-            "variant_position": group.get("position", "prefix"),
-            "variant_prices": group.get("prices"),
-        }
-        for group in groups
-    ]
-    for row in expand_dish_options(as_dish_rows):
-        key = normalise(row["name"])
-        if key in existing_names:
-            continue
-        existing_names.add(key)
-        kept.append(row)
-    return kept
+    existing_names = {normalise(dish["name"]) for dish in kept}
+    for group in groups:
+        for group_dish in group.get("dishes", []):
+            key = normalise(group_dish["name"])
+            if key in existing_names:
+                continue
+            existing_names.add(key)
+            kept.append(
+                {
+                    "name": group_dish["name"],
+                    "price": group_dish.get("price"),
+                    "confidence": 0.8,
+                    "expanded_from": group["heading"],
+                }
+            )
+    return dedup_dishes(kept)
 
 
 def _cache_key(dish_names: list[str]) -> str:

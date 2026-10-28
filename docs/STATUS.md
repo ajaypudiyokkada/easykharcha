@@ -635,6 +635,30 @@ not built yet.
   whether a nested used_by grouping (vs. the flat `family` tag) is worth doing before the confirm
   screen.
 
+- **Step EK-2c — Remove duplicate expansion, fix names/splits, refine types.** Two real bugs fixed:
+  (1) the first pass's own inline-variant expansion and the dedicated group pass could both expand
+  the same heading, producing duplicates/garbled names ("Gobi Manchurian/65 65") — `apply_groups` is
+  now the single source of truth (drops the first pass's matching expansion, drops a leftover bare
+  choice-word fragment from the same table like "Veg" beside "Fried Rice Veg", then `dedup_dishes`
+  merges anything still duplicated by word order/casing); `expand_dish_options` drops a self-duplicate
+  variant. (2) The group pass's prefix/suffix label was unreliable (wrong word order) — it now returns
+  each group's own final dish names directly, letting it enumerate a two-axis table ("Fried Rice/
+  Noodles" x "Veg/Egg/Chicken/Mixed") as 8 real dishes in one pass. New no-base types
+  (`plain_fried_snack`/`dry_masala_fry`/`gravy_thai`/`butter_garlic`/`bread_maida`) plus
+  `restaurant_cafe.json`'s `keyword_type_overrides`, applied deterministically after classification
+  so the model can't misplace malai/naan-kulcha/Thai-curry/butter-garlic/fries/mutton-fry dishes.
+  Real-run proof (`scripts/ai_try_kitchen.py`, 2 runs each, ~$0.36 total): Kavan 140/140 dishes
+  (target 125-145 ✓), FOMO 207/205 (target 195-215 ✓), 0 duplicates and 0 bare headings every run,
+  no makhani base either menu, Thai curries confirmed off the Indian curry base on FOMO (it has no
+  naan/kulcha/fries dishes to exercise those rules — covered by new smoke fixtures instead). **Missed
+  target, not fixed**: sauce-base/batter split — Kavan run 1 sauce 38/batter 14, run 2 (after
+  retuning `CLASSIFY_SYSTEM_PROMPT`'s wet/dry wording) sauce 31/batter 20; FOMO run 1 sauce 54/
+  batter 11, run 2 sauce 44/batter 15 — target was 28-38 each. Both of this step's two allowed design
+  attempts went into this; the model keeps funnelling most Indo-Chinese starters into the sauce-coated
+  type over the dry one even after the prompt clarified the distinction, which prior steps (EK-2/
+  EK-2b) also saw swing wildly run to run on the same menu — likely inherent model variance on this
+  specific split, not a code bug, but not confirmed. Next step should try a few more real runs before
+  touching the prompt again, or accept the split as a soft target.
 - **Step EK-2b — Grouped-line extraction works on designed menus (Kavan).** Attempt A (of the task's
   two allowed): a dedicated second pass (`extract_menu_groups`/`GROUP_SYSTEM_PROMPT`, new
   `ai/schemas.ExtractedGroup`) re-reads the same file(s), focused only on heading-plus-choices

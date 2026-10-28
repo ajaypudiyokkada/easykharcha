@@ -4,12 +4,29 @@ knowledge/dish_types.json, batched to keep each model call small and cheap. Cach
 else is on the same menu — reusable across every menu/business in the same sector."""
 
 from . import provider
-from .knowledge import load_dish_types
+from .knowledge import load_dish_types, load_library
 from .matching import normalise
 from .models import AiDishTypeCache
 from .prompts import CLASSIFY_PROMPT_VERSION
 
 BATCH_SIZE = 60
+
+
+def _apply_keyword_override(name: str, classified: dict, overrides: list[dict]) -> dict:
+    """Step EK-2c: a deterministic safety net over the model's own classification — a sector's
+    knowledge/<sector>.json can list keyword -> type/family rules (e.g. "malai" always means
+    grilled_tandoori, never gravy_makhani) that the model is not allowed to override, applied to
+    every lookup (fresh model call AND a cache hit, so a stale cache row from before a rule existed
+    still gets corrected). First matching rule wins; no match leaves `classified` untouched."""
+    name_norm = normalise(name)
+    for rule in overrides:
+        if any(keyword in name_norm for keyword in rule["keywords"]):
+            return {
+                "type": rule["type"],
+                "family": rule.get("family", classified.get("family", "")),
+                "confidence": max(classified.get("confidence", 0.0), 0.9),
+            }
+    return classified
 
 
 def classify_dishes(
@@ -23,6 +40,7 @@ def classify_dishes(
     response still gets a bucket ("other", confidence 0) so the mapping step never silently skips it."""
     classify = classify_fn or provider.classify_dishes
     dish_types = load_dish_types()
+    overrides = load_library(sector).get("rules", {}).get("keyword_type_overrides", [])
     names = [d["name"] for d in dishes]
     by_norm: dict[str, dict] = {}
     usage: list[dict] = []
@@ -33,7 +51,9 @@ def classify_dishes(
         prompt_version=CLASSIFY_PROMPT_VERSION,
     )
     for row in cached_rows:
-        by_norm[row.dish_name_normalised] = row.result
+        by_norm[row.dish_name_normalised] = _apply_keyword_override(
+            row.dish_name_normalised, row.result, overrides
+        )
 
     to_classify = [n for n in names if normalise(n) not in by_norm]
     for start in range(0, len(to_classify), BATCH_SIZE):
@@ -55,6 +75,7 @@ def classify_dishes(
                 "family": dish.get("family", ""),
                 "confidence": dish["confidence"],
             }
+            classified = _apply_keyword_override(dish["name"], classified, overrides)
             by_norm[key] = classified
             AiDishTypeCache.objects.update_or_create(
                 dish_name_normalised=key,
@@ -63,6 +84,11 @@ def classify_dishes(
                 defaults={"result": classified},
             )
         for name in batch:
-            by_norm.setdefault(normalise(name), {"type": "other", "family": "", "confidence": 0.0})
+            by_norm.setdefault(
+                normalise(name),
+                _apply_keyword_override(
+                    name, {"type": "other", "family": "", "confidence": 0.0}, overrides
+                ),
+            )
 
     return by_norm, usage

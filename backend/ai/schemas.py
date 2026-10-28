@@ -16,7 +16,7 @@ MAX_INGREDIENTS_PER_DISH = 7
 MAX_MINOR_INGREDIENTS_PER_DISH = 8
 MAX_VARIANTS_PER_DISH = 6
 MAX_NOTE_LENGTH = 20
-_ALLOWED_NOTES = {"has options", "two names"}
+_ALLOWED_NOTES = {"has options", "two names", "check this"}
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # A variant must be an option/alternate NAME, never a price — this is a backstop for prompt drift
@@ -181,42 +181,46 @@ def merge_menu_results(chunk_results: list[dict]) -> tuple[dict, bool]:
 
 
 MAX_GROUPS_PER_SCAN = 40
-MAX_CHOICES_PER_GROUP = 12
+MAX_DISHES_PER_GROUP = 16
 
 
-class ExtractedGroup(BaseModel):
-    """Step EK-2b: one heading-plus-choices group found by the dedicated group pass
-    (prompts.GROUP_SYSTEM_PROMPT) — same shape as ExtractedDish's own variant fields, so
-    base_discovery.apply_groups can feed it straight through expand_dish_options."""
+class GroupDish(BaseModel):
+    """Step EK-2c: one of a group's own final, already-combined dish names (e.g. "Chicken
+    Manchurian") — the model builds the real name itself instead of handing back a prefix/suffix
+    label for base_discovery to recombine, which was proving unreliable (wrong word order)."""
 
-    heading: str
-    choices: list[str] = Field(default_factory=list)
-    position: Literal["prefix", "suffix"] = "prefix"
+    name: str
     price: float | None = None
-    prices: list[float] | None = None
 
-    @field_validator("heading")
+    @field_validator("name")
     @classmethod
-    def _clean_heading(cls, value: str) -> str:
+    def _clean_name(cls, value: str) -> str:
         return _clean_text(value, MAX_NAME_LENGTH)
-
-    @field_validator("choices")
-    @classmethod
-    def _clean_choices(cls, value: list[str]) -> list[str]:
-        cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
-        return [v for v in cleaned if v and not _is_price_like(v)][:MAX_CHOICES_PER_GROUP]
 
     @field_validator("price")
     @classmethod
     def _non_negative_price(cls, value: float | None) -> float | None:
         return None if value is None or value < 0 else value
 
-    @field_validator("prices")
+
+class ExtractedGroup(BaseModel):
+    """Step EK-2b/EK-2c: one heading-plus-choices group found by the dedicated group pass
+    (prompts.GROUP_SYSTEM_PROMPT). `heading` is kept only for traceability (expanded_from, and so
+    base_discovery.apply_groups can tell when the first pass already expanded this same heading
+    itself) — the real output is `dishes`, the group's own final combined names."""
+
+    heading: str
+    dishes: list[GroupDish] = Field(default_factory=list)
+
+    @field_validator("heading")
     @classmethod
-    def _clean_prices(cls, value: list[float] | None) -> list[float] | None:
-        if not value:
-            return None
-        return [p for p in value[:MAX_CHOICES_PER_GROUP] if p is not None and p >= 0] or None
+    def _clean_heading(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("dishes")
+    @classmethod
+    def _cap_dishes(cls, value: list) -> list:
+        return value[:MAX_DISHES_PER_GROUP]
 
 
 class GroupExtractionResult(BaseModel):
@@ -225,9 +229,10 @@ class GroupExtractionResult(BaseModel):
     def sanitized(self) -> dict:
         kept = []
         for group in self.groups:
-            if not group.heading or len(group.choices) < 2 or len(kept) >= MAX_GROUPS_PER_SCAN:
+            named_dishes = [d.model_dump() for d in group.dishes if d.name]
+            if not group.heading or len(named_dishes) < 2 or len(kept) >= MAX_GROUPS_PER_SCAN:
                 continue
-            kept.append(group.model_dump())
+            kept.append({"heading": group.heading, "dishes": named_dishes})
         return {"groups": kept}
 
 
