@@ -667,6 +667,25 @@ not built yet.
   each after fixing a same-type-merge bug found on the first Kavan run): Kavan 10 best sellers/5
   categories, 25 families, 93 ingredients (target ≤90, missed by 3), ~Rs 7.66; FOMO 10/5 categories,
   25 families, 89 ingredients, ~Rs 8.22 — both well under the Rs 15/menu cost target.
+- **Step EK-3b — Per-member main items, 0-is-not-an-error, ingredient aliases, low-stock keyword
+  fix.** Real EK-3 runs found families merged nonsensically and sharing one wrong main item (Gobi
+  Pepper got Chicken's qty), 0 treated as an error (veg dishes got a phantom default protein), a real
+  1,000 g tandoori chicken rejected, duplicate ingredients (capsicum/bell pepper, cooking/refined
+  oil, Cooked rice listed as a buyable item), and cabbage/ginger/garlic mis-bucketed by substring
+  keyword matching. Fixed: `FamilyRecipeSuggestion.members` — every family dish gets its own
+  main_item_name/unit/qty (0/empty = genuinely not used, never defaulted; a veg name given a meat
+  main item, or the reverse, is dropped and flagged `"check this"`); cap raised 25->60 (merging still
+  exhausts same-type pairs first); a sector `ingredient_aliases` table (knowledge JSON) canonicalises
+  near-duplicates and drops a cooked-derived name (the base already covers it); low-stock category
+  now whole-word keyword matching, 4 reviewed buckets. Real-run proof (`ai_try_kitchen.py --setup`):
+  Kavan 60 families, 95 ingredients (target 40-85, missed by 10), 0 corrections/flags, ~Rs 4.39; FOMO
+  60 families, 118 ingredients (missed, target scaled for the old 25-cap), 0 corrections/flags, ~Rs
+  21.85 (missed — 56 family calls alone at ~Rs 0.27/call consume the whole Rs 15 budget on a
+  114-family raw menu; the cap-60 instruction and the Rs 15 target are in direct tension on a dense
+  menu, not something this step's code can reconcile). **Not done** (scope cut for the 45-minute
+  limit): drink sub-typing, the merge-only-same-bases-and-main-item-pattern restriction, the
+  re-ask-once-on-mismatch flow (drops and flags instead), and dish-list source-line tracking (only a
+  repeated-word safety net was added to `base_discovery.dedup_dishes`).
 - **Step EK-2c — Remove duplicate expansion, fix names/splits, refine types.** Two real bugs fixed:
   (1) the first pass's own inline-variant expansion and the dedicated group pass could both expand
   the same heading, producing duplicates/garbled names ("Gobi Manchurian/65 65") — `apply_groups` is

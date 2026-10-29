@@ -86,12 +86,27 @@ def _name_cleanliness_score(name: str) -> float:
     return score
 
 
+_REPEATED_WORD = re.compile(r"\b(\w+)\s+\1\b", re.IGNORECASE)
+
+
+def _drop_repeated_word(name: str) -> str:
+    """Step EK-3b Fix F: a leftover like "Gobi Manchurian/65 65" or "MIXED FRIED RICE/SCHEZWAN
+    SCHEZWAN" — a word doubled back-to-back, almost always a slash/variant artifact — collapses to
+    one occurrence. Only fires on an exact, adjacent repeat, never a dish that's legitimately named
+    with a repeated word elsewhere (e.g. "Dal Dal Makhani" wouldn't match since "Dal"/"Makhani" aren't
+    adjacent-identical in that order anyway — this is deliberately conservative)."""
+    return _REPEATED_WORD.sub(r"\1", name)
+
+
 def dedup_dishes(dishes: list[dict]) -> list[dict]:
     """Fix A: one source of truth downstream of expand_dish_options/apply_groups — merges any two
     rows that are the same dish once normalised and word-order-independent (duplicates between the
     first pass's own expansion and the dedicated group pass, or within either one alone), keeping
     whichever row's name is cleaner (not all-caps, no back-to-back repeated word) and that row's own
-    price. Order-preserving: a merged dish keeps its first occurrence's position."""
+    price. Order-preserving: a merged dish keeps its first occurrence's position. Step EK-3b Fix F:
+    also strips a back-to-back repeated word from every surviving name (e.g. "... 65 65" -> "... 65")
+    even when there's no duplicate row to merge against."""
+    dishes = [{**d, "name": _drop_repeated_word(d["name"])} for d in dishes]
     best_by_key: dict[str, dict] = {}
     order: list[str] = []
     for dish in dishes:

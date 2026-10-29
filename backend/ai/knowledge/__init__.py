@@ -29,6 +29,11 @@ EMPTY_LIBRARY: dict = {
         # _secondary_types_for. None (not just {}) so a sector with no rule is a clean no-op.
         "two_base_starter_rule": None,
     },
+    # Step EK-3b: canonical ingredient name -> the name/alias phrases that mean the same raw
+    # ingredient (e.g. "capsicum"/"bell pepper"/"green capsicum" all buy the same thing) —
+    # recipe_composer.resolve_ingredients canonicalises every ingredient name through this before
+    # merging/matching, so near-duplicate stock items are never proposed for the same thing.
+    "ingredient_aliases": {},
     # type (from dish_types.json) -> {"base": <base template name>, "grams_per_portion": N,
     # "family_overrides": {<family>: N}} | null (no base for that type) — the deterministic mapping
     # step (base_discovery.map_bases_from_classification) looks a classified dish's type up here

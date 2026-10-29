@@ -464,6 +464,10 @@ def pick_best_sellers(shortlist: list[dict], business_type: str) -> AiCallResult
     )
 
 
+_PROTEIN_WORDS = ["chicken", "mutton", "fish", "prawn", "pork"]
+_VEG_MAIN_WORDS = ["gobi", "paneer", "mushroom"]
+
+
 def compose_family_recipe(
     family_name: str,
     member_dish_names: list[str],
@@ -471,14 +475,52 @@ def compose_family_recipe(
     stock_items: list[tuple[str, str]],
     excluded_ingredient_names: list[str],
 ) -> AiCallResult:
-    """ "FORCE_SILLY_QTY" in family_name returns an implausible main_item_qty (50,000 g) — proves
-    recipe_composer's sanity rule replaces it with the library default instead of trusting it.
-    Otherwise a plausible-looking shared recipe, never repeating an excluded (base-covered)
-    ingredient name."""
+    """Step EK-3b Fix A: derives each member's OWN main item from its own dish name — a protein word
+    (chicken/mutton/fish/prawn/pork) gets that protein at a realistic weight; "egg" gets Egg
+    deliberately given in g (proves recipe_composer forces eggs to pieces); a veg word (gobi/paneer/
+    mushroom) gets that item; a dish with none of these (e.g. "Veg Fried Rice") gets no main item at
+    all (name "", qty 0) — proves a dish genuinely having no single defining ingredient is left
+    alone, not invented. "FORCE_SILLY_QTY" in family_name gives the first member an implausible
+    50,000 g qty (proves the sanity fallback-and-flag). "FORCE_FULL_QTY" gives the first member a
+    real but large 1,000 g qty (proves a genuinely big portion, like a whole tandoori chicken, is
+    accepted, not corrected). "FORCE_MISMATCH" gives every member a Chicken main item regardless of
+    its own name (proves the veg/protein mismatch guard drops it and flags "check this")."""
     default_match = stock_items[0][0] if stock_items else None
     force_silly = "FORCE_SILLY_QTY" in family_name
-    main_qty = 50000.0 if force_silly else 150.0
+    force_full = "FORCE_FULL_QTY" in family_name
+    force_mismatch = "FORCE_MISMATCH" in family_name
     excluded_norm = {name.lower() for name in excluded_ingredient_names}
+
+    members = []
+    for index, dish_name in enumerate(member_dish_names):
+        lower = dish_name.lower()
+        protein = next((w for w in _PROTEIN_WORDS if w in lower), None)
+        if force_mismatch:
+            main_name, unit, qty = "Chicken", "g", 180.0
+        elif protein:
+            qty = 180.0
+            if index == 0 and force_silly:
+                qty = 50000.0
+            elif index == 0 and force_full:
+                qty = 1000.0
+            main_name, unit = protein.title(), "g"
+        elif "egg" in lower:
+            main_name, unit, qty = "Egg", "g", 2.0
+        else:
+            veg = next((w for w in _VEG_MAIN_WORDS if w in lower), None)
+            if veg:
+                main_name, unit, qty = veg.title(), "g", 150.0
+            else:
+                main_name, unit, qty = "", "g", 0.0
+        members.append(
+            {
+                "dish_name": dish_name,
+                "main_item_name": main_name,
+                "main_item_unit": unit,
+                "main_item_qty": qty,
+            }
+        )
+
     ingredients = []
     if "ginger" not in excluded_norm:
         ingredients.append(
@@ -496,10 +538,7 @@ def compose_family_recipe(
         return (
             {
                 "portion_label": "1 plate",
-                "main_item_name": member_dish_names[0] if member_dish_names else "Main item",
-                "main_item_unit": "g",
-                "main_item_qty": main_qty,
-                "member_quantities": [],
+                "members": members,
                 "ingredients": ingredients,
                 "minor_ingredients": [
                     {

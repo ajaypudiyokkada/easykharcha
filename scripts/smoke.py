@@ -6300,13 +6300,18 @@ def check_kitchen_base_discovery() -> None:
 
 
 def check_recipe_composer_flow() -> None:
-    """Step EK-3: recipe_composer.py's best-seller picker, per-family recipe composer and ingredient
-    resolver — no network, fake provider, direct Django calls (same style as
+    """Step EK-3/EK-3b: recipe_composer.py's best-seller picker, per-family recipe composer and
+    ingredient resolver — no network, fake provider, direct Django calls (same style as
     check_kitchen_base_discovery). Covers: a family's recipe never repeats its base's own
-    ingredients; the resolver merges Onion/Onions/Onion Chopped, matches an existing stock item,
-    proposes new items with a unit family and low-stock category, and records "used in"; more than
-    25 families on one menu is capped at 25 AI calls; a silly per-portion quantity is replaced by the
-    default; suggest_setup never writes to StockItem/SellItem/Base/Recipe tables."""
+    ingredients (even if the model does, via a final deterministic filter); every member dish gets
+    its OWN main item, never a single shared one (a protein dish gets its protein, a veg dish gets
+    its veg, a dish with neither gets none — 0/empty is never replaced by a default); a genuinely
+    implausible quantity is replaced by the default and flagged, but a big-but-real one (1,000 g)
+    isn't; eggs are always tracked in pieces; a veg/protein main-item mismatch is dropped and
+    flagged; the resolver canonicalises and merges near-duplicate ingredient names, drops a
+    cooked-derived name, matches an existing stock item, proposes new ones with a unit family and
+    low-stock category, and records "used in"; more families than the cap is still capped;
+    suggest_setup never writes to StockItem/SellItem/Base/Recipe tables."""
     backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
     sys.path.insert(0, os.path.abspath(backend_dir))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -6318,8 +6323,13 @@ def check_recipe_composer_flow() -> None:
     from businesses.models import Business
     from stock.models import Base, SellItem, StockItem
 
+    from ai.provider.base import AiCallResult
     from ai.recipe_composer import (
         MAX_FAMILIES_PER_MENU,
+        _build_alias_lookup,
+        _canonical_ingredient_name,
+        _guess_low_stock_category,
+        _is_cooked_derived,
         _merge_key,
         build_families,
         compose_family_recipes,
@@ -6355,35 +6365,121 @@ def check_recipe_composer_flow() -> None:
     ingredient_names = {i["name"] for i in family_result["ingredients"]}
     if "Garlic" in ingredient_names:
         fail("recipe composer: expected the base's own Garlic NOT repeated in the family's own ingredients")
-    print("OK — a family recipe looks its base grams up deterministically and never repeats the base's own ingredients.")
+    members_by_dish = {m["dish_name"]: m for m in family_result["members"]}
+    if members_by_dish["Chicken Manchurian"]["main_item_name"] != "Chicken":
+        fail(f"recipe composer: expected Chicken Manchurian's own main item to be Chicken, got {members_by_dish['Chicken Manchurian']}")
+    if members_by_dish["Gobi Manchurian"]["main_item_name"] != "Gobi":
+        fail(f"recipe composer: expected Gobi Manchurian's own main item to be Gobi, got {members_by_dish['Gobi Manchurian']}")
+    print("OK — a family recipe looks its base grams up deterministically, never repeats the base's own ingredients, and each member keeps its own main item.")
 
-    # --- a silly per-portion quantity is replaced by the default, not trusted ---
-    silly_family = {
-        "name": "FORCE_SILLY_QTY family",
-        "type": "gravy_nonveg",
-        "dishes": ["Chicken Curry"],
-    }
+    # --- Fix A: a member with no distinct main item (Veg Fried Rice) gets none, not an invented one;
+    #     Fix C: 0/no main item is never replaced by a default ---
+    rice_family = {"name": "Fried rice family", "type": "rice_fried", "dishes": ["Veg Fried Rice", "Chicken Fried Rice"]}
+    rice_result = compose_family_recipes([rice_family], [], "restaurant_cafe", [])["families"][0]
+    rice_members = {m["dish_name"]: m for m in rice_result["members"]}
+    if rice_members["Veg Fried Rice"]["main_item_name"] or rice_members["Veg Fried Rice"]["qty"]:
+        fail(f"recipe composer: expected Veg Fried Rice to get no main item, got {rice_members['Veg Fried Rice']}")
+    if rice_members["Chicken Fried Rice"]["main_item_name"] != "Chicken":
+        fail(f"recipe composer: expected Chicken Fried Rice to keep its own Chicken main item, got {rice_members['Chicken Fried Rice']}")
+    if any("Veg Fried Rice" in c for c in rice_result["corrections"]):
+        fail(f"recipe composer: expected a 0/none main item to never be 'corrected', got {rice_result['corrections']}")
+    print("OK — a dish with no distinct main item gets none (never invented), and 0/none is never replaced by a default.")
+
+    # --- Fix C: an implausible quantity is corrected and flagged; a big-but-real one (1,000 g,
+    #     e.g. a whole tandoori chicken) is accepted untouched ---
+    silly_family = {"name": "FORCE_SILLY_QTY family", "type": "gravy_nonveg", "dishes": ["Chicken Curry"]}
     silly_result = compose_family_recipes([silly_family], [], "restaurant_cafe", [])["families"][0]
-    if silly_result["main_item"]["qty"] != 150.0 or not silly_result["corrections"]:
+    silly_member = silly_result["members"][0]
+    if silly_member["qty"] != 150.0 or not silly_result["corrections"]:
         fail(f"recipe composer: expected a 50,000 g quantity corrected to the default, got {silly_result}")
-    print("OK — an implausible per-portion quantity is replaced by the default and flagged, not trusted.")
+    full_family = {"name": "FORCE_FULL_QTY family", "type": "gravy_nonveg", "dishes": ["Tandoori Chicken Curry"]}
+    full_result = compose_family_recipes([full_family], [], "restaurant_cafe", [])["families"][0]
+    full_member = full_result["members"][0]
+    if full_member["qty"] != 1000.0 or full_result["corrections"]:
+        fail(f"recipe composer: expected a real 1,000 g quantity accepted untouched, got {full_result}")
+    print("OK — an implausible per-portion quantity is corrected and flagged, but a real big one (1,000 g) is accepted.")
 
-    # --- cap: a menu with 40 families makes at most 25 AI calls ---
+    # --- Fix A: eggs are always tracked in pieces, whatever unit the source gave ---
+    egg_family = {"name": "Egg family", "type": "gravy_veg", "dishes": ["Egg Curry"]}
+    egg_result = compose_family_recipes([egg_family], [], "restaurant_cafe", [])["families"][0]
+    egg_member = egg_result["members"][0]
+    if egg_member["main_item_unit"] != "pieces" or egg_member["qty"] != 2.0:
+        fail(f"recipe composer: expected Egg forced to pieces (qty unchanged), got {egg_member}")
+    print("OK — eggs are always tracked in pieces, even when given in grams.")
+
+    # --- Fix A: a veg/protein main-item mismatch is dropped and flagged "check this" ---
+    mismatch_family = {"name": "FORCE_MISMATCH family", "type": "veg_starter_snack", "dishes": ["Veg Manchurian"]}
+    mismatch_result = compose_family_recipes([mismatch_family], [], "restaurant_cafe", [])["families"][0]
+    mismatch_member = mismatch_result["members"][0]
+    if mismatch_member["main_item_name"] or mismatch_member["qty"]:
+        fail(f"recipe composer: expected a veg dish given a Chicken main item to be dropped, got {mismatch_member}")
+    if not any("check this" in f for f in mismatch_result["flags"]):
+        fail(f"recipe composer: expected a 'check this' flag for the dropped mismatch, got {mismatch_result['flags']}")
+    print("OK — a veg dish given a meat main item (or the reverse) is dropped and flagged 'check this', not trusted.")
+
+    # --- Fix D: a final pass strips an ingredient the model repeated despite being told it's
+    #     already covered by the family's own base (Atta / Chapathi / Atta dough) ---
+    def _fake_compose_with_atta(family_name, member_dish_names, business_type, stock_items, excluded_ingredient_names):
+        return AiCallResult(
+            data={
+                "portion_label": "1 piece",
+                "members": [
+                    {"dish_name": d, "main_item_name": "", "main_item_unit": "g", "main_item_qty": 0.0}
+                    for d in member_dish_names
+                ],
+                "ingredients": [
+                    {"name": "Atta", "amount": 50.0, "unit": "g", "role": "main", "confidence": 0.8, "matched_stock_name": None}
+                ],
+                "minor_ingredients": [],
+            },
+            model="fake",
+            input_tokens=10,
+            output_tokens=10,
+        )
+
+    chapathi_family = {"name": "Chapathi family", "type": "bread_dough", "dishes": ["Chapathi"]}
+    atta_dough_base = {
+        "name": "Atta dough",
+        "batch_ingredients": [{"name": "Atta", "qty": 620, "unit": "g"}],
+        "used_by": [{"dish": "Chapathi", "grams_per_portion": 60}],
+    }
+    chapathi_result = compose_family_recipes(
+        [chapathi_family], [atta_dough_base], "restaurant_cafe", [], compose_fn=_fake_compose_with_atta
+    )["families"][0]
+    if any(i["name"] == "Atta" for i in chapathi_result["ingredients"]):
+        fail(f"recipe composer: expected Atta stripped (already covered by the Atta dough base), got {chapathi_result['ingredients']}")
+    print("OK — Atta is stripped from the Chapathi family's own ingredients when the dough base already covers it.")
+
+    # --- cap: more families than MAX_FAMILIES_PER_MENU is still capped, no dish lost ---
+    many_count = MAX_FAMILIES_PER_MENU + 10
     many_families = build_families(
-        [{"name": f"Dish {i}"} for i in range(40)],
-        {f"dish {i}": {"type": "gravy_nonveg" if i % 2 else "rice_fried", "family": f"fam{i}"} for i in range(40)},
+        [{"name": f"Dish {i}"} for i in range(many_count)],
+        {
+            f"dish {i}": {"type": "gravy_nonveg" if i % 2 else "rice_fried", "family": f"fam{i}"}
+            for i in range(many_count)
+        },
     )
-    if len(many_families) != 40:
-        fail(f"recipe composer: expected 40 distinct families from 40 distinct family tags, got {len(many_families)}")
+    if len(many_families) != many_count:
+        fail(f"recipe composer: expected {many_count} distinct families from {many_count} distinct family tags, got {len(many_families)}")
     capped_composed = compose_family_recipes(many_families, [], "restaurant_cafe", [])
     if len(capped_composed["families"]) != MAX_FAMILIES_PER_MENU:
         fail(f"recipe composer: expected exactly {MAX_FAMILIES_PER_MENU} families after capping, got {len(capped_composed['families'])}")
     if len(capped_composed["usage"]) > MAX_FAMILIES_PER_MENU:
         fail(f"recipe composer: expected at most {MAX_FAMILIES_PER_MENU} AI calls, got {len(capped_composed['usage'])}")
     total_dishes_after_cap = sum(len(f["dishes"]) for f in capped_composed["families"])
-    if total_dishes_after_cap != 40:
+    if total_dishes_after_cap != many_count:
         fail(f"recipe composer: expected no dish lost while merging families down to the cap, got {total_dishes_after_cap}")
-    print(f"OK — 40 families on one menu merge down to {MAX_FAMILIES_PER_MENU}, at most {MAX_FAMILIES_PER_MENU} AI calls, no dish lost.")
+    print(f"OK — {many_count} families on one menu merge down to {MAX_FAMILIES_PER_MENU}, at most {MAX_FAMILIES_PER_MENU} AI calls, no dish lost.")
+
+    # --- a 40-family menu (within the cap) keeps all 40 families, uncapped ---
+    forty_families = build_families(
+        [{"name": f"Dish {i}"} for i in range(40)],
+        {f"dish {i}": {"type": "gravy_nonveg" if i % 2 else "rice_fried", "family": f"fam{i}"} for i in range(40)},
+    )
+    forty_composed = compose_family_recipes(forty_families, [], "restaurant_cafe", [])
+    if len(forty_composed["families"]) != 40:
+        fail(f"recipe composer: expected a 40-family menu to keep all 40 families (cap is {MAX_FAMILIES_PER_MENU}), got {len(forty_composed['families'])}")
+    print("OK — a 40-family menu keeps all 40 families under the raised cap.")
 
     # --- merge key: Onion/Onions/Onion Chopped collide; Peas/Oil (short words) don't over-merge ---
     if _merge_key("Onion") != _merge_key("Onions") or _merge_key("Onion") != _merge_key("Onion Chopped"):
@@ -6391,6 +6487,38 @@ def check_recipe_composer_flow() -> None:
     if _merge_key("Peas") == _merge_key("Oil"):
         fail("recipe composer: expected Peas and Oil to stay distinct")
     print("OK — the ingredient merge key collapses Onion/Onions/Onion Chopped without over-merging short names.")
+
+    # --- Fix D: ingredient canonicalisation merges the 7 duplicate sets the real menus found ---
+    duplicate_sets = [
+        ("Capsicum", ["Capsicum", "Bell Pepper", "Capsicum (green diced)"]),
+        ("Black pepper", ["Black pepper", "Pepper powder", "Coarse black pepper"]),
+        ("Cumin seeds", ["Cumin seeds", "Cumin seeds (jeera)", "Jeera"]),
+        ("Cooking oil", ["Cooking oil", "Refined oil", "Vegetable oil", "Oil for frying"]),
+        ("Curry Leaves", ["Curry Leaves", "curry leaves", "Curry leaf"]),
+    ]
+    alias_lookup = _build_alias_lookup("restaurant_cafe")
+    for canonical, variants in duplicate_sets:
+        keys = {_merge_key(_canonical_ingredient_name(v, alias_lookup)) for v in variants}
+        if len(keys) != 1:
+            fail(f"recipe composer: expected {variants} to canonicalise to one '{canonical}' entry, got keys {keys}")
+    if not _is_cooked_derived("Cooked basmati rice") or not _is_cooked_derived("Basmati rice (cooked base)"):
+        fail("recipe composer: expected 'Cooked basmati rice'/'Basmati rice (cooked base)' recognised as cooked-derived (dropped, not a raw ingredient)")
+    print("OK — ingredient canonicalisation merges capsicum/pepper/cumin/oil/case-duplicate variants, and drops cooked-rice-derived names.")
+
+    # --- Fix E: low-stock category by whole-word keyword, not substring ---
+    category_cases = [
+        ("Cabbage", "fresh_semi"),
+        ("Carrot", "fresh_semi"),
+        ("Ginger", "perishable"),
+        ("Garlic", "perishable"),
+        ("Coffee powder", "dry_staples"),
+        ("Tissue paper", "packaging_cleaning"),
+    ]
+    for name, expected in category_cases:
+        got = _guess_low_stock_category(name)
+        if got != expected:
+            fail(f"recipe composer: expected '{name}' categorised '{expected}', got '{got}'")
+    print("OK — low-stock category matches whole words only (cabbage/carrot/ginger/garlic/coffee/tissue all correct).")
 
     # --- resolver: matches an existing stock item, proposes new ones with unit/category, "used in" ---
     tag = __import__("uuid").uuid4().hex[:8]
@@ -6413,12 +6541,14 @@ def check_recipe_composer_flow() -> None:
             "name": "Curry family",
             "type": "gravy_nonveg",
             "dishes": ["Chicken Curry"],
-            "main_item": {"name": "Chicken", "unit": "g", "qty": 180.0},
+            "members": [
+                {"dish_name": "Chicken Curry", "main_item_name": "Chicken", "main_item_unit": "g", "qty": 180.0}
+            ],
             "ingredients": [{"name": "Onions", "unit": "g"}, {"name": "Tomato Chopped", "unit": "g"}],
             "minor_ingredients": [{"name": "Salt", "unit": "g"}],
         }
     ]
-    resolved = resolve_ingredients(family_results, [], business)
+    resolved = resolve_ingredients(family_results, [], business, sector="restaurant_cafe")
     matched_names = {m["stock_item_name"] for m in resolved["matched"]}
     if "Onion" not in matched_names:
         fail(f"recipe composer: expected 'Onions' matched to the existing 'Onion' stock item, got {resolved['matched']}")

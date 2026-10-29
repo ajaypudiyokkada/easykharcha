@@ -37,6 +37,7 @@ from ai.classification import classify_dishes  # noqa: E402
 from ai.extraction import run_menu_extraction  # noqa: E402
 from ai.provider import anthropic_provider  # noqa: E402
 from ai.recipe_composer import (  # noqa: E402
+    MAX_FAMILIES_PER_MENU,
     build_families,
     compose_family_recipes,
     pick_best_sellers,
@@ -244,7 +245,8 @@ def main() -> None:
 
     families = build_families(expanded, classifications)
     print(
-        f"\n{len(families)} raw families built from {len(expanded)} dishes (before the 25-family cap)"
+        f"\n{len(families)} raw families built from {len(expanded)} dishes "
+        f"(before the {MAX_FAMILIES_PER_MENU}-family cap)"
     )
 
     family_data = compose_family_recipes(
@@ -264,18 +266,23 @@ def main() -> None:
     )
 
     corrections = [(f["name"], c) for f in family_results for c in f["corrections"]]
+    all_flags = [(f["name"], flag) for f in family_results for flag in f.get("flags", [])]
+
+    print(f"\nALL {len(family_results)} FAMILIES (name — member count):")
+    for family in family_results:
+        print(f"  - {family['name']} ({len(family['dishes'])} members)")
+
     print(f"\n3 SAMPLE FAMILY RECIPES (of {len(family_results)}):")
     for family in family_results[:3]:
-        main = family["main_item"]
         print(f"\n- {family['name']} ({len(family['dishes'])} dishes: {family['dishes']})")
-        print(
-            f"  portion: {family['portion_label']!r}, main item: {main['qty']:g} {main['unit']} {main['name']}"
+        print(f"  portion: {family['portion_label']!r}")
+        members_line = ", ".join(
+            f"{m['dish_name']}={m['qty']:g}{m['main_item_unit']} {m['main_item_name']}".strip()
+            if m["main_item_name"]
+            else f"{m['dish_name']}=(no main item)"
+            for m in family["members"]
         )
-        if family["member_overrides"]:
-            overrides = ", ".join(
-                f"{o['dish_name']}={o['qty']:g}" for o in family["member_overrides"]
-            )
-            print(f"  member overrides: {overrides}")
+        print(f"  members: {members_line}")
         if family["bases_used"]:
             bases_line = ", ".join(
                 f"{b['base']} {b['grams_per_portion']:g}g" for b in family["bases_used"]
@@ -290,21 +297,38 @@ def main() -> None:
         )
         print(f"  minor ingredients: {minor_line or '(none)'}")
 
-    ingredients = resolve_ingredients(family_results, bases)
+    # The Coffee/drinks family (or families) and the Pepper family — called out explicitly per the
+    # EK-3b real-run proof's required sections.
+    drink_families = [f for f in family_results if "coffee" in f["name"].lower() or "drink" in f["name"].lower()]
+    print(f"\nCOFFEE/DRINKS FAMILIES ({len(drink_families)}):")
+    for family in drink_families:
+        print(f"  - {family['name']}: {family['dishes']}")
+
+    pepper_families = [f for f in family_results if "pepper" in f["name"].lower()]
+    print(f"\nPEPPER FAMILY ({len(pepper_families)} found):")
+    for family in pepper_families:
+        print(f"  - {family['name']}:")
+        for m in family["members"]:
+            item = f"{m['qty']:g}{m['main_item_unit']} {m['main_item_name']}" if m["main_item_name"] else "(no main item)"
+            print(f"      {m['dish_name']}: {item}")
+
+    ingredients = resolve_ingredients(family_results, bases, sector=args.business_type)
     distinct_count = ingredients["matched_count"] + ingredients["new_count"]
     print(
         f"\nINGREDIENTS: {distinct_count} distinct ({ingredients['matched_count']} matched to "
-        f"existing stock, {ingredients['new_count']} new)"
+        f"existing stock, {ingredients['new_count']} new) — FULL LIST:"
     )
     all_names = [m["stock_item_name"] for m in ingredients["matched"]] + [
         n["name"] for n in ingredients["new"]
     ]
     duplicate_names = {name for name in all_names if all_names.count(name) > 1}
-    for n in ingredients["new"][:40]:
+    for n in ingredients["new"]:
         print(
             f"  new: {n['name']} ({n['unit_family']}, {n['low_stock_category']}) — "
             f"used in {len(n['used_in'])}: {n['used_in'][:3]}{'...' if len(n['used_in']) > 3 else ''}"
         )
+    for m in ingredients["matched"]:
+        print(f"  matched: {m['stock_item_name']} (from '{m['matched_from']}') — used in {len(m['used_in'])}")
 
     if corrections:
         print(f"\nQUANTITY CORRECTIONS ({len(corrections)}):")
@@ -312,6 +336,13 @@ def main() -> None:
             print(f"  - [{family_name}] {note}")
     else:
         print("\nQUANTITY CORRECTIONS: none")
+
+    if all_flags:
+        print(f"\nFLAGS / CHECK-THIS ({len(all_flags)}):")
+        for family_name, flag in all_flags:
+            print(f"  - [{family_name}] {flag}")
+    else:
+        print("\nFLAGS / CHECK-THIS: none")
 
     setup_input = (
         kitchen_input + sum(u["input_tokens"] for u in best_sellers_data["usage"]) + family_input
@@ -346,12 +377,14 @@ def main() -> None:
         misses.append(f"best sellers: got {len(best_sellers)}, target 8-12")
     if len(bs_categories) < 4:
         misses.append(f"best seller categories: got {len(bs_categories)}, target >=4")
-    if not (12 <= len(family_results) <= 25):
-        misses.append(f"families: got {len(family_results)} (of {len(families)} raw), target 12-25")
-    if not (40 <= distinct_count <= 90):
-        misses.append(f"distinct ingredients: got {distinct_count}, target 40-90")
+    if not (30 <= len(family_results) <= 60):
+        misses.append(f"families: got {len(family_results)} (of {len(families)} raw), target 30-60")
+    if not (40 <= distinct_count <= 85):
+        misses.append(f"distinct ingredients: got {distinct_count}, target 40-85")
     if duplicate_names:
         misses.append(f"duplicate ingredient names: {duplicate_names}")
+    if all_flags:
+        misses.append(f"protein/veg main-item mismatches flagged (should be 0): {len(all_flags)}")
     if full_cost_inr > 15:
         misses.append(f"cost: ~Rs {full_cost_inr:.2f}, target under Rs 15")
     if misses:
