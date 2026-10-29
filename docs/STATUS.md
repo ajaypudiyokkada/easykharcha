@@ -686,6 +686,29 @@ not built yet.
   limit): drink sub-typing, the merge-only-same-bases-and-main-item-pattern restriction, the
   re-ask-once-on-mismatch flow (drops and flags instead), and dish-list source-line tracking (only a
   repeated-word safety net was added to `base_discovery.dedup_dishes`).
+- **Step EK-3c — Ingredient merging, low-stock category fixes, a real spice list.** Real runs found a
+  bad alias ("rice" wrongly merged Rice flour into Basmati rice), 15 duplicate names still listed
+  separately, several categories wrong (coconut oil/tomato sauce fresh_semi, coriander powder/bread
+  crumbs perishable, babycorn/pork/watermelon/etc. dry_staples), Water/Ice/Ice cubes listed as stock
+  items, and the curry base's generic "Spices 20g" an owner can't buy. Fixed: removed the bad alias
+  and added a sector `never_merge` list (rice flour≠rice, chilli powder≠green chilli/chilli sauce,
+  lemon≠lemon juice, coconut≠coconut milk/oil, cream≠cream cheese, chicken≠chicken wings, ice
+  cream≠ice); one new `AI_MODEL_KITCHEN` call (`provider.merge_ingredients`) groups remaining
+  duplicates and tags every item's category, applied only when `_group_is_safe` (same unit family, no
+  never-merge conflict) — real-run testing found the first `_MAX_TOKENS_MERGE` (3000) silently
+  truncated to zero groups on a ~100-item menu (the schema's safe empty-list default masked it),
+  raised to 8000; `_guess_low_stock_category` now checks dry_staples before perishable/fresh_semi (a
+  processed form must win over the fresh thing it's made from) plus an expanded keyword table; Water/
+  Ice/Ice cubes excluded entirely from the ingredient list; the onion-tomato masala formula's "Spices"
+  split into garam masala/coriander powder/turmeric/red chilli powder (still 20g). Real-run proof
+  (`ai_try_kitchen.py --setup`): Kavan 91 ingredients (was 95), 3 merges, 0 Water/Ice, Rice flour
+  still separate, ~Rs 5.89; FOMO 114 (was 118), 5 merges, ~Rs 12.65 — the merge call itself costs well
+  under Rs 3/menu (family recipes were all cache hits); missed the 40-85 distinct-ingredient target on
+  both (unrelated pre-existing target, a dense real menu genuinely has this many raw ingredients).
+  **Not done** (scope cut for the 40-minute limit): quantity summation across a merged group (no
+  existing code path tracks per-ingredient quantities at all, so there was nothing to sum); the merge
+  call isn't itself cached, so it re-runs (and finds a slightly different, always-safe set of merges)
+  on every call.
 - **Step EK-2c — Remove duplicate expansion, fix names/splits, refine types.** Two real bugs fixed:
   (1) the first pass's own inline-variant expansion and the dedicated group pass could both expand
   the same heading, producing duplicates/garbled names ("Gobi Manchurian/65 65") — `apply_groups` is

@@ -49,6 +49,8 @@ class AiUsageKind(models.TextChoices):
     # Step EK-3: recipe_composer.py's best-seller pick (one call/menu) and per-family recipe calls.
     SETUP_BEST_SELLERS = "setup_best_sellers", "setup_best_sellers"
     SETUP_FAMILY_RECIPE = "setup_family_recipe", "setup_family_recipe"
+    # Step EK-3c: the one ingredient merge + low-stock category call in resolve_ingredients.
+    SETUP_INGREDIENT_MERGE = "setup_ingredient_merge", "setup_ingredient_merge"
 
 
 class AiUsage(models.Model):

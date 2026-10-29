@@ -34,6 +34,11 @@ EMPTY_LIBRARY: dict = {
     # recipe_composer.resolve_ingredients canonicalises every ingredient name through this before
     # merging/matching, so near-duplicate stock items are never proposed for the same thing.
     "ingredient_aliases": {},
+    # Step EK-3c: pairs of name-phrases that must NEVER end up as one merged stock item even if the
+    # merge AI call groups them together — recipe_composer._group_is_safe checks every pair of a
+    # proposed group's members against this list before trusting the merge (e.g. "rice flour" is not
+    # "rice" — a milled product is never the same purchasable item as what it's milled from).
+    "never_merge": [],
     # type (from dish_types.json) -> {"base": <base template name>, "grams_per_portion": N,
     # "family_overrides": {<family>: N}} | null (no base for that type) — the deterministic mapping
     # step (base_discovery.map_bases_from_classification) looks a classified dish's type up here

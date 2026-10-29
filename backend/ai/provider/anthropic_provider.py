@@ -11,6 +11,7 @@ from ..schemas import (
     DishClassificationResult,
     FamilyRecipeSuggestion,
     GroupExtractionResult,
+    IngredientMergeResult,
     MenuExtractionResult,
     RecipeSuggestionsResult,
 )
@@ -24,6 +25,10 @@ _MAX_TOKENS_RECIPE = 4000
 _MAX_TOKENS_KITCHEN = 8000
 _MAX_TOKENS_BEST_SELLER = 2000
 _MAX_TOKENS_FAMILY_RECIPE = 2000
+# A real menu's full ingredient list can be ~100 distinct names, and the model must echo every one
+# back inside some group — real-run testing found 3000 silently truncated to 0 groups (the schema's
+# safe empty-list default masked the truncation as "nothing to merge" instead of failing loudly).
+_MAX_TOKENS_MERGE = 8000
 
 # Models that default to adaptive extended thinking reject a forced tool_choice ("tool" or "any") —
 # the API returns a 400 ("tool_choice: type ... are not supported for this model"), since forcing an
@@ -206,4 +211,22 @@ def compose_family_recipe(
             max_tokens=_MAX_TOKENS_FAMILY_RECIPE,
         ),
         parse=lambda raw: FamilyRecipeSuggestion.model_validate(raw).model_dump(),
+    )
+
+
+def merge_ingredients(items: list[dict]) -> AiCallResult:
+    messages = prompts.merge_messages(items)
+    tool = prompts.merge_tool()
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_KITCHEN,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=prompts.MERGE_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_MERGE,
+        ),
+        parse=lambda raw: IngredientMergeResult.model_validate(raw).model_dump(),
     )

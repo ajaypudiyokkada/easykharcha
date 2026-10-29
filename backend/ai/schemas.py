@@ -469,3 +469,39 @@ class FamilyRecipeSuggestion(BaseModel):
     @classmethod
     def _cap_minor_ingredients(cls, value: list) -> list:
         return value[:MAX_MINOR_INGREDIENTS_PER_DISH]
+
+
+# Step EK-3c: one cheap call groups the resolver's already-alias-merged ingredient names into real
+# purchasable stock items and tags each with a low-stock category — recipe_composer.py applies a
+# group only once it passes the sector's never-merge list and a same-unit-family check, never trusted
+# blindly; every input name not covered by a trusted group stays its own item.
+MAX_MERGE_GROUPS = 200
+MAX_MERGE_MEMBERS_PER_GROUP = 12
+
+
+class MergeGroup(BaseModel):
+    canonical_name: str
+    members: list[str] = Field(default_factory=list)
+    category: Literal["perishable", "fresh_semi", "dry_staples", "packaging_cleaning"] = (
+        "dry_staples"
+    )
+
+    @field_validator("canonical_name")
+    @classmethod
+    def _clean_canonical(cls, value: str) -> str:
+        return _clean_text(value, MAX_NAME_LENGTH)
+
+    @field_validator("members")
+    @classmethod
+    def _clean_members(cls, value: list[str]) -> list[str]:
+        cleaned = [_clean_text(v, MAX_NAME_LENGTH) for v in value]
+        return [v for v in cleaned if v][:MAX_MERGE_MEMBERS_PER_GROUP]
+
+
+class IngredientMergeResult(BaseModel):
+    groups: list[MergeGroup] = Field(default_factory=list)
+
+    @field_validator("groups")
+    @classmethod
+    def _cap_groups(cls, value: list) -> list:
+        return value[:MAX_MERGE_GROUPS]

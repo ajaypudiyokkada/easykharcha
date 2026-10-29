@@ -6330,7 +6330,9 @@ def check_recipe_composer_flow() -> None:
         _canonical_ingredient_name,
         _guess_low_stock_category,
         _is_cooked_derived,
+        _is_excluded_non_stock_item,
         _merge_key,
+        _never_merge_pairs,
         build_families,
         compose_family_recipes,
         resolve_ingredients,
@@ -6513,6 +6515,27 @@ def check_recipe_composer_flow() -> None:
         ("Garlic", "perishable"),
         ("Coffee powder", "dry_staples"),
         ("Tissue paper", "packaging_cleaning"),
+        # Step EK-3c: real-run categorisation bugs (finding 3) — a processed/dried form must win over
+        # the fresh ingredient it's made from (checked BEFORE perishable/fresh_semi now).
+        ("Coconut oil", "dry_staples"),
+        ("Tomato sauce", "dry_staples"),
+        ("Coriander powder", "dry_staples"),
+        ("Bread crumbs", "dry_staples"),
+        ("Pork", "perishable"),
+        ("Bacon", "perishable"),
+        ("Pork ribs", "perishable"),
+        ("Sausages", "perishable"),
+        ("Babycorn", "perishable"),
+        ("Broccoli", "perishable"),
+        ("Cucumber", "perishable"),
+        ("Banana", "perishable"),
+        ("Watermelon", "perishable"),
+        ("Green chilli", "perishable"),
+        ("Green peas", "perishable"),
+        ("Pineapple", "perishable"),
+        ("Corn", "perishable"),
+        ("Mixed vegetables", "perishable"),
+        ("Fruit", "perishable"),
     ]
     for name, expected in category_cases:
         got = _guess_low_stock_category(name)
@@ -6562,6 +6585,144 @@ def check_recipe_composer_flow() -> None:
         if not new_item["unit_family"] or not new_item["low_stock_category"] or not new_item["used_in"]:
             fail(f"recipe composer: expected every new ingredient to carry a unit family, category and used_in, got {new_item}")
     print("OK — the resolver merges near-duplicate names, matches an existing stock item, and proposes new ones with a unit family, low-stock category and used_in.")
+
+    # --- Step EK-3c: Rice flour stays separate from Basmati rice (the real bad-merge bug) ---
+    if ("rice flour", "rice") not in _never_merge_pairs("restaurant_cafe"):
+        fail("recipe composer: expected the sector's never_merge list to carry ('rice flour', 'rice')")
+    rice_family = {
+        "name": "Rice family", "type": "other", "dishes": ["Rice Dish"], "members": [],
+        "ingredients": [{"name": "Rice flour", "unit": "g"}, {"name": "Basmati rice", "unit": "g"}],
+        "minor_ingredients": [],
+    }
+    rice_resolved = resolve_ingredients([rice_family], [], None, sector="restaurant_cafe")
+    rice_new_names = {n["name"] for n in rice_resolved["new"]}
+    if not {"Rice flour", "Basmati rice"} <= rice_new_names:
+        fail(f"recipe composer: expected Rice flour and Basmati rice to stay two separate items, got {rice_new_names}")
+    print("OK — Rice flour stays separate from Basmati rice.")
+
+    # --- Step EK-3c: the 15 real duplicate sets each merge to one item. 5 of them (Bread crumbs/
+    # Breadcrumbs, Cream/Fresh cream, Oil/Cooking oil, Peanut/Peanuts, Cabbage/"Cabbage, shredded")
+    # already canonicalise via the EXISTING alias table / descriptor-stripping merge key (Fix D)
+    # before the new merge call ever sees them — confirmed by never appearing in its own merges log;
+    # the other 10 are genuinely new names the merge call alone can tell are the same item. ---
+    already_merged_pairs = [
+        ("Breadcrumbs", ["Bread crumbs", "Breadcrumbs"]),
+        ("Cream", ["Cream", "Fresh cream"]),
+        ("Cooking oil", ["Oil", "Cooking oil"]),
+        ("Peanut", ["Peanut", "Peanuts"]),
+        ("Cabbage", ["Cabbage", "Cabbage, shredded"]),
+    ]
+    ai_merge_pairs = [
+        ("Gram flour", ["Gram flour", "Besan"]),
+        ("Yogurt", ["Yogurt", "Curd", "Hung curd"]),
+        ("Cashew", ["Cashew", "Cashew Nuts"]),
+        ("Maida", ["Maida", "Flour", "All-purpose flour"]),
+        ("Ajwain", ["Ajwain", "Carom seeds"]),
+        ("Watermelon", ["Water Melon", "Watermelon"]),
+        ("Potato", ["Aloo", "Potato"]),
+        ("Chilli powder", ["Chilli powder", "Red chilli powder"]),
+        ("Vanilla essence", ["Vanilla essence", "Vanilla extract"]),
+        ("Vanilla ice cream", ["Ice Cream", "Vanilla ice cream"]),
+    ]
+    duplicate_groups = already_merged_pairs + ai_merge_pairs
+    dup_family = {
+        "name": "Duplicate sets family", "type": "other", "dishes": ["Dup Dish"], "members": [],
+        "ingredients": [{"name": name, "unit": "g"} for _canon, names in duplicate_groups for name in names],
+        "minor_ingredients": [],
+    }
+
+    def _fake_merge_duplicate_sets(items: list) -> "AiCallResult":
+        given = {i["name"] for i in items}
+        groups = []
+        for canonical, names in duplicate_groups:
+            members = [n for n in names if n in given]
+            if members:
+                groups.append({"canonical_name": canonical, "members": members, "category": "dry_staples"})
+        return AiCallResult(data={"groups": groups}, model="fake", input_tokens=1, output_tokens=1)
+
+    dup_resolved = resolve_ingredients(
+        [dup_family], [], None, sector="restaurant_cafe", merge_fn=_fake_merge_duplicate_sets
+    )
+    dup_new_names = {n["name"] for n in dup_resolved["new"]}
+    for canonical, _names in duplicate_groups:
+        if canonical not in dup_new_names:
+            fail(f"recipe composer: expected duplicate set to merge into '{canonical}', got {dup_new_names}")
+    if len(dup_resolved["merges"]) != len(ai_merge_pairs):
+        fail(f"recipe composer: expected exactly the {len(ai_merge_pairs)} genuinely new-to-AI merges logged (the other 5 pre-merge deterministically), got {dup_resolved['merges']}")
+    print(f"OK — all {len(duplicate_groups)} real duplicate sets merge to one item each (5 already deterministic, {len(ai_merge_pairs)} via the new merge call), every AI merge logged.")
+
+    # --- Step EK-3c: a merge crossing unit families, or the never-merge list, is rejected ---
+    def _fake_merge_bad_groups(items: list) -> "AiCallResult":
+        return AiCallResult(
+            data={
+                "groups": [
+                    {"canonical_name": "Rice", "members": ["Rice flour", "Basmati rice"], "category": "dry_staples"},
+                    {"canonical_name": "Chicken", "members": ["Chicken", "Chicken wings"], "category": "perishable"},
+                    {"canonical_name": "Mixed unit item", "members": ["Egg", "Salt"], "category": "dry_staples"},
+                ]
+            },
+            model="fake", input_tokens=1, output_tokens=1,
+        )
+
+    bad_family = {
+        "name": "Bad merge family", "type": "other", "dishes": ["Bad Dish"], "members": [],
+        "ingredients": [
+            {"name": "Rice flour", "unit": "g"}, {"name": "Basmati rice", "unit": "g"},
+            {"name": "Chicken", "unit": "g"}, {"name": "Chicken wings", "unit": "g"},
+            {"name": "Egg", "unit": "pieces"}, {"name": "Salt", "unit": "g"},
+        ],
+        "minor_ingredients": [],
+    }
+    bad_resolved = resolve_ingredients(
+        [bad_family], [], None, sector="restaurant_cafe", merge_fn=_fake_merge_bad_groups
+    )
+    bad_new_names = {n["name"] for n in bad_resolved["new"]}
+    expected_separate = {"Rice flour", "Basmati rice", "Chicken", "Chicken wings", "Egg", "Salt"}
+    if not expected_separate <= bad_new_names:
+        fail(f"recipe composer: expected a never-merge/unit-family-crossing proposal rejected, got {bad_new_names}")
+    if bad_resolved["merges"]:
+        fail(f"recipe composer: expected no merges applied once every proposal is unsafe, got {bad_resolved['merges']}")
+    print("OK — a proposed merge crossing the never-merge list or unit families is rejected; members stay separate.")
+
+    # --- Step EK-3c: Water and Ice never become stock items ---
+    water_family = {
+        "name": "Water family", "type": "other", "dishes": ["Water Dish"], "members": [],
+        "ingredients": [
+            {"name": "Water", "unit": "ml"}, {"name": "Ice", "unit": "g"}, {"name": "Ice cubes", "unit": "g"},
+            {"name": "Ice cream", "unit": "g"},
+        ],
+        "minor_ingredients": [],
+    }
+    water_resolved = resolve_ingredients([water_family], [], None, sector="restaurant_cafe")
+    water_new_names = {n["name"] for n in water_resolved["new"]}
+    if {"Water", "Ice", "Ice cubes"} & water_new_names:
+        fail(f"recipe composer: expected Water/Ice/Ice cubes excluded as non-stock items, got {water_new_names}")
+    if "Ice cream" not in water_new_names:
+        fail(f"recipe composer: expected Ice cream (a real stock item) kept, got {water_new_names}")
+    if not (_is_excluded_non_stock_item("Water") and _is_excluded_non_stock_item("Ice cubes")):
+        fail("recipe composer: expected Water/Ice cubes recognised as non-stock items")
+    if _is_excluded_non_stock_item("Ice cream"):
+        fail("recipe composer: expected Ice cream NOT recognised as a non-stock item")
+    print("OK — Water and Ice (and Ice cubes) are excluded as non-stock items; Ice cream is kept.")
+
+    # --- Step EK-3c: a failed/skipped merge call still falls back to the keyword category table ---
+    def _fake_merge_empty(items: list) -> "AiCallResult":
+        return AiCallResult(data={"groups": []}, model="fake", input_tokens=1, output_tokens=1)
+
+    fallback_family = {
+        "name": "Fallback family", "type": "other", "dishes": ["Fallback Dish"], "members": [],
+        "ingredients": [{"name": "Watermelon", "unit": "g"}, {"name": "Random Spice Mix", "unit": "g"}],
+        "minor_ingredients": [],
+    }
+    fallback_resolved = resolve_ingredients(
+        [fallback_family], [], None, sector="restaurant_cafe", merge_fn=_fake_merge_empty
+    )
+    fallback_categories = {n["name"]: n["low_stock_category"] for n in fallback_resolved["new"]}
+    if fallback_categories.get("Watermelon") != "perishable":
+        fail(f"recipe composer: expected keyword fallback to categorise Watermelon when the merge call returns nothing, got {fallback_categories}")
+    if not fallback_categories.get("Random Spice Mix"):
+        fail(f"recipe composer: expected every item to still get a category when the merge call returns nothing, got {fallback_categories}")
+    print("OK — when the merge call returns nothing, every ingredient still gets a category from the keyword table.")
 
     # --- suggest_setup never writes to StockItem/SellItem/Base tables ---
     dishes = [
