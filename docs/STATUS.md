@@ -906,3 +906,19 @@ both say so in the UI.
   `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props exist as extension points but nothing
   creates or drives the recipe-suggestions call or a guided per-dish ingredients flow yet — Step C2b,
   which also owns best-sellers.
+
+- **Step EK-4a — EK setup runs as a real job, backend only.** New `EkSetupRun` (one per MenuScan,
+  OneToOne), `POST`/`GET businesses/<id>/ai/menu-scans/<scan_id>/ek-setup/` (Owner-only, same
+  monthly cap and `AI_DAILY_SCANS_PER_BUSINESS` bucket as menu scans; a second POST returns the
+  existing run, never a second AI call). Input is the business's own current active sell items (an
+  owner's edit/deletion is respected with no FK back to the scan needed); `ai/ek_setup.py` maps
+  `suggest_setup`'s result to dish ids and formats every quantity via `stock/units.py` — never cost,
+  model names or vendor wording. `run_ai_jobs` now also polls EkSetupRun (same heartbeat/10-minute
+  stuck-`running` recovery/per-job try-except as MenuScan). New `scripts/ai_try_ek_setup.py` (real
+  key, HTTP end to end: scan, confirm dishes, start+poll EK setup). Proved via `verify --area ai`'s
+  new `check_ek_setup_flow` (AI_FAKE). **Real-key run against `_private/menus/kavan.pdf` did not
+  finish**: the menu scan and most of suggest_setup's real calls (classification, best sellers, most
+  family recipes) succeeded, but the run hit a reproducible `ai_provider_error` late in the pipeline
+  on two separate attempts — not yet root-caused (suspect `resolve_ingredients`' one ingredient-merge
+  call over this menu's ~90 distinct ingredients, but unconfirmed); needs a follow-up step with
+  logging around that call before this can be called proven end-to-end on a real menu.

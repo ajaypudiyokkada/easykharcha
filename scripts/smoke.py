@@ -6916,6 +6916,290 @@ def check_recipe_composer_flow() -> None:
     print("OK — suggest_setup proposes but never writes to StockItem/SellItem/Base — nothing applied until a later step.")
 
 
+def check_ek_setup_flow() -> None:
+    """Step EK-4a: base discovery + recipe_composer.suggest_setup run as a real job (EkSetupRun),
+    queued/polled the same way as a menu scan (AI_FAKE runs it inline). Covers: the owner's
+    confirmed dish list (deletions respected) drives the input and every dish_id in the result
+    matches it; Owner-only, cross-business 404; a second POST is idempotent (same run, no second
+    AI call); the shared daily-scan cap and the monthly cost cap both surface a clear error code;
+    the worker's 10-minute stuck-job recovery; display-unit rollup (1,200 g -> 1.2 kg)."""
+    owner_mobile, owner_access, _ = signup_and_login("EK Setup Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "EK Setup Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ek setup flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+    _, manager_access, _ = _add_team_member(
+        business_id, owner_access, "EK Setup Manager", "manager"
+    )
+    _, head_chef_access, _ = _add_team_member(
+        business_id, owner_access, "EK Setup Head Chef", "head_chef"
+    )
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "EK Setup Helper", "helper")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {
+            "items": [
+                {"name": "Chicken", "unit": "kg"},
+                {"name": "Gobi", "unit": "kg"},
+                {"name": "Rice", "unit": "kg"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ek setup flow: stock bulk create expected 201, got {status} ({body})")
+    stock_ids = {i["name"]: i["id"] for i in body}
+
+    dish_names = [
+        "Chicken Curry",
+        "Chicken Manchurian",
+        "Gobi Manchurian",
+        "Veg Fried Rice",
+        "Chicken Fried Rice",
+        "Egg Curry",
+    ]
+    dish_ids = {}
+    for name in dish_names:
+        lowered = name.lower()
+        main = "Chicken" if "chicken" in lowered else "Gobi" if "gobi" in lowered else "Rice"
+        dish_id, _ = _create_dish(
+            business_id, owner_access, name, "150.00", [(stock_ids[main], "0.200")]
+        )
+        dish_ids[name] = dish_id
+
+    deleted_id, _ = _create_dish(
+        business_id, owner_access, "Soon Deleted Dish", "99.00", [(stock_ids["Rice"], "0.100")]
+    )
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{deleted_id}/",
+        {"active": False},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"ek setup flow: deactivate dish expected 200, got {status} ({body})")
+    print("OK — test fixtures: 6 confirmed dishes plus one deactivated ('deleted') dish.")
+
+    def new_scan(marker: bytes | None = None):
+        body_bytes, content_type = multipart_multi_body(
+            [("images", "menu.png", make_png(marker=marker), "image/png")]
+        )
+        return request(
+            "POST",
+            f"/businesses/{business_id}/ai/menu-scans/",
+            raw_body=body_bytes,
+            content_type=content_type,
+            token=owner_access,
+        )
+
+    status, body, _ = new_scan()
+    if status != 202:
+        fail(f"ek setup flow: menu scan create expected 202, got {status} ({body})")
+    scan_id = body["id"]
+
+    def ek_setup_post(scan: int = scan_id, token: str = owner_access):
+        return request(
+            "POST", f"/businesses/{business_id}/ai/menu-scans/{scan}/ek-setup/", token=token
+        )
+
+    def ek_setup_get(scan: int = scan_id, token: str = owner_access):
+        return request(
+            "GET", f"/businesses/{business_id}/ai/menu-scans/{scan}/ek-setup/", token=token
+        )
+
+    # --- role gating: only the Owner (sellitems.manage) can reach this endpoint ---
+    for role_name, token in (
+        ("manager", manager_access),
+        ("head chef", head_chef_access),
+        ("helper", helper_access),
+    ):
+        status, body, _ = ek_setup_post(token=token)
+        if status != 403:
+            fail(f"ek setup flow: {role_name} POST expected 403, got {status} ({body})")
+    print("OK — Manager/Head chef/Helper can't start an EK setup run (Owner-only).")
+
+    # --- happy path: queued -> done (AI_FAKE runs inline) ---
+    status, body, _ = ek_setup_post()
+    if status != 202 or body["status"] != "done":
+        fail(f"ek setup flow: ek-setup create expected 202/done, got {status} ({body})")
+    run_id = body["id"]
+    for key in ("best_sellers", "bases", "families", "ingredients", "estimate_note"):
+        if key not in body:
+            fail(f"ek setup flow: expected '{key}' in the owner-facing result, got {body}")
+    print("OK — EK setup run queued->done (AI_FAKE inline), owner-facing result shape present.")
+
+    # --- every dish_id matches the owner's own dishes; the deactivated dish never appears ---
+    seen_dish_ids: set = set()
+    for pick in body["best_sellers"]:
+        seen_dish_ids.add(pick["dish_id"])
+    for base in body["bases"]:
+        for d in base["dishes"]:
+            seen_dish_ids.add(d["dish_id"])
+    for family in body["families"]:
+        for m in family["members"]:
+            seen_dish_ids.add(m["dish_id"])
+    seen_dish_ids.discard(None)
+    valid_ids = set(dish_ids.values())
+    if not seen_dish_ids <= valid_ids:
+        fail(
+            "ek setup flow: expected every dish_id to be one of the owner's own dishes, extra: "
+            f"{seen_dish_ids - valid_ids}"
+        )
+    if deleted_id in seen_dish_ids:
+        fail("ek setup flow: expected the deactivated ('deleted') dish to never appear in the result")
+    print("OK — every dish_id in the result matches the owner's own dishes; the deleted dish never appears.")
+
+    # --- second POST is idempotent: same run, no second AI call ---
+    before_usage = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (business_id,)
+    )[0]
+    status, body, _ = ek_setup_post()
+    after_usage = _ai_sql_read_one(
+        "SELECT COUNT(*) FROM ai_aiusage WHERE business_id = ?", (business_id,)
+    )[0]
+    if status != 200 or body["id"] != run_id or after_usage != before_usage:
+        fail(
+            "ek setup flow: expected the same run with no new AiUsage rows, got "
+            f"{status}, id {body.get('id')} (expected {run_id}), usage {before_usage}->{after_usage}"
+        )
+    print("OK — a second POST returns the same run and makes no second AI call.")
+
+    status, body, _ = ek_setup_get()
+    if status != 200 or body["id"] != run_id or body["status"] != "done":
+        fail(f"ek setup flow: GET expected the same done run, got {status} ({body})")
+    print("OK — GET polls the same run.")
+
+    # --- cross-business access: a real scan id under someone else's business -> 404 ---
+    other_mobile, other_access, _ = signup_and_login("EK Setup Intruder")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "EK Setup Intruder Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=other_access,
+    )
+    if status != 201:
+        fail(f"ek setup flow: intruder business create expected 201, got {status} ({body})")
+    other_business_id = body["id"]
+    status, body, _ = request(
+        "GET",
+        f"/businesses/{other_business_id}/ai/menu-scans/{scan_id}/ek-setup/",
+        token=other_access,
+    )
+    if status != 404:
+        fail(f"ek setup flow: cross-business ek-setup access expected 404, got {status} ({body})")
+    print("OK — another business's scan id is a 404, not the run's own data.")
+
+    # --- monthly cost cap: a huge AiUsage row trips it (checked first, so it never touches the
+    # daily-scan bucket below) ---
+    status, body, _ = new_scan()
+    if status != 202:
+        fail(f"ek setup flow: monthly-cap-test scan expected 202, got {status} ({body})")
+    cap_scan_id = body["id"]
+    cap_row_id = _ai_sql_write(
+        "INSERT INTO ai_aiusage "
+        "(business_id, kind, model, input_tokens, output_tokens, est_cost_usd, created) "
+        "VALUES (?, 'setup_best_sellers', 'smoke-test', 0, 0, '999999', ?)",
+        (business_id, str(datetime.now(dt_timezone.utc))),
+    )
+    status, body, _ = ek_setup_post(scan=cap_scan_id)
+    if status != 503 or body["error"]["code"] != "ai_unavailable":
+        fail(f"ek setup flow: expected 503/ai_unavailable once the monthly cost cap is reached, got {status} ({body})")
+    _ai_sql_write("DELETE FROM ai_aiusage WHERE id = ?", (cap_row_id,))
+    print("OK — EK setup returns ai_unavailable (503) once the monthly cost cap is reached.")
+
+    # --- daily scan cap (AI_DAILY_SCANS_PER_BUSINESS, shared with menu scans): 3 units used so far
+    # (the happy-path scan, its own successful EK setup start, and the monthly-cap-test scan — the
+    # cap-blocked POST on top of that never reached the daily-scan check) — 2 more scans fill it to
+    # the default limit of 5, then starting EK setup on the 5th scan (itself already inside the
+    # full bucket) is rejected ---
+    last_scan_id = None
+    for _ in range(2):
+        status, body, _ = new_scan()
+        if status != 202:
+            fail(f"ek setup flow: filler scan expected 202, got {status} ({body})")
+        last_scan_id = body["id"]
+    status, body, _ = ek_setup_post(scan=last_scan_id)
+    if status != 429 or body["error"]["code"] != "ai_daily_limit_reached":
+        fail(
+            "ek setup flow: expected the shared daily-scan cap to reject with "
+            f"ai_daily_limit_reached, got {status} ({body})"
+        )
+    print("OK — EK setup returns ai_daily_limit_reached (429) once the shared daily-scan cap is reached.")
+
+    # --- direct-call checks: the worker's 10-minute stuck-job recovery, and display-unit rollup
+    # (1,200 g -> 1.2 kg) — same direct-Django-call style as check_recipe_composer_flow, since
+    # these depend on internals the HTTP API doesn't expose ---
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    from django.utils import timezone as dj_timezone
+
+    from ai import ek_setup as ek_setup_module
+    from ai.management.commands.run_ai_jobs import Command as RunAiJobsCommand
+    from ai.models import EkSetupRun as DjEkSetupRun
+    from ai.models import EkSetupRunStatus as DjEkSetupRunStatus
+    from ai.models import MenuScan as DjMenuScan
+    from ai.models import MenuScanStatus as DjMenuScanStatus
+    from businesses.models import Business as DjBusiness
+
+    business = DjBusiness.objects.get(id=business_id)
+    # status=DONE from the start — this fixture scan is never meant to be read; left QUEUED (the
+    # model default), a real worker polling this same dev DB would pick it up, fail on its
+    # nonexistent temp_dir, and log a scary (harmless) traceback every run.
+    stuck_scan = DjMenuScan.objects.create(
+        business=business,
+        created_by_id=business.created_by_id,
+        temp_dir="smoke-stuck-ek",
+        status=DjMenuScanStatus.DONE,
+        result={"is_menu": True, "sections": []},
+    )
+    stuck_run = DjEkSetupRun.objects.create(business=business, menu_scan=stuck_scan)
+    stuck_run.status = DjEkSetupRunStatus.RUNNING
+    stuck_run.heartbeat = dj_timezone.now() - dj_timezone.timedelta(minutes=11)
+    stuck_run.started_at = stuck_run.heartbeat
+    stuck_run.save(update_fields=["status", "heartbeat", "started_at"])
+    RunAiJobsCommand()._fail_stuck_jobs()
+    stuck_run.refresh_from_db()
+    if stuck_run.status != DjEkSetupRunStatus.FAILED or stuck_run.error != "timeout":
+        fail(
+            "ek setup flow: expected a stuck (>10 min) running job recovered as failed/timeout, "
+            f"got {stuck_run.status}/{stuck_run.error}"
+        )
+    print("OK — a stuck (>10 min) running EK setup job is recovered (failed cleanly, error=timeout).")
+
+    raw = {
+        "best_sellers": [],
+        "bases": [
+            {
+                "name": "Test Base",
+                "type": "batter",
+                "batch_ingredients": [{"name": "Flour", "qty": 1200, "unit": "g"}],
+                "used_by": [],
+            }
+        ],
+        "families": [],
+        "ingredients": {"matched": [], "new": []},
+    }
+    owner_result = ek_setup_module.build_owner_result(raw, {})
+    formula = owner_result["bases"][0]["per_1000_formula"][0]
+    if formula["display_qty"] != "1.2" or formula["display_unit"] != "kg":
+        fail(f"ek setup flow: expected 1,200 g to display as 1.2 kg, got {formula}")
+    if not owner_result.get("estimate_note"):
+        fail("ek setup flow: expected every result to carry an estimate note")
+    print("OK — display units roll up (1,200 g shows as 1.2 kg), and every result carries an estimate note.")
+
+
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
@@ -7114,6 +7398,7 @@ ALL_CHECKS = [
     check_ai_flow,
     check_kitchen_base_discovery,
     check_recipe_composer_flow,
+    check_ek_setup_flow,
     check_admin_delete_flow,
 ]
 
@@ -7149,6 +7434,7 @@ AREA_CHECKS: dict[str, list] = {
         check_ai_flow,
         check_kitchen_base_discovery,
         check_recipe_composer_flow,
+        check_ek_setup_flow,
     ],
     "admin": [check_admin_delete_flow],
 }

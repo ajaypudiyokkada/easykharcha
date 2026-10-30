@@ -166,6 +166,16 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   cream) plus `never_merge` protection for Kashmiri red chilli vs red chilli powder and soy sauce
   variants; a base already carrying Dark/Light soy sauce also excludes a generic "Soy sauce" from its
   family's own ingredient list.
+  Step EK-4a: `EkSetupRun` (business, menu_scan OneToOne — one run per scan, status queued/running/
+  done/failed, heartbeat, error, result, cost fields mirroring AiUsage); `ek_setup.py`
+  (`build_dish_input` — the business's own current active sell items, so deletions/edits are
+  respected with no FK back to the scan; `build_owner_result` — suggest_setup's raw shape mapped to
+  dish ids and display-formatted via stock/units.py, cost/model/vendor wording stripped);
+  `jobs.process_ek_setup_run` (inline under AI_FAKE, else `run_ai_jobs` — same per-job try/except,
+  heartbeat, 10-minute stuck-`running` recovery as MenuScan); `views.EkSetupView` (POST starts or
+  returns the existing run idempotently, GET polls), Owner-only (`sellitems.manage`), gated by the
+  monthly cap and the same daily-scan bucket as menu scans (`AI_DAILY_SCANS_PER_BUSINESS`). No
+  StockItem/SellItem/Recipe/Base writes — unchanged from suggest_setup's own contract.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
@@ -260,6 +270,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   chunk hit max_tokens or the 400-dish cap
 - `POST businesses/<id>/ai/recipe-suggestions/` — RecipeSuggestionView — `dish_ids` or `dishes:[{name}]`,
   max 15/call; both `sellitems.manage`, 429/503 on limits, see ai/limits.py
+- `POST/GET businesses/<id>/ai/menu-scans/<scan_id>/ek-setup/` — EkSetupView — Step EK-4a: starts
+  (or idempotently returns) the EK setup run for this scan / polls it; `sellitems.manage`, same
+  429/503 caps as above, owner-facing result shape in docs/STATUS.md
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
