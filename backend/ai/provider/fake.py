@@ -55,6 +55,7 @@ from ..schemas import (
     DishClassificationResult,
     FamilyRecipeSuggestion,
     GroupExtractionResult,
+    IngredientMergeResult,
     MenuExtractionResult,
     RecipeSuggestionsResult,
 )
@@ -71,6 +72,8 @@ _BEST_SELLER_INPUT_TOKENS = 500
 _BEST_SELLER_OUTPUT_TOKENS = 250
 _FAMILY_RECIPE_INPUT_TOKENS = 500
 _FAMILY_RECIPE_OUTPUT_TOKENS = 300
+_MERGE_INPUT_TOKENS = 400
+_MERGE_OUTPUT_TOKENS = 250
 
 # Dish-name keyword -> (type, family) — a stand-in for the real model's judgement, just enough to
 # exercise classify-then-map end to end without a network call. Checked in order, first match wins.
@@ -562,4 +565,27 @@ def compose_family_recipe(
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=get_raw,
         parse=lambda raw: FamilyRecipeSuggestion.model_validate(raw).model_dump(),
+    )
+
+
+def merge_ingredients(items: list[dict]) -> AiCallResult:
+    """Deterministic stand-in for the real model: never merges on its own — each name becomes its own
+    singleton group, category always "dry_staples". recipe_composer's own whole-word keyword table
+    overrides the obvious categories regardless (same "deterministic rule first" pattern used
+    everywhere else in this module), so a wrong guess here never reaches the owner uncorrected; tests
+    that need to exercise an actual proposed merge pass their own merge_fn, same as compose_fn/pick_fn
+    elsewhere in recipe_composer.py."""
+    groups = [
+        {"canonical_name": item["name"], "members": [item["name"]], "category": "dry_staples"}
+        for item in items
+    ]
+
+    def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        return ({"groups": groups}, model, _MERGE_INPUT_TOKENS, _MERGE_OUTPUT_TOKENS, False)
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_KITCHEN,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=get_raw,
+        parse=lambda raw: IngredientMergeResult.model_validate(raw).model_dump(),
     )

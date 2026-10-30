@@ -312,7 +312,9 @@ def main() -> None:
             item = f"{m['qty']:g}{m['main_item_unit']} {m['main_item_name']}" if m["main_item_name"] else "(no main item)"
             print(f"      {m['dish_name']}: {item}")
 
-    ingredients = resolve_ingredients(family_results, bases, sector=args.business_type)
+    ingredients = resolve_ingredients(
+        family_results, bases, sector=args.business_type, merge_fn=anthropic_provider.merge_ingredients
+    )
     distinct_count = ingredients["matched_count"] + ingredients["new_count"]
     print(
         f"\nINGREDIENTS: {distinct_count} distinct ({ingredients['matched_count']} matched to "
@@ -330,6 +332,18 @@ def main() -> None:
     for m in ingredients["matched"]:
         print(f"  matched: {m['stock_item_name']} (from '{m['matched_from']}') — used in {len(m['used_in'])}")
 
+    if ingredients["merges"]:
+        print(f"\nMERGES APPLIED ({len(ingredients['merges'])}):")
+        for merge in ingredients["merges"]:
+            print(f"  - {merge['canonical_name']} <- {', '.join(merge['members'])}")
+    else:
+        print("\nMERGES APPLIED: none")
+
+    if ingredients["excluded"]:
+        print(f"\nEXCLUDED (not stock items): {ingredients['excluded']}")
+    else:
+        print("\nEXCLUDED (not stock items): none")
+
     if corrections:
         print(f"\nQUANTITY CORRECTIONS ({len(corrections)}):")
         for family_name, note in corrections:
@@ -344,11 +358,19 @@ def main() -> None:
     else:
         print("\nFLAGS / CHECK-THIS: none")
 
+    merge_input = sum(u["input_tokens"] for u in ingredients["usage"])
+    merge_output = sum(u["output_tokens"] for u in ingredients["usage"])
     setup_input = (
-        kitchen_input + sum(u["input_tokens"] for u in best_sellers_data["usage"]) + family_input
+        kitchen_input
+        + sum(u["input_tokens"] for u in best_sellers_data["usage"])
+        + family_input
+        + merge_input
     )
     setup_output = (
-        kitchen_output + sum(u["output_tokens"] for u in best_sellers_data["usage"]) + family_output
+        kitchen_output
+        + sum(u["output_tokens"] for u in best_sellers_data["usage"])
+        + family_output
+        + merge_output
     )
     setup_cost_usd = (
         Decimal(setup_input) / Decimal(1_000_000) * settings.AI_PRICE_IN_PER_MTOK
@@ -383,6 +405,10 @@ def main() -> None:
         misses.append(f"distinct ingredients: got {distinct_count}, target 40-85")
     if duplicate_names:
         misses.append(f"duplicate ingredient names: {duplicate_names}")
+    non_stock = {"water", "ice", "ice cubes", "ice cube"}
+    leaked_non_stock = {n for n in all_names if n.lower() in non_stock}
+    if leaked_non_stock:
+        misses.append(f"Water/Ice should never be a stock item, got: {leaked_non_stock}")
     if all_flags:
         misses.append(f"protein/veg main-item mismatches flagged (should be 0): {len(all_flags)}")
     if full_cost_inr > 15:

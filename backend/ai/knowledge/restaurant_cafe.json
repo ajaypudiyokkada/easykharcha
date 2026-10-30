@@ -10,9 +10,12 @@
         {"name": "Tomato", "qty": 400, "unit": "g"},
         {"name": "Oil", "qty": 90, "unit": "ml"},
         {"name": "Cashew", "qty": 40, "unit": "g"},
-        {"name": "Spices", "qty": 20, "unit": "g"}
+        {"name": "Garam masala", "qty": 8, "unit": "g"},
+        {"name": "Coriander powder", "qty": 6, "unit": "g"},
+        {"name": "Turmeric", "qty": 3, "unit": "g"},
+        {"name": "Red chilli powder", "qty": 3, "unit": "g"}
       ],
-      "notes": "Workhorse curry gravy — chicken/mutton/veg/paneer curries"
+      "notes": "Workhorse curry gravy — chicken/mutton/veg/paneer curries. Step EK-3c: the spice line is 4 specific, buyable spices (8+6+3+3=20g), not a generic 'Spices' an owner can't shop for."
     },
     {
       "name": "Makhani/butter base",
@@ -128,9 +131,20 @@
     "Cooking oil": ["cooking oil", "refined oil", "vegetable oil", "sunflower oil", "oil for frying"],
     "Curry leaves": ["curry leaves", "curry leaf"],
     "Breadcrumbs": ["breadcrumbs", "bread crumbs"],
-    "Basmati rice": ["basmati rice", "rice"],
     "Egg": ["egg", "eggs"]
   },
+  "never_merge": [
+    ["rice flour", "rice"],
+    ["rice flour", "basmati rice"],
+    ["chilli powder", "green chilli"],
+    ["chilli powder", "chilli sauce"],
+    ["lemon", "lemon juice"],
+    ["coconut", "coconut milk"],
+    ["coconut", "coconut oil"],
+    ["cream", "cream cheese"],
+    ["chicken", "chicken wings"],
+    ["ice cream", "ice"]
+  ],
   "rules": {
     "min_dishes_to_suggest_base": 3,
     "min_grams_per_portion": 30,

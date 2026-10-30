@@ -21,6 +21,7 @@ from .matching import match_stock_item, normalise, stock_items_by_normalised_nam
 from .models import AiFamilyRecipeCache, AiUsageKind
 from .prompts import FAMILY_RECIPE_PROMPT_VERSION
 from .provider import compose_family_recipe as provider_compose_family_recipe
+from .provider import merge_ingredients as provider_merge_ingredients
 from .provider import pick_best_sellers as provider_pick_best_sellers
 
 # Step EK-3b Fix B: raised from 25 — a family-recipe call costs about Rs 0.2, so the real limit is
@@ -105,13 +106,19 @@ _DESCRIPTOR_WORDS = {
 }
 
 # Step EK-3b Fix E: a short, reviewed, whole-word keyword table (not substring matching — "cabbage"
-# must never match "bag", see _keyword_hit below) across four categories, checked in this priority
-# order by _guess_low_stock_category: packaging/cleaning first (only packaging words belong there),
-# then perishable, then fresh/semi-perishable, then dry staples (also the final fallback).
+# must never match "bag", see _keyword_hit below) across four categories. Step EK-3c: _guess_low_
+# stock_category now checks dry_staples BEFORE perishable/fresh_semi (packaging still checked first
+# of all) — a processed/dried form (coconut OIL, tomato SAUCE, coriander POWDER, bread CRUMBS) must
+# win over the fresh ingredient it's made from, which the old perishable/fresh_semi-first order got
+# backwards (real-run bug: coconut oil and tomato sauce both came out fresh_semi).
 _PERISHABLE_KEYWORDS = {
     "meat",
     "chicken",
     "mutton",
+    "pork",
+    "bacon",
+    "sausage",
+    "sausages",
     "fish",
     "prawn",
     "egg",
@@ -133,6 +140,20 @@ _PERISHABLE_KEYWORDS = {
     "lemon",
     "curry leaves",
     "spinach",
+    "babycorn",
+    "baby corn",
+    "broccoli",
+    "cucumber",
+    "banana",
+    "watermelon",
+    "water melon",
+    "pineapple",
+    "fruit",
+    "chilli",
+    "peas",
+    "corn",
+    "vegetable",
+    "vegetables",
 }
 _FRESH_SEMI_KEYWORDS = {"carrot", "cabbage", "onion", "potato", "coconut", "tomato"}
 _DRY_STAPLE_KEYWORDS = {
@@ -154,6 +175,11 @@ _DRY_STAPLE_KEYWORDS = {
     "sooji",
     "tea",
     "coffee",
+    "powder",
+    "extract",
+    "essence",
+    "crumbs",
+    "ketchup",
 }
 _PACKAGING_KEYWORDS = {"box", "bag", "napkin", "foil", "container", "cleaning", "tissue", "wrap"}
 
@@ -562,6 +588,8 @@ def _guess_low_stock_category(name: str) -> str:
     norm = normalise(name)
     if _keyword_hit(norm, _PACKAGING_KEYWORDS):
         return "packaging_cleaning"
+    if _keyword_hit(norm, _DRY_STAPLE_KEYWORDS):
+        return "dry_staples"
     if _keyword_hit(norm, _PERISHABLE_KEYWORDS):
         return "perishable"
     if _keyword_hit(norm, _FRESH_SEMI_KEYWORDS):
@@ -627,21 +655,176 @@ def _canonical_ingredient_name(name: str, alias_lookup: dict[str, str]) -> str:
     return cleaned
 
 
+# Step EK-3c Fix D: never a stock item — Water/Ice are consumed in the kitchen but nobody buys them
+# as a tracked ingredient. Checked on the descriptor-stripped, normalised name so "Ice cubes"/"Ice,
+# crushed" are caught the same as a bare "Ice" (never confused with "Ice cream", a real stock item —
+# the sector's never-merge list keeps the two apart during merging too).
+_EXCLUDED_NON_STOCK_ITEMS = {"water", "ice", "ice cubes", "ice cube"}
+
+
+def _is_excluded_non_stock_item(name: str) -> bool:
+    return normalise(_strip_descriptors(name)) in _EXCLUDED_NON_STOCK_ITEMS
+
+
+def _never_merge_pairs(sector: str) -> list[tuple[str, str]]:
+    return [(normalise(a), normalise(b)) for a, b in load_library(sector).get("never_merge", [])]
+
+
+def _phrase_in(norm: str, phrase: str) -> bool:
+    return bool(re.search(rf"\b{re.escape(phrase)}\b", norm))
+
+
+def _pair_side(norm: str, left: str, right: str) -> str | None:
+    """Which side of a never-merge pair this normalised name belongs to — checks the LONGER phrase
+    first, since a shorter phrase can be a genuine word inside the longer one without meaning the
+    same thing (e.g. "ice" is a real word inside "Vanilla ice cream", which is still an ice-cream
+    item, not a conflict with the "ice cream"/"ice" pair — checking "ice cream" first resolves it to
+    that side before the shorter "ice" ever gets a chance to wrongly also match)."""
+    long_phrase, long_side, short_phrase, short_side = (
+        (left, "left", right, "right")
+        if len(left) >= len(right)
+        else (right, "right", left, "left")
+    )
+    if _phrase_in(norm, long_phrase):
+        return long_side
+    if _phrase_in(norm, short_phrase):
+        return short_side
+    return None
+
+
+def _never_merge_conflict(
+    name_a: str, name_b: str, never_merge_pairs: list[tuple[str, str]]
+) -> bool:
+    norm_a = normalise(_strip_descriptors(name_a))
+    norm_b = normalise(_strip_descriptors(name_b))
+    for left, right in never_merge_pairs:
+        side_a = _pair_side(norm_a, left, right)
+        side_b = _pair_side(norm_b, left, right)
+        if side_a and side_b and side_a != side_b:
+            return True
+    return False
+
+
+def _group_is_safe(
+    member_names: list[str], unit_by_name: dict[str, str], never_merge_pairs: list[tuple[str, str]]
+) -> bool:
+    """A proposed merge group is trusted only when every member shares one unit family (g/ml/pieces —
+    never e.g. a g item merged with a pieces item) and no two members conflict on the sector's
+    never-merge list (e.g. "rice flour" and "rice" are never the same purchasable item)."""
+    units = {unit_by_name[name] for name in member_names if name in unit_by_name}
+    if len({_unit_family_guess(u) for u in units}) > 1:
+        return False
+    for i, name_a in enumerate(member_names):
+        for name_b in member_names[i + 1 :]:
+            if _never_merge_conflict(name_a, name_b, never_merge_pairs):
+                return False
+    return True
+
+
+def _merge_ingredient_entries(
+    raw: dict[str, dict], business, sector: str, *, merge_fn=None
+) -> tuple[dict[str, dict], list[dict], list[dict]]:
+    """Step EK-3c: one cheap AI call over the already alias-merged entries groups genuine remaining
+    near-duplicates (e.g. Gram flour/Besan, Aloo/Potato) into one purchasable item and tags every
+    final item with a low-stock category. A proposed group is applied only when _group_is_safe passes
+    — an unsafe or partly-unrecognised group is rejected and every one of its members stays its own
+    separate entry, still carrying the AI's own category guess (categorisation doesn't depend on the
+    merge being trusted). An entry the call never mentions (call skipped or failed) is left completely
+    untouched, falling back to the keyword table alone. Returns (new_raw, merges_log, usage) —
+    merges_log lists only the merges actually applied, for a step/real-run proof to print."""
+    entries = list(raw.items())
+    if not entries:
+        return raw, [], []
+
+    name_to_key = {entry["display_name"]: key for key, entry in entries}
+    unit_by_name = {entry["display_name"]: entry["unit"] for _key, entry in entries}
+    never_merge_pairs = _never_merge_pairs(sector)
+
+    can_call_ai = business is None or not limits.monthly_cost_cap_exceeded()
+    groups: list[dict] = []
+    usage: list[dict] = []
+    if can_call_ai:
+        merge = merge_fn or provider_merge_ingredients
+        items = [
+            {"name": entry["display_name"], "unit_family": _unit_family_guess(entry["unit"])}
+            for _key, entry in entries
+        ]
+        result = merge(items)
+        usage.append(
+            {
+                "model": result.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "used_fallback": result.used_fallback,
+            }
+        )
+        if business is not None:
+            limits.record_usage(
+                business=business,
+                kind=AiUsageKind.SETUP_INGREDIENT_MERGE,
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
+        groups = result.data.get("groups", [])
+
+    new_raw: dict[str, dict] = {}
+    merges_log: list[dict] = []
+    seen_names: set[str] = set()
+
+    for group in groups:
+        # Never trust a member name the resolver doesn't actually have, or a repeat across groups.
+        members = [m for m in group.get("members", []) if m in name_to_key and m not in seen_names]
+        if not members:
+            continue
+        category = group.get("category", "dry_staples")
+        if len(members) >= 2 and _group_is_safe(members, unit_by_name, never_merge_pairs):
+            canonical = group.get("canonical_name") or members[0]
+            used_in: set = set()
+            for name in members:
+                used_in |= raw[name_to_key[name]]["used_in"]
+            new_raw[_merge_key(canonical)] = {
+                "display_name": canonical,
+                "unit": unit_by_name[members[0]],
+                "used_in": used_in,
+                "ai_category": category,
+            }
+            merges_log.append({"canonical_name": canonical, "members": members})
+        else:
+            # Singleton, or an unsafe group split back into its separate original entries — each
+            # still gets the AI's own category guess, only the merge itself is distrusted.
+            for name in members:
+                new_raw[name_to_key[name]] = {**raw[name_to_key[name]], "ai_category": category}
+        seen_names.update(members)
+
+    for key, entry in raw.items():
+        if entry["display_name"] not in seen_names:
+            new_raw[key] = entry
+
+    return new_raw, merges_log, usage
+
+
 def resolve_ingredients(
-    family_results: list[dict], bases: list[dict], business=None, sector: str = ""
+    family_results: list[dict], bases: list[dict], business=None, sector: str = "", *, merge_fn=None
 ) -> dict:
     """Collects every ingredient across the family recipes' per-member main items + shared
     ingredients + minor_ingredients, plus every base's own batch ingredients, canonicalises and
-    merges near-duplicate names (Fix D), and matches each merged ingredient to an existing StockItem
-    (fuzzy, business-scoped) or proposes it as new. Returns {"matched": [...], "new": [...]}; every
-    entry carries `used_in` (dish/base names)."""
+    merges near-duplicate names (Fix D), excludes Water/Ice (never a stock item), runs them through
+    one AI merge+categorise call (Step EK-3c, _merge_ingredient_entries), and matches each final
+    ingredient to an existing StockItem (fuzzy, business-scoped) or proposes it as new. Returns
+    {"matched": [...], "new": [...], "merges": [...], "excluded": [...]}; every matched/new entry
+    carries `used_in` (dish/base names)."""
     alias_lookup = _build_alias_lookup(sector)
     raw: dict[str, dict] = {}  # merge key -> {"display_name", "unit", "used_in": set()}
+    excluded: set[str] = set()
 
     def _add(name: str, unit: str, used_in: str) -> None:
         if not name or _is_cooked_derived(name):
             return
         canonical = _canonical_ingredient_name(name, alias_lookup)
+        if _is_excluded_non_stock_item(canonical):
+            excluded.add(canonical)
+            return
         if _has_marker(canonical, {"egg"}):
             unit = "pieces"  # eggs are always tracked in pieces, whatever unit the source gave
         key = _merge_key(canonical)
@@ -666,6 +849,8 @@ def resolve_ingredients(
         for ing in base["batch_ingredients"]:
             _add(ing["name"], ing["unit"], base_label)
 
+    raw, merges, merge_usage = _merge_ingredient_entries(raw, business, sector, merge_fn=merge_fn)
+
     stock_by_norm = stock_items_by_normalised_name(business) if business is not None else {}
 
     matched = []
@@ -684,12 +869,21 @@ def resolve_ingredients(
                 }
             )
         else:
+            # Fix E's keyword table overrides the AI's own category guess for the "obvious" cases
+            # (anything it has a specific perishable/fresh_semi/packaging rule for); the AI's guess is
+            # used only for the dry_staples catch-all, and only when the call actually ran.
+            keyword_guess = _guess_low_stock_category(entry["display_name"])
+            category = (
+                keyword_guess
+                if keyword_guess != "dry_staples"
+                else entry.get("ai_category") or keyword_guess
+            )
             new.append(
                 {
                     "name": entry["display_name"],
                     "unit_family": _unit_family_guess(entry["unit"]),
                     "pack_size": None,
-                    "low_stock_category": _guess_low_stock_category(entry["display_name"]),
+                    "low_stock_category": category,
                     "used_in": used_in,
                 }
             )
@@ -701,6 +895,9 @@ def resolve_ingredients(
         "new": new,
         "matched_count": len(matched),
         "new_count": len(new),
+        "merges": merges,
+        "excluded": sorted(excluded),
+        "usage": merge_usage,
     }
 
 
@@ -712,6 +909,7 @@ def suggest_setup(
     classify_fn=None,
     pick_fn=None,
     compose_fn=None,
+    merge_fn=None,
     menu_scan=None,
 ) -> dict:
     """The one orchestrator entry point for Step EK-3. `dishes` must already be expanded
@@ -743,10 +941,16 @@ def suggest_setup(
     family_data = compose_family_recipes(
         families, bases, sector, stock_items, business, compose_fn=compose_fn
     )
-    ingredients = resolve_ingredients(family_data["families"], bases, business, sector=sector)
+    ingredients = resolve_ingredients(
+        family_data["families"], bases, business, sector=sector, merge_fn=merge_fn
+    )
 
     all_usage = (
-        classify_usage + bases_data["usage"] + best_sellers_data["usage"] + family_data["usage"]
+        classify_usage
+        + bases_data["usage"]
+        + best_sellers_data["usage"]
+        + family_data["usage"]
+        + ingredients["usage"]
     )
     total_input = sum(u["input_tokens"] for u in all_usage)
     total_output = sum(u["output_tokens"] for u in all_usage)

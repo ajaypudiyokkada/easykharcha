@@ -49,3 +49,7 @@ def compose_family_recipe(
     return _provider().compose_family_recipe(
         family_name, member_dish_names, business_type, stock_items, excluded_ingredient_names
     )
+
+
+def merge_ingredients(items: list[dict]) -> AiCallResult:
+    return _provider().merge_ingredients(items)
