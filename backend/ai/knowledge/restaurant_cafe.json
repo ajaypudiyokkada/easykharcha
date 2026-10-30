@@ -131,7 +131,12 @@
     "Cooking oil": ["cooking oil", "refined oil", "vegetable oil", "sunflower oil", "oil for frying"],
     "Curry leaves": ["curry leaves", "curry leaf"],
     "Breadcrumbs": ["breadcrumbs", "bread crumbs"],
-    "Egg": ["egg", "eggs"]
+    "Egg": ["egg", "eggs"],
+    "Turmeric powder": ["turmeric powder", "turmeric"],
+    "Curd": ["curd", "hung curd"],
+    "Tomato sauce": ["tomato sauce", "ketchup"],
+    "Milk": ["milk", "chilled milk"],
+    "Ice cream": ["ice cream", "vanilla ice cream"]
   },
   "never_merge": [
     ["rice flour", "rice"],
@@ -143,7 +148,10 @@
     ["coconut", "coconut oil"],
     ["cream", "cream cheese"],
     ["chicken", "chicken wings"],
-    ["ice cream", "ice"]
+    ["ice cream", "ice"],
+    ["kashmiri red chilli", "red chilli powder"],
+    ["soy sauce", "dark soy sauce"],
+    ["soy sauce", "light soy sauce"]
   ],
   "rules": {
     "min_dishes_to_suggest_base": 3,
