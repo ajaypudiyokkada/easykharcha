@@ -33,6 +33,16 @@ _MAX_PORTION_GRAMS = 600
 _TRAILING_PAREN = re.compile(r"\s*\([^()]*\)\s*$")
 
 
+def _variant_already_in_heading(variant: str, heading_norm: str) -> bool:
+    """Step EK-3d Fix B: a variant that's already a whole phrase INSIDE the heading (not just an exact
+    match of the whole heading) is the same model slip as the exact-match case, just partial — e.g. a
+    heading "CHICKEN LOLLIPOP / DRUMS OF HEAVEN" with a stray variant "Drums of Heaven" would otherwise
+    glue the heading's own second half back onto itself ("... Drums of Heaven"). Checked before the
+    variant is ever combined, never after."""
+    phrase = normalise(variant)
+    return bool(phrase) and bool(re.search(rf"\b{re.escape(phrase)}\b", heading_norm))
+
+
 def expand_dish_options(dishes: list[dict]) -> list[dict]:
     """Turns one menu row carrying 2+ `variants` (schemas.ExtractedDish — set for both an inline
     "Chicken (Manchurian/Chilli)" line and a heading-plus-separate-choices group like a "MANCHURIAN"
@@ -42,13 +52,20 @@ def expand_dish_options(dishes: list[dict]) -> list[dict]:
     row's single price. Deterministic, no model call. Each expanded row carries `expanded_from` (the
     original heading text) so a future review screen can flag it. A dish with fewer than 2 variants
     passes through unchanged — it is never left in the output named only by its bare heading. A
-    variant that normalises the same as the heading itself is dropped before combining (a model slip
-    that would otherwise glue the same words onto themselves, e.g. "Gulab Jamun Gulab Jamun")."""
+    variant that normalises the same as the heading, or is already a whole phrase inside it
+    (_variant_already_in_heading), is dropped before combining (a model slip that would otherwise glue
+    the same words onto themselves, e.g. "Gulab Jamun Gulab Jamun" or "... Drums of Heaven")."""
     expanded = []
     for dish in dishes:
         heading = _TRAILING_PAREN.sub("", dish.get("name", "")).strip() or dish.get("name", "")
         heading_norm = normalise(heading)
-        variants = [v for v in (dish.get("variants") or []) if v and normalise(v) != heading_norm]
+        variants = [
+            v
+            for v in (dish.get("variants") or [])
+            if v
+            and normalise(v) != heading_norm
+            and not _variant_already_in_heading(v, heading_norm)
+        ]
         if len(variants) < 2:
             expanded.append(dish)
             continue
@@ -86,6 +103,7 @@ def _name_cleanliness_score(name: str) -> float:
     return score
 
 
+_REPEATED_PHRASE = re.compile(r"\b(\w+\s+\w+)\s+\1\b", re.IGNORECASE)
 _REPEATED_WORD = re.compile(r"\b(\w+)\s+\1\b", re.IGNORECASE)
 
 
@@ -94,8 +112,91 @@ def _drop_repeated_word(name: str) -> str:
     SCHEZWAN" — a word doubled back-to-back, almost always a slash/variant artifact — collapses to
     one occurrence. Only fires on an exact, adjacent repeat, never a dish that's legitimately named
     with a repeated word elsewhere (e.g. "Dal Dal Makhani" wouldn't match since "Dal"/"Makhani" aren't
-    adjacent-identical in that order anyway — this is deliberately conservative)."""
+    adjacent-identical in that order anyway — this is deliberately conservative). Step EK-3d Fix B:
+    the same artifact can double a whole 2-word PHRASE, not just one word (e.g. "Fish Masala Fry
+    Masala Fry") — checked first, since collapsing the phrase first then leaves no partial single-word
+    repeat behind for the word-level regex to (harmlessly) re-check."""
+    name = _REPEATED_PHRASE.sub(r"\1", name)
     return _REPEATED_WORD.sub(r"\1", name)
+
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _word_tokens(name: str) -> set[str]:
+    """Punctuation-aware tokenising ("Rice/Noodles" -> {"rice", "noodles"}), unlike a plain
+    .split() — needed for matching against a slash/comma-garbled leftover name."""
+    return set(_WORD.findall(normalise(name)))
+
+
+_SLASH_SPLIT = re.compile(r"\s*/\s*")
+
+
+def _split_slash_name(name: str) -> tuple[str, str] | None:
+    if name.count("/") != 1:
+        return None
+    left, right = _SLASH_SPLIT.split(name, maxsplit=1)
+    left, right = left.strip(), right.strip()
+    return (left, right) if left and right else None
+
+
+def _resolve_slash_name(dish: dict) -> dict:
+    """Step EK-3d Fix B: a dish name left with exactly one "A / B" split (no separate prices, no
+    group-pass result — those are handled earlier) is kept as ONE dish. When A and B share a real word
+    (len >= 3) — "Fish Masala Fry" / "Tava Fry" both end in "Fry" — they read as two styles of the
+    SAME base dish, so only the fuller side (A) is kept, flagged "check this" rather than guessed at.
+    When they share nothing — "Chicken Lollipop" / "Drums of Heaven" — they're two names for one dish;
+    kept combined, exactly as written, unflagged."""
+    parts = _split_slash_name(dish["name"])
+    if parts is None:
+        return dish
+    left, right = parts
+    left_words = {w for w in _word_tokens(left) if len(w) >= 3}
+    right_words = {w for w in _word_tokens(right) if len(w) >= 3}
+    if left_words & right_words:
+        return {**dish, "name": left, "note": "check this"}
+    return dish
+
+
+def _resolve_slash_names(dishes: list[dict]) -> list[dict]:
+    return [_resolve_slash_name(d) for d in dishes]
+
+
+_BARE_VS_SPECIFIC_OPTION_WORDS = {
+    "veg",
+    "nonveg",
+    "non",
+    "chicken",
+    "egg",
+    "mixed",
+    "prawn",
+    "red",
+    "green",
+}
+
+
+def _drop_bare_duplicates(dishes: list[dict]) -> list[dict]:
+    """Step EK-3d Fix C: a bare heading-only row (e.g. "Sweetcorn Soup") surviving next to its own
+    more specific siblings (e.g. "Sweetcorn Soup Veg"/"Sweetcorn Soup Chicken") is the same table's
+    generic label the first pass also emitted standalone, not a genuine third choice — dropped when
+    some other dish's words are an exact superset adding exactly one recognised option word."""
+    token_sets = [_word_tokens(d["name"]) for d in dishes]
+    drop: set[int] = set()
+    for i, tokens_a in enumerate(token_sets):
+        if not tokens_a:
+            continue
+        for j, tokens_b in enumerate(token_sets):
+            if i == j:
+                continue
+            extra = tokens_b - tokens_a
+            if (
+                tokens_a < tokens_b
+                and len(extra) == 1
+                and next(iter(extra)) in _BARE_VS_SPECIFIC_OPTION_WORDS
+            ):
+                drop.add(i)
+                break
+    return [d for idx, d in enumerate(dishes) if idx not in drop]
 
 
 def dedup_dishes(dishes: list[dict]) -> list[dict]:
@@ -133,34 +234,77 @@ def _is_choice_fragment(name: str, group_dish_token_sets: list[set[str]]) -> boo
     return sum(1 for dish_tokens in group_dish_token_sets if tokens < dish_tokens) >= 2
 
 
+_BLOB_BRACKETED = re.compile(r"\([^()]*\)")
+
+
+def _is_blob_leftover(
+    name: str, heading_tokens: set[str], group_dish_token_sets: list[set[str]]
+) -> bool:
+    """Step EK-3d Fix A: a first-pass dish covering the same table a group pass already handled, in
+    either of two shapes real menus produced. (1) The whole table garbled into one dish name (e.g.
+    "Fried Rice/Noodles Veg/Egg/Chicken/Mixed (Egg, Chicken, Pork, Prawns, Mutton)") — true when the
+    dish's own words fully contain the group heading's words AND it carries strictly more words than
+    the group's own widest real dish. (2) expand_dish_options DID split the row into one dish per
+    option, but combined with the heading's own compound, slash-joined text ("Fried Rice/Noodles
+    Chicken") where the group pass split that same heading into two separate real dishes ("Fried Rice
+    Chicken" + "Noodles Chicken") — true when some one real group dish's full words are entirely
+    contained in this dish's words, with only heading vocabulary (never anything else) left over."""
+    if not heading_tokens:
+        return False
+    # Real menus explain a "Mixed" option with its own parenthetical ("Mixed (Egg, Chicken, Pork,
+    # Prawns, Mutton)") — real content, not a bug, but irrelevant to telling this dish apart from the
+    # group pass's plain "Fried Rice Mixed"/"Noodles Mixed", so it's dropped before comparing tokens.
+    tokens = _word_tokens(_BLOB_BRACKETED.sub(" ", name))
+    if heading_tokens <= tokens:
+        widest_real_dish = max((len(s) for s in group_dish_token_sets), default=0)
+        if len(tokens) > widest_real_dish:
+            return True
+    for gd_tokens in group_dish_token_sets:
+        if gd_tokens and gd_tokens <= tokens:
+            extra = tokens - gd_tokens
+            if extra and extra <= heading_tokens:
+                return True
+    return False
+
+
 def apply_groups(dishes: list[dict], groups: list[dict]) -> list[dict]:
     """Step EK-2b/EK-2c: runs AFTER expand_dish_options, using the dedicated group pass's output
     (extraction.MenuExtractionOutcome.groups, prompts.GROUP_SYSTEM_PROMPT) as the SINGLE source of
     truth for any heading it recognised — the group pass now returns the final combined dish names
     directly (e.g. heading "MANCHURIAN" -> dishes ["Gobi Manchurian", "Paneer Manchurian"]), not a
     prefix/suffix label to recombine. For every discovered group: drops every dish the first pass
-    already produced for that same heading (whether it was a broken bare leftover like just
-    "Manchurian", or a clean-looking expansion built from the row's own `variants` — the group pass
-    found the same heading independently, so keeping both would duplicate it); drops any standalone
-    choice-word fragment left over from the SAME table (_is_choice_fragment, e.g. a bare "Veg" row
-    beside a Fried Rice/Noodles price table); then adds the group's own dish rows. A final
-    dedup_dishes pass catches anything still duplicated (word-order or casing differences) across the
+    already produced for that same heading — whether it was a broken bare leftover like just
+    "Manchurian", a clean-looking expansion built from the row's own `variants` (even word-order-
+    reversed, e.g. "Manchurian Gobi" vs the group's "Gobi Manchurian" — Step EK-3d Fix A: matched by
+    _dedup_key, not exact string, so the group's own name always wins a tie), or a whole-table blob
+    the first pass produced as a single dish (_is_blob_leftover) — drops any standalone choice-word
+    fragment left over from the SAME table (_is_choice_fragment, e.g. a bare "Veg" row beside a Fried
+    Rice/Noodles price table); then adds the group's own dish rows. A final dedup_dishes pass (plus
+    slash-name resolution and bare-vs-specific pruning) catches anything still duplicated across the
     two passes or within either one alone. Deterministic, no model call. A menu with no groups still
-    runs through dedup_dishes."""
+    runs through the same final cleanup passes."""
     if not groups:
-        return dedup_dishes(dishes)
+        return _drop_bare_duplicates(_resolve_slash_names(dedup_dishes(dishes)))
 
     group_heading_norms = {normalise(g["heading"]) for g in groups}
+    group_dish_keys = {_dedup_key(gd["name"]) for g in groups for gd in g.get("dishes", [])}
     kept = [
         dish
         for dish in dishes
         if normalise(dish.get("expanded_from") or dish["name"]) not in group_heading_norms
+        and _dedup_key(dish["name"]) not in group_dish_keys
     ]
     for group in groups:
         group_dish_token_sets = [
             set(normalise(gd["name"]).split()) for gd in group.get("dishes", [])
         ]
-        kept = [d for d in kept if not _is_choice_fragment(d["name"], group_dish_token_sets)]
+        heading_tokens = {w for w in _word_tokens(group["heading"]) if len(w) >= 3}
+        kept = [
+            d
+            for d in kept
+            if not _is_choice_fragment(d["name"], group_dish_token_sets)
+            and not _is_blob_leftover(d["name"], heading_tokens, group_dish_token_sets)
+        ]
 
     existing_names = {normalise(dish["name"]) for dish in kept}
     for group in groups:
@@ -177,7 +321,7 @@ def apply_groups(dishes: list[dict], groups: list[dict]) -> list[dict]:
                     "expanded_from": group["heading"],
                 }
             )
-    return dedup_dishes(kept)
+    return _drop_bare_duplicates(_resolve_slash_names(dedup_dishes(kept)))
 
 
 def _cache_key(dish_names: list[str]) -> str:

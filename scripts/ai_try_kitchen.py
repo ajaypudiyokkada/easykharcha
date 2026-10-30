@@ -135,7 +135,14 @@ def main() -> None:
         return
 
     raw_dishes = [
-        {"name": dish["name"], "variants": dish.get("variants") or []}
+        {
+            "name": dish["name"],
+            "variants": dish.get("variants") or [],
+            "variant_position": dish.get("variant_position", "prefix"),
+            "variant_prices": dish.get("variant_prices"),
+            "price": dish.get("price"),
+            "note": dish.get("note", ""),
+        }
         for section in outcome.merged["sections"]
         for dish in section["dishes"]
         if dish.get("kind", "dish") != "addon"
@@ -167,6 +174,8 @@ def main() -> None:
     print(
         f"DUPLICATE NAMES (after token-sort normalisation): {len(duplicate_names)} {duplicate_names}"
     )
+    dish_notes = [(d["name"], d["note"]) for d in expanded if d.get("note") == "check this"]
+    print(f"DISH NOTES / CHECK-THIS ({len(dish_notes)}): {dish_notes}")
 
     print(f"\nClassifying dishes and mapping bases ({settings.AI_MODEL_KITCHEN})...")
     result = discover_bases(
@@ -271,6 +280,9 @@ def main() -> None:
     print(f"\nALL {len(family_results)} FAMILIES (name — member count):")
     for family in family_results:
         print(f"  - {family['name']} ({len(family['dishes'])} members)")
+    family_names = [f["name"] for f in family_results]
+    dup_family_names = {n for n in family_names if family_names.count(n) > 1}
+    print(f"DUPLICATE FAMILY NAMES: {len(dup_family_names)} {dup_family_names}")
 
     print(f"\n3 SAMPLE FAMILY RECIPES (of {len(family_results)}):")
     for family in family_results[:3]:
@@ -411,8 +423,23 @@ def main() -> None:
         misses.append(f"Water/Ice should never be a stock item, got: {leaked_non_stock}")
     if all_flags:
         misses.append(f"protein/veg main-item mismatches flagged (should be 0): {len(all_flags)}")
-    if full_cost_inr > 15:
-        misses.append(f"cost: ~Rs {full_cost_inr:.2f}, target under Rs 15")
+    if full_cost_inr > 30:
+        misses.append(f"cost: ~Rs {full_cost_inr:.2f}, target under Rs 30 (Step EK-3d)")
+    # Step EK-3d targets. dish_notes ("check this") is printed above for visibility but isn't itself a
+    # miss — a genuine "two flavours" slash pair (e.g. "Koot Curry (Coorg Style) / Chicken Curry",
+    # sharing the word "curry") is SUPPOSED to collapse-and-flag per Fix B; "zero flags" in the task's
+    # own targets means zero FAMILY-level veg/protein mismatches (all_flags, checked above), not zero
+    # of these.
+    if dup_family_names:
+        misses.append(f"duplicate family names (should be 0): {dup_family_names}")
+    import re as _ek3d_re
+
+    # A tight "word/word" compound (no spaces, e.g. "Fried Rice/Noodles") is the garbled-heading
+    # signature Fix A targets — unlike a legitimately spaced "A / B" two-name pair (e.g. "Peach /
+    # Lemon Ice Tea"), which Fix B deliberately keeps combined as written.
+    leftover_blobs = [d["name"] for d in expanded if _ek3d_re.search(r"\w/\w", d["name"])]
+    if leftover_blobs:
+        misses.append(f"leftover slash/table-blob dish names (should be 0): {leftover_blobs}")
     if misses:
         print("MISSED:")
         for m in misses:

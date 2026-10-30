@@ -151,7 +151,21 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   (same unit family, no conflict on the sector's new `never_merge` knowledge-JSON list); excludes
   Water/Ice/Ice cubes entirely (never a stock item); `_guess_low_stock_category` now checks
   `dry_staples` before `perishable`/`fresh_semi` (a processed form must win over the fresh thing
-  it's made from).
+  it's made from). Step EK-3d: `base_discovery.apply_groups`/`expand_dish_options` gained
+  `_is_blob_leftover` (drops a first-pass dish still covering a group-pass table, whole-blob or
+  compound-heading-residue shaped), `_dedup_key`-based group-dish matching (the group pass's own name
+  always wins a word-order tie), `_variant_already_in_heading` (stops a variant already inside the
+  heading gluing on twice), a 2-word repeated-phrase collapse (`_REPEATED_PHRASE`), `_resolve_slash_
+  name` (a lone "A / B" with a shared word collapses to the fuller half + a "check this" note; no
+  shared word stays combined, unflagged), and `_drop_bare_duplicates` (a bare heading dropped beside
+  its own Veg/Chicken/... sibling). `recipe_composer.build_families` now rejects a dish that's an
+  outlier against its own group's majority word signature (`_family_outliers`) into a fallback bucket
+  ("Fried starters" for starter types), and merges any two families left sharing one display name.
+  "Mixed"-named dishes never get a single protein as a main item (silently, not flagged). 6 new
+  `restaurant_cafe.json` aliases (turmeric/hung curd/tomato sauce/rice/chilled milk/vanilla ice
+  cream) plus `never_merge` protection for Kashmiri red chilli vs red chilli powder and soy sauce
+  variants; a base already carrying Dark/Light soy sauce also excludes a generic "Soy sauce" from its
+  family's own ingredient list.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/

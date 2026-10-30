@@ -6323,6 +6323,13 @@ def check_recipe_composer_flow() -> None:
     from businesses.models import Business
     from stock.models import Base, SellItem, StockItem
 
+    from ai.base_discovery import (
+        apply_groups,
+        expand_dish_options,
+        _drop_bare_duplicates,
+        _drop_repeated_word,
+        _resolve_slash_name,
+    )
     from ai.provider.base import AiCallResult
     from ai.recipe_composer import (
         MAX_FAMILIES_PER_MENU,
@@ -6600,21 +6607,23 @@ def check_recipe_composer_flow() -> None:
         fail(f"recipe composer: expected Rice flour and Basmati rice to stay two separate items, got {rice_new_names}")
     print("OK — Rice flour stays separate from Basmati rice.")
 
-    # --- Step EK-3c: the 15 real duplicate sets each merge to one item. 5 of them (Bread crumbs/
-    # Breadcrumbs, Cream/Fresh cream, Oil/Cooking oil, Peanut/Peanuts, Cabbage/"Cabbage, shredded")
-    # already canonicalise via the EXISTING alias table / descriptor-stripping merge key (Fix D)
-    # before the new merge call ever sees them — confirmed by never appearing in its own merges log;
-    # the other 10 are genuinely new names the merge call alone can tell are the same item. ---
+    # --- Step EK-3c/EK-3d: the 15 real duplicate sets each merge to one item. 6 of them (Bread
+    # crumbs/Breadcrumbs, Cream/Fresh cream, Oil/Cooking oil, Peanut/Peanuts, Cabbage/"Cabbage,
+    # shredded", Ice Cream/Vanilla ice cream) already canonicalise via the EXISTING alias table /
+    # descriptor-stripping merge key (Fix D/Fix F) before the new merge call ever sees them —
+    # confirmed by never appearing in its own merges log; the other 9 are genuinely new names the
+    # merge call alone can tell are the same item. ---
     already_merged_pairs = [
         ("Breadcrumbs", ["Bread crumbs", "Breadcrumbs"]),
         ("Cream", ["Cream", "Fresh cream"]),
         ("Cooking oil", ["Oil", "Cooking oil"]),
         ("Peanut", ["Peanut", "Peanuts"]),
         ("Cabbage", ["Cabbage", "Cabbage, shredded"]),
+        ("Ice cream", ["Ice Cream", "Vanilla ice cream"]),
     ]
     ai_merge_pairs = [
         ("Gram flour", ["Gram flour", "Besan"]),
-        ("Yogurt", ["Yogurt", "Curd", "Hung curd"]),
+        ("Yogurt", ["Yogurt", "Curd"]),
         ("Cashew", ["Cashew", "Cashew Nuts"]),
         ("Maida", ["Maida", "Flour", "All-purpose flour"]),
         ("Ajwain", ["Ajwain", "Carom seeds"]),
@@ -6622,7 +6631,6 @@ def check_recipe_composer_flow() -> None:
         ("Potato", ["Aloo", "Potato"]),
         ("Chilli powder", ["Chilli powder", "Red chilli powder"]),
         ("Vanilla essence", ["Vanilla essence", "Vanilla extract"]),
-        ("Vanilla ice cream", ["Ice Cream", "Vanilla ice cream"]),
     ]
     duplicate_groups = already_merged_pairs + ai_merge_pairs
     dup_family = {
@@ -6723,6 +6731,168 @@ def check_recipe_composer_flow() -> None:
     if not fallback_categories.get("Random Spice Mix"):
         fail(f"recipe composer: expected every item to still get a category when the merge call returns nothing, got {fallback_categories}")
     print("OK — when the merge call returns nothing, every ingredient still gets a category from the keyword table.")
+
+    # --- Step EK-3d Fix A: no first-pass dish survives from a line the group pass covered, even a
+    #     whole-table "blob" the first pass crammed into one name, or a word-order duplicate (the
+    #     group pass's own name always wins display) ---
+    blob_dishes = [
+        {"name": "Fried Rice/Noodles Veg/Egg/Chicken/Mixed (Egg, Chicken, Pork, Prawns, Mutton)"},
+    ]
+    blob_groups = [
+        {
+            "heading": "Fried Rice / Noodles",
+            "dishes": [
+                {"name": "Veg Fried Rice"}, {"name": "Egg Fried Rice"}, {"name": "Chicken Fried Rice"},
+                {"name": "Mixed Fried Rice"}, {"name": "Veg Noodles"}, {"name": "Egg Noodles"},
+                {"name": "Chicken Noodles"}, {"name": "Mixed Noodles"},
+            ],
+        }
+    ]
+    blob_result = [d["name"] for d in apply_groups(blob_dishes, blob_groups)]
+    if any("/" in n for n in blob_result) or len(blob_result) != 8:
+        fail(f"base discovery: expected the table-blob leftover dropped, only the 8 group-pass dishes kept, got {blob_result}")
+    print("OK — a whole-table blob the first pass crammed into one dish name is dropped when the group pass already covers it.")
+
+    # Step EK-3d Fix A, real-run variant: expand_dish_options DID split the row (one dish per option),
+    # but kept the heading's own compound "Fried Rice/Noodles" text, while the group pass split that
+    # same heading into two separate dishes ("Fried Rice Chicken" + "Noodles Chicken") per option.
+    cross_dishes = [
+        {"name": "Fried Rice/Noodles Veg", "expanded_from": "Fried Rice/Noodles"},
+        {"name": "Fried Rice/Noodles Chicken", "expanded_from": "Fried Rice/Noodles"},
+        {"name": "Fried Rice/Noodles Mixed (Egg, Chicken, Pork, Prawns, Mutton)", "expanded_from": "Fried Rice/Noodles"},
+    ]
+    cross_groups = [
+        {
+            "heading": "FRIED RICE/NOODLES (VEG/CHICKEN/MIXED)",
+            "dishes": [
+                {"name": "Fried Rice Veg"}, {"name": "Fried Rice Chicken"}, {"name": "Fried Rice Mixed"},
+                {"name": "Noodles Veg"}, {"name": "Noodles Chicken"}, {"name": "Noodles Mixed"},
+            ],
+        }
+    ]
+    cross_result = [d["name"] for d in apply_groups(cross_dishes, cross_groups)]
+    if any("/" in n for n in cross_result) or len(cross_result) != 6:
+        fail(f"base discovery: expected the 3 compound-heading leftovers dropped, only the 6 group-pass dishes kept, got {cross_result}")
+    print("OK — a first-pass dish keeping the heading's own compound 'Fried Rice/Noodles' text is dropped when the group pass split it into two real dishes per option.")
+
+    reorder_dishes = [{"name": "Manchurian Gobi", "expanded_from": "Gobi"}]
+    reorder_groups = [{"heading": "Manchurian", "dishes": [{"name": "Gobi Manchurian"}]}]
+    reorder_result = [d["name"] for d in apply_groups(reorder_dishes, reorder_groups)]
+    if reorder_result != ["Gobi Manchurian"]:
+        fail(f"base discovery: expected the group pass's 'Gobi Manchurian' to win over the first pass's word-order-reversed 'Manchurian Gobi', got {reorder_result}")
+    print("OK — the group pass's own dish name wins over a word-order-reversed first-pass duplicate.")
+
+    # --- Step EK-3d Fix B: a glued "A / B ... B" artifact is never produced; a genuine "A / B" with no
+    #     group result and no shared word stays one dish, exactly as written ---
+    lollipop = expand_dish_options(
+        [{"name": "CHICKEN LOLLIPOP / DRUMS OF HEAVEN", "variants": ["Drums of Heaven"]}]
+    )
+    if len(lollipop) != 1 or lollipop[0]["name"] != "CHICKEN LOLLIPOP / DRUMS OF HEAVEN":
+        fail(f"base discovery: expected one unglued dish 'CHICKEN LOLLIPOP / DRUMS OF HEAVEN', got {lollipop}")
+    print("OK — a variant already contained in the heading is never glued onto it a second time.")
+
+    if _drop_repeated_word("Fish Masala Fry Masala Fry") != "Fish Masala Fry":
+        fail(f"base discovery: expected a repeated 2-word phrase collapsed, got {_drop_repeated_word('Fish Masala Fry Masala Fry')!r}")
+    print("OK — a repeated 2-word phrase ('Masala Fry Masala Fry') collapses to one occurrence.")
+
+    two_flavours = _resolve_slash_name({"name": "Fish Masala Fry / Tava Fry"})
+    if two_flavours["name"] != "Fish Masala Fry" or two_flavours.get("note") != "check this":
+        fail(f"base discovery: expected 'Fish Masala Fry / Tava Fry' collapsed to 'Fish Masala Fry' with a note, got {two_flavours}")
+    two_names = _resolve_slash_name({"name": "Chicken Lollipop / Drums of Heaven"})
+    if two_names["name"] != "Chicken Lollipop / Drums of Heaven" or two_names.get("note"):
+        fail(f"base discovery: expected 'Chicken Lollipop / Drums of Heaven' kept combined and unflagged, got {two_names}")
+    print("OK — a shared-word slash name collapses to its fuller half with a note; a no-shared-word slash name stays combined, unflagged.")
+
+    # --- Step EK-3d Fix C: a bare heading-only dish is dropped when a specific sibling exists ---
+    bare_dishes = [
+        {"name": "Sweetcorn Soup"}, {"name": "Sweetcorn Soup Veg"}, {"name": "Sweetcorn Soup Chicken"},
+        {"name": "Tom Yum Soup"}, {"name": "Tom Yum Soup Chicken"},
+    ]
+    bare_result = {d["name"] for d in _drop_bare_duplicates(bare_dishes)}
+    if "Sweetcorn Soup" in bare_result or "Tom Yum Soup" in bare_result:
+        fail(f"base discovery: expected bare 'Sweetcorn Soup'/'Tom Yum Soup' dropped beside their specific siblings, got {bare_result}")
+    if not {"Sweetcorn Soup Veg", "Sweetcorn Soup Chicken", "Tom Yum Soup Chicken"} <= bare_result:
+        fail(f"base discovery: expected the specific siblings kept, got {bare_result}")
+    print("OK — a bare heading-only dish is dropped when a specific Veg/Chicken sibling exists.")
+
+    # --- Step EK-3d Fix D: a "Mixed" dish never gets a single protein as its main item, and it's
+    #     never flagged (not an ambiguous mismatch, an expected case) ---
+    def _fake_compose_mixed_chicken(family_name, member_dish_names, business_type, stock_items, excluded):
+        return AiCallResult(
+            data={
+                "portion_label": "1 plate",
+                "members": [
+                    {"dish_name": d, "main_item_name": "Chicken", "main_item_unit": "g", "main_item_qty": 150.0}
+                    for d in member_dish_names
+                ],
+                "ingredients": [],
+                "minor_ingredients": [],
+            },
+            model="fake", input_tokens=1, output_tokens=1,
+        )
+
+    mixed_family = {"name": "Mixed fried rice family", "type": "rice_fried", "dishes": ["Mixed Fried Rice"]}
+    mixed_result = compose_family_recipes(
+        [mixed_family], [], "restaurant_cafe", [], compose_fn=_fake_compose_mixed_chicken
+    )["families"][0]
+    mixed_member = mixed_result["members"][0]
+    if mixed_member["main_item_name"] or mixed_member["qty"]:
+        fail(f"recipe composer: expected 'Mixed Fried Rice' to get no single-protein main item, got {mixed_member}")
+    if mixed_result["flags"]:
+        fail(f"recipe composer: expected no flag for a 'Mixed' dish's dropped main item (expected, not ambiguous), got {mixed_result['flags']}")
+    print("OK — a 'Mixed' dish never gets a single protein as its main item, and it's never flagged.")
+
+    # --- Step EK-3d Fix E: family names are unique; a dish that doesn't share its group's majority
+    #     word signature lands in a fallback family (Fried starters), not a misleading named one ---
+    pepper_classifications = {
+        "prawn pepper dry": {"type": "fried_starter_dry", "family": "prawn pepper"},
+        "prawn pepper masala": {"type": "fried_starter_dry", "family": "prawn pepper"},
+        "fish fingers": {"type": "fried_starter_dry", "family": "prawn pepper"},
+        "golden fry prawns": {"type": "fried_starter_dry", "family": "prawn pepper"},
+    }
+    pepper_dishes = [{"name": n.title()} for n in pepper_classifications]
+    pepper_families = build_families(pepper_dishes, pepper_classifications)
+    by_name = {f["name"]: f["dishes"] for f in pepper_families}
+    if set(by_name.get("Prawn Pepper family", [])) != {"Prawn Pepper Dry", "Prawn Pepper Masala"}:
+        fail(f"recipe composer: expected only the genuine Prawn Pepper dishes in 'Prawn Pepper family', got {by_name}")
+    if set(by_name.get("Fried starters", [])) != {"Fish Fingers", "Golden Fry Prawns"}:
+        fail(f"recipe composer: expected Fish Fingers/Golden Fry Prawns in a 'Fried starters' fallback family, got {by_name}")
+    print("OK — Fish Fingers/Golden Fry Prawns land in 'Fried starters', not a misleading 'Prawn Pepper family'.")
+
+    dup_name_classifications = {
+        "chicken manchurian": {"type": "fried_starter_tossed", "family": "manchurian"},
+        "gobi manchurian": {"type": "fried_starter_tossed", "family": "manchurian"},
+        "paneer manchurian gravy": {"type": "gravy_chinese", "family": "manchurian"},
+        "veg manchurian gravy": {"type": "gravy_chinese", "family": "manchurian"},
+    }
+    dup_name_dishes = [{"name": n.title()} for n in dup_name_classifications]
+    dup_name_families = build_families(dup_name_dishes, dup_name_classifications)
+    dup_family_names = [f["name"] for f in dup_name_families]
+    if len(dup_family_names) != len(set(dup_family_names)):
+        fail(f"recipe composer: expected unique family names even when two types share one family tag, got {dup_family_names}")
+    print("OK — two families sharing one AI family tag across different types get unique display names.")
+
+    # --- Step EK-3d Fix F: the 6 new aliases merge; Kashmiri red chilli / red chilli powder stay
+    #     protected; bare "rice" (exact match only) still leaves "Rice flour" untouched ---
+    new_alias_lookup = _build_alias_lookup("restaurant_cafe")
+    new_alias_pairs = [
+        ("Turmeric", "Turmeric powder"),
+        ("Hung curd", "Curd"),
+        ("Tomato sauce", "Ketchup"),
+        ("Rice", "Basmati rice"),
+        ("Chilled milk", "Milk"),
+        ("Vanilla ice cream", "Ice cream"),
+    ]
+    for a, b in new_alias_pairs:
+        canon_a = _canonical_ingredient_name(a, new_alias_lookup)
+        canon_b = _canonical_ingredient_name(b, new_alias_lookup)
+        if canon_a != canon_b:
+            fail(f"recipe composer: expected '{a}'/'{b}' to canonicalise to the same name, got '{canon_a}'/'{canon_b}'")
+    if _canonical_ingredient_name("Rice flour", new_alias_lookup) == _canonical_ingredient_name("Rice", new_alias_lookup):
+        fail("recipe composer: expected the bare 'rice' alias to stay EXACT-match only — 'Rice flour' must not be swept into 'Basmati rice'")
+    if ("kashmiri red chilli", "red chilli powder") not in _never_merge_pairs("restaurant_cafe"):
+        fail("recipe composer: expected Kashmiri red chilli / Red chilli powder protected on the never_merge list")
+    print("OK — the 6 new aliases merge; bare 'rice' stays exact-match only; Kashmiri red chilli stays separate from red chilli powder.")
 
     # --- suggest_setup never writes to StockItem/SellItem/Base tables ---
     dishes = [

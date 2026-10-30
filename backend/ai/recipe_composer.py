@@ -13,7 +13,7 @@ from decimal import Decimal
 from django.conf import settings
 
 from . import limits
-from .base_discovery import discover_bases
+from .base_discovery import _word_tokens, discover_bases
 from .classification import classify_dishes
 from .exceptions import AiDailyLimitReached, AiUnavailable
 from .knowledge import load_library
@@ -71,6 +71,12 @@ _DEFAULT_QTY_BY_UNIT = {"g": 150.0, "ml": 150.0, "pieces": 1.0}
 # the other way round — a mismatch (whichever side the model got wrong) is dropped, never trusted.
 _VEG_MARKERS = {"veg", "egg", "paneer", "gobi", "mushroom"}
 _PROTEIN_MARKERS = {"chicken", "fish", "pork", "mutton", "prawn"}
+
+# Step EK-3d Fix D: a dish explicitly named "Mixed" (e.g. "Mixed Fried Rice") uses several proteins
+# at once in a real kitchen — a single main item the model may have given it (e.g. "Chicken") is
+# always wrong and dropped, but silently, never through _main_item_mismatch's flagged path, since
+# this isn't an ambiguous veg/protein mismatch to report — it's an expected, understood case.
+_MIXED_MARKERS = {"mixed"}
 
 
 def _has_marker(text: str, markers: set[str]) -> bool:
@@ -314,20 +320,88 @@ def _family_label(family_tag: str) -> str:
     return f"{family_tag.title()} family"
 
 
+def _family_outliers(dish_names: list[str]) -> set[str]:
+    """Step EK-3d Fix E: finds any dish in a (type, family_tag) group that doesn't actually share the
+    group's own majority "signature" word(s) with the rest — the real-run bug was an AI family tag
+    ("prawn pepper") loosely applied to dishes that share only ONE of its two words (Golden Fry Prawns
+    has "prawn" but not "pepper") or none at all (Fish Fingers, Crispy Corn). Needs the GROUP's own
+    member names to agree on a signature, never the tag text itself (a tag like "south indian" may
+    never appear verbatim in any dish name at all, so matching against the tag itself would wrongly
+    reject perfectly good groupings). Only runs on groups of 3+ — too few members to tell a genuine
+    majority signature from coincidence otherwise, so a 1-2 dish family is always left alone."""
+    if len(dish_names) < 3:
+        return set()
+    word_sets = [_word_tokens(n) for n in dish_names]
+    word_counts: dict[str, int] = {}
+    for words in word_sets:
+        for word in words:
+            if len(word) >= 3:
+                word_counts[word] = word_counts.get(word, 0) + 1
+    threshold = (len(dish_names) + 1) // 2
+    signature = {word for word, count in word_counts.items() if count >= threshold}
+    if not signature:
+        return set()
+    outliers = {
+        name for name, words in zip(dish_names, word_sets, strict=True) if not signature <= words
+    }
+    if len(outliers) > len(dish_names) // 2:
+        return set()  # the "signature" itself is actually the minority — don't trust it
+    return outliers
+
+
 def build_families(dishes: list[dict], classifications: dict[str, dict]) -> list[dict]:
     """Groups dishes sharing a recipe shape (same classify_dishes family tag, or the same type when
-    there's no tag) into families. Returns [{"name", "type", "dishes": [names]}], ordered by family
-    size descending (largest families first — the ones most worth the owner's attention)."""
+    there's no tag) into families. Step EK-3d Fix E: any dish that's an outlier against its own
+    group's majority word signature (_family_outliers) is pulled out into a fallback bucket instead
+    (a starter-type orphan becomes "Fried starters"; any other type becomes "<Category> family")
+    rather than trusting a sloppy AI-reported grouping. Any two families that still end up sharing one
+    display name (the same tag reached from two different dish types) are merged into one. Returns
+    [{"name", "type", "dishes": [names]}], ordered by family size descending (largest families first —
+    the ones most worth the owner's attention)."""
     groups: dict[tuple[str, str], list[str]] = {}
     for dish in dishes:
         info = classifications.get(normalise(dish["name"]), {"type": "other", "family": ""})
         key = _family_key_for(dish, info)
         groups.setdefault(key, []).append(dish["name"])
 
-    families = [
-        {"name": _family_label(family_tag), "type": dish_type, "dishes": names}
-        for (dish_type, family_tag), names in groups.items()
-    ]
+    fallback: dict[str, list[str]] = {}
+    cleaned_groups: dict[tuple[str, str], list[str]] = {}
+    for (dish_type, family_tag), names in groups.items():
+        outliers = _family_outliers(names)
+        kept_names = [n for n in names if n not in outliers]
+        if kept_names:
+            cleaned_groups[(dish_type, family_tag)] = kept_names
+        for name in outliers:
+            category = category_for_type(dish_type)
+            label = "Fried starters" if category == "starter" else f"{category.title()} family"
+            fallback.setdefault(label, []).append(name)
+    groups = cleaned_groups
+
+    name_counts: dict[str, int] = {}
+    for _dish_type, family_tag in groups:
+        label = _family_label(family_tag)
+        name_counts[label] = name_counts.get(label, 0) + 1
+
+    families: list[dict] = []
+    for (dish_type, family_tag), names in groups.items():
+        label = _family_label(family_tag)
+        if name_counts[label] > 1:
+            label = f"{label} ({category_for_type(dish_type)})"
+        families.append({"name": label, "type": dish_type, "dishes": names})
+    for label, names in fallback.items():
+        families.append({"name": label, "type": "other", "dishes": names})
+
+    # Fix E: unique names — any two families still sharing one display name (a suffix collision, or a
+    # fallback bucket matching an already-named family) are merged into one, dish lists unioned.
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for family in families:
+        if family["name"] in merged:
+            merged[family["name"]]["dishes"] += family["dishes"]
+        else:
+            merged[family["name"]] = family
+            order.append(family["name"])
+    families = [merged[name] for name in order]
     families.sort(key=lambda f: -len(f["dishes"]))
     return families
 
@@ -386,10 +460,16 @@ def _sanitise_main_item_qty(name: str, unit: str, qty: float) -> tuple[str, floa
     )
 
 
+_SOY_SAUCE_VARIANTS = {"dark soy sauce", "light soy sauce"}
+
+
 def _base_ingredient_names_for_family(family_dishes: list[str], bases: list[dict]) -> list[str]:
     """Every raw ingredient name already covered by a base used by any dish in this family — the
     family recipe call must not repeat these (F: recipes for dishes using a base must not repeat the
-    base's own ingredients)."""
+    base's own ingredients). Step EK-3d: a base already carrying Dark/Light soy sauce also excludes a
+    generic "Soy sauce" the family call might separately suggest — "Soy sauce" itself stays a real,
+    separate stock item when nothing already covers it, it just shouldn't be added a second time on
+    top of a base that already has a specific soy sauce."""
     family_dishes_norm = {normalise(name) for name in family_dishes}
     names: set[str] = set()
     for base in bases:
@@ -398,6 +478,8 @@ def _base_ingredient_names_for_family(family_dishes: list[str], bases: list[dict
         )
         if used_by_this_family:
             names.update(ing["name"] for ing in base["batch_ingredients"])
+    if any(normalise(n) in _SOY_SAUCE_VARIANTS for n in names):
+        names.add("Soy sauce")
     return sorted(names)
 
 
@@ -501,7 +583,9 @@ def compose_family_recipes(
             main_unit = member.get("main_item_unit") or "g"
             main_qty = member.get("main_item_qty") or 0.0
 
-            if main_name and main_qty > 0 and _main_item_mismatch(dish_name, main_name):
+            if main_name and main_qty > 0 and _has_marker(dish_name, _MIXED_MARKERS):
+                main_name, main_qty = "", 0.0
+            elif main_name and main_qty > 0 and _main_item_mismatch(dish_name, main_name):
                 flags.append(
                     f'check this: "{dish_name}" was given "{main_name}" as its main item, which '
                     "looks like the wrong veg/non-veg match — dropped"
@@ -647,6 +731,11 @@ def _canonical_ingredient_name(name: str, alias_lookup: dict[str, str]) -> str:
     norm = normalise(cleaned)
     if norm == "oil":
         return "Cooking oil"
+    # Step EK-3d Fix F: "rice" = "Basmati rice", but EXACT-match only, like "oil" above — the real-run
+    # bug this is a rerun of was a substring "rice" alias wrongly swallowing "Rice flour" too (whole-
+    # word "rice" is genuinely inside "rice flour"). Bare "rice" alone never is, so this is safe.
+    if norm == "rice":
+        return "Basmati rice"
     if norm in alias_lookup:
         return alias_lookup[norm]
     for phrase in sorted(alias_lookup, key=len, reverse=True):

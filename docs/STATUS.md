@@ -686,6 +686,53 @@ not built yet.
   limit): drink sub-typing, the merge-only-same-bases-and-main-item-pattern restriction, the
   re-ask-once-on-mismatch flow (drops and flags instead), and dish-list source-line tracking (only a
   repeated-word safety net was added to `base_discovery.dedup_dishes`).
+- **Step EK-3d — Dish list leftovers, family names, final aliases.** Real runs (setup3) found: (1)
+  first-pass dishes surviving next to the group pass's own dishes for the same table — a whole garbled
+  blob ("Fried Rice/Noodles Veg/Egg/Chicken/Mixed (...)") and, more commonly, a first-pass dish keeping
+  the heading's own compound slash text ("Fried Rice/Noodles Chicken") beside the group's two clean
+  dishes ("Fried Rice Chicken" + "Noodles Chicken"); word-order duplicates ("Manchurian Gobi" surviving
+  over the group's "Gobi Manchurian"); (2) a variant already inside its own heading glued on a second
+  time ("... Drums of Heaven"), and a repeated 2-word phrase ("Masala Fry Masala Fry"); (3) a bare
+  heading-only dish beside its own Veg/Chicken sibling (bare "Sweetcorn Soup"); (4) a "Mixed" dish
+  wrongly given a single protein as its main item; (5) duplicate family display names (two dish types
+  sharing one AI family tag) and misleading groupings (Fish Fingers/Golden Fry Prawns landing in a
+  "Prawn Pepper family" on the strength of sharing only one of its two words); (6) 6 more duplicate
+  ingredient names (turmeric/turmeric powder, hung curd/curd, tomato sauce/ketchup, rice/basmati rice,
+  chilled milk/milk, vanilla ice cream/ice cream). Fixed: `base_discovery._is_blob_leftover` drops both
+  leftover shapes (whole-blob and compound-heading-residue, the latter needed stripping a real
+  parenthetical like "Mixed (Egg, Chicken, Pork, ...)" before comparing tokens); `apply_groups` also
+  drops a first-pass dish whose `_dedup_key` matches a group dish (word-order ties now always resolve
+  to the group's name); `expand_dish_options` drops a variant already contained in its own heading;
+  `_drop_repeated_word` now collapses a repeated 2-word phrase, not just a single word; new
+  `_resolve_slash_name` keeps a lone "A / B" as one dish — collapsed to the fuller half + a "check
+  this" note when the two sides share a real word (two styles of one dish, e.g. "Fish Masala Fry /
+  Tava Fry" -> "Fish Masala Fry"), kept combined and unflagged when they share nothing (two names for
+  one dish, e.g. "Chicken Lollipop / Drums of Heaven"); new `_drop_bare_duplicates` drops a bare dish
+  beside a sibling adding exactly one option word (veg/nonveg/chicken/egg/mixed/prawn/red/green);
+  `compose_family_recipes` drops a "Mixed" dish's main item silently (not through the flagged mismatch
+  path — this is expected, not ambiguous); `build_families`'s new `_family_outliers` pulls a dish out
+  of a group it doesn't share the group's own majority word signature with (3+ member groups only —
+  too few to tell a real signature from noise otherwise) into a type-based fallback bucket ("Fried
+  starters" for starter types), and any two families still sharing one display name are merged; 6 new
+  `restaurant_cafe.json` aliases (bare "rice"→"Basmati rice" kept EXACT-match only, like the existing
+  "oil" case, to avoid re-introducing the EK-3c "Rice flour" bug) plus `never_merge` protection for
+  Kashmiri red chilli vs red chilli powder and soy sauce variants, and a base already carrying
+  Dark/Light soy sauce now also excludes a generic "Soy sauce" from its family's own ingredients (not
+  one of the lettered fixes, a Finding 5 clarification). Found and fixed one bug outside the finding
+  list during the real-proof polish pass: `ai_try_kitchen.py`'s own `raw_dishes` construction was
+  silently dropping `variant_position`/`variant_prices` before they ever reached
+  `expand_dish_options`, undermining Fix B's "no separate prices" check for every real run through that
+  script. Real-run proof (`ai_try_kitchen.py --setup`, `_private/kavan_setup4.txt`/`fomo_setup4.txt`):
+  Kavan 135 dishes (target 125-140), FOMO 204 (target 190-215); both 0 duplicate family names, 0
+  leftover "Fried Rice/Noodles <type>" dishes, 0 repeated-phrase names, 0 bare-vs-specific pairs, 0
+  family-level flags, all 6 alias pairs merged; cost Kavan ~Rs 5.94, FOMO ~Rs 10.14 (well under the
+  Rs 30 target). Missed on both (pre-existing EK-3c target, not in this step's scope): the 40-85
+  distinct-ingredient range — Kavan 89, FOMO 112, a dense real menu's genuine raw ingredient count.
+  **Not done** (scope cut for the 45-minute limit): true per-menu-line source-line IDs (apply_groups
+  still matches by name/token overlap, not a model-tagged line id — the same gap EK-3b already
+  deferred); re-running the merge/categorise AI call to account for the newly-split "Fried starters"
+  fallback family's own ingredients separately from its old misleading family (ingredients still
+  resolve fine, just via whichever family the dish ends up in).
 - **Step EK-3c — Ingredient merging, low-stock category fixes, a real spice list.** Real runs found a
   bad alias ("rice" wrongly merged Rice flour into Basmati rice), 15 duplicate names still listed
   separately, several categories wrong (coconut oil/tomato sauce fresh_semi, coriander powder/bread
