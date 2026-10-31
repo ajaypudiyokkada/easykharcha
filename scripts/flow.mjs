@@ -66,6 +66,7 @@ const STEP25C2A_FIXTURE_IMAGE = resolvePath('docs/images/ek_logo_icon.png');
 const STEPO1_SCREEN_DIR = 'docs/screens/stepo1';
 const STEP44V1_SCREEN_DIR = 'docs/screens/step44v1';
 const STEP45B1C2B_SCREEN_DIR = 'docs/screens/step45b1c2b';
+const EK_SCREEN_DIR = 'docs/screens/ek';
 // Step C2c: a 1-page PDF carrying the AI_FAKE-only FORCE_NEVER_FINISH marker (ai/views.py) — the
 // scan it starts stays queued forever, used below to prove the Analyzing screen's stuck-scan UI.
 // Must be a PDF, not a photo: a photo upload is always resized/re-encoded client-side before it
@@ -1578,6 +1579,382 @@ async function checkMenuScanStuckFlow(page) {
   await logoutFromAnywhere(page);
 }
 
+function ekDraftKey(businessId, scanId) {
+  return `easykharcha.ek_setup_draft.${businessId}.${scanId}`;
+}
+
+async function readEkDraft(page, businessId, scanId) {
+  const raw = await page.evaluate(
+    (key) => localStorage.getItem(key),
+    ekDraftKey(businessId, scanId),
+  );
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function waitForEkDraft(page, businessId, scanId) {
+  return retryUntil(() => readEkDraft(page, businessId, scanId));
+}
+
+// A weight/volume ingredient's qty_base_units (EK-4b's apply format, ekSetupStore.ts's
+// buildApplyPayload) is always grams/millilitres regardless of which entry unit (kg/L) the owner's
+// edit used — mirrors convertEntryQuantity's kg/L->g/ml scaling closely enough to check the saved
+// draft converts correctly without re-importing the real (TypeScript) implementation here.
+function ekLineBaseUnits(amount, entryUnit) {
+  const n = Number(String(amount).replace(',', '.')) || 0;
+  return entryUnit === 'kg' || entryUnit === 'L' ? n * 1000 : n;
+}
+
+// Intercepts exactly the next POST to a business's EK setup endpoint and fakes its response, then
+// detaches again. Used to exercise the client's failed/cap-reached states: provider/fake.py's own
+// FORCE_PROVIDER_ERROR marker (ai/provider/fake.py) only fails one recipe family, by design — it
+// proves compose_family_recipes skips a family that never succeeds rather than failing the whole
+// run, so there's no dish/family name that reliably fails an entire EkSetupRun under AI_FAKE. This
+// tests the same client code (ek.tsx's error rendering and its retry/poll wiring) without needing
+// one. Every other request (the CORS preflight, and after the one swap, the real Retry) continues
+// to the real backend untouched — 'Access-Control-Allow-Origin: *' is added to the faked response
+// because the app (localhost:8081) and the API (127.0.0.1:8000) are cross-origin, and a faked
+// response bypasses the real server's own normally-permissive dev CORS headers.
+async function fakeNextEkSetupResponse(page, { status, body }) {
+  await page.setRequestInterception(true);
+  let handled = false;
+  const handler = (req) => {
+    if (!handled && req.method() === 'POST' && req.url().includes('/ek-setup/')) {
+      handled = true;
+      req.respond({
+        status,
+        contentType: 'application/json',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      req.continue();
+    }
+  };
+  page.on('request', handler);
+  return async () => {
+    page.off('request', handler);
+    await page.setRequestInterception(false);
+  };
+}
+
+// A trimmed-down version of responsive_check.mjs's measurePage, scoped to just the three checks
+// Step EK-4c-1b's spec asks for (no horizontal scroll, no clipped/one-char-per-line text, every tap
+// target >= 44px) — the full shared script's own `--screen` manifest isn't wired up for these
+// screens (they need a real menu-scan-derived scanId, not a plain route), so this flow's own
+// screenshots are checked inline instead.
+async function assertNoEkLayoutIssues(page, label) {
+  const issues = await page.evaluate(() => {
+    const found = [];
+    for (const el of document.querySelectorAll('body, body *')) {
+      const style = getComputedStyle(el);
+      if (style.overflowX === 'hidden' || style.overflowX === 'clip') continue;
+      const isRoot = el === document.body || el === document.documentElement;
+      const compareWidth = isRoot ? window.innerWidth : el.clientWidth;
+      if (el.scrollWidth > compareWidth + 2) {
+        found.push(
+          `horizontal overflow: <${el.tagName.toLowerCase()}> scrollWidth=${el.scrollWidth} width=${compareWidth}`,
+        );
+        break;
+      }
+    }
+    document
+      .querySelectorAll('[role="button"],[role="link"],[role="checkbox"],[role="radio"],a,button')
+      .forEach((el) => {
+        if (el.getAttribute('tabindex') === '-1') return;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;
+        const labelEl = el.closest('label');
+        const useLabel = (el.getAttribute('role') === 'checkbox' || el.tagName === 'INPUT') && labelEl;
+        const target = useLabel ? labelEl : el;
+        const tr = target.getBoundingClientRect();
+        if (tr.width < 44 || tr.height < 44) {
+          const text = (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30);
+          found.push(`touch target < 44px: <${el.tagName.toLowerCase()}> "${text}" ${Math.round(tr.width)}x${Math.round(tr.height)}`);
+        }
+      });
+    document.querySelectorAll('body *').forEach((el) => {
+      const hasDirectText = Array.from(el.childNodes).some(
+        (n) => n.nodeType === 3 && n.textContent.trim().length > 0,
+      );
+      if (!hasDirectText) return;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const text = el.textContent.trim();
+      if (r.width < 40 && text.length > 6) {
+        found.push(`one-char-per-line text: <${el.tagName.toLowerCase()}> "${text.slice(0, 30)}" width=${Math.round(r.width)}`);
+      }
+    });
+    return found;
+  });
+  if (issues.length > 0) fail(`ek-setup layout (${label}): ${issues.join('; ')}`);
+}
+
+// Step EK-4c-1b: the EK setup screens reached once the dish review is saved (ek.tsx) — progress,
+// batches (edit/remove an ingredient line, remove a "Used in" dish), best sellers (untick/add),
+// the draft surviving a refresh and a Back navigation, and the two client-only error states
+// (failed -> Retry -> queued -> done, and cap-reached) faked via fakeNextEkSetupResponse. 15
+// dishes are created at review (not three) — more than the fake best-sellers picker's own cap —
+// so preselecting some of them still leaves at least one "other" dish to add from search.
+async function checkEkSetupFlow(page) {
+  await mkdir(EK_SCREEN_DIR, { recursive: true });
+  const name = 'Ek Setup Flow';
+  const mobile = randomMobile();
+  const password = `Flow${Math.floor(1000 + Math.random() * 9000)}!`;
+
+  await signup(page, name, mobile, password, 'Spice Route EK');
+  await login(page, mobile, password);
+  await waitForPath(page, '/setup/1');
+  await fillStepOne(page, '411001', 'Restaurant or cafe', 'quick');
+
+  await waitForText(page, 'Scan your menu');
+  const [fileChooser] = await Promise.all([
+    page.waitForFileChooser(),
+    clickButton(page, 'Choose photos'),
+  ]);
+  await fileChooser.accept([STEP25C2A_FIXTURE_IMAGE]);
+  await waitForText(page, 'Photos are used only to read your menu.');
+  await retryUntil(async () => (await page.$$('img')).length > 0);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  await clickButton(page, 'Read my menu');
+  await waitForPath(page, '/menu-scan/review');
+  await findVisible(page, '[aria-label="Fake Dish 1"]');
+  await clickAndSettle(await findVisible(page, '[aria-label="Fake Dish 1"]'));
+  await typeInto(page, 'Selling price — Fake Dish 2', '150');
+  // Real-sounding dish names, all 3 in the same "curry" family (ai/base_discovery.py's
+  // min_dishes_to_suggest_base is 3 — fewer sharing dishes and the base is dropped, same rule the
+  // smoke suite's own "a base used by fewer dishes than the sector's rule requires is dropped"
+  // check covers) so this review is guaranteed to produce at least one suggested batch ("base").
+  // 3 real dishes (same family, for a guaranteed base — see the comment above) plus 10 generic
+  // filler ones: the fake best-sellers picker tops up under 12 picks by pulling in every remaining
+  // dish (provider/fake.py's pick_best_sellers' own round-robin, topped up further by
+  // recipe_composer's own gap-fill over the full shortlist) — with only a handful of dishes in the
+  // business every one of them ends up preselected, leaving nothing in "other dishes" to add from
+  // search below. More dishes than that cap guarantees at least one is left over.
+  const reviewDishes = [
+    ['Chicken Curry', '180'],
+    ['Egg Curry', '140'],
+    ['Paneer Curry', '160'],
+    ...Array.from({ length: 10 }, (_, i) => [`Snack ${i + 1}`, '30']),
+  ];
+  for (const [dishName, price] of reviewDishes) {
+    await clickButton(page, 'Add a dish');
+    await typeInto(page, 'Name — Untitled item', dishName);
+    await typeInto(page, `Selling price — ${dishName}`, price);
+  }
+  console.log(
+    `OK — reviewed the scanned menu: dropped one, edited a price, added ${reviewDishes.length} dishes by hand.`,
+  );
+
+  // === Fix 1/2: a failed run shows Retry/Continue without, and Retry actually resumes polling ===
+  const stopFailed = await fakeNextEkSetupResponse(page, {
+    status: 202,
+    body: { id: 0, status: 'failed', error_code: 'ai_provider_error' },
+  });
+  await clickButton(page, 'Add 15 dishes');
+  await waitForPath(page, '/menu-scan/ek');
+  const { businessId, scanId } = await page.evaluate(() => {
+    const p = new URLSearchParams(location.search);
+    return { businessId: p.get('businessId'), scanId: p.get('scanId') };
+  });
+  await waitForText(page, 'Something went wrong setting up your kitchen.');
+  await waitForText(page, 'Try again');
+  await waitForText(page, 'Continue without EK suggestions');
+  await stopFailed();
+  console.log('OK — Fix 1: a failed run shows Try again and Continue without EK suggestions.');
+
+  await clickButton(page, 'Try again');
+  // Fix 2: nothing is intercepted this time, so Retry's own POST reaches the real backend for
+  // real — AI_FAKE processes it inline and the run completes (failed -> Retry -> queued -> done).
+  await waitForText(page, 'Things you make in batches');
+  console.log('OK — Fix 2: Retry resumes the start-and-poll cycle and reaches the batches screen.');
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/progress-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'progress');
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/batches-list-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'batches-list');
+  console.log(`OK — saved progress + batches-list screenshots at 360/390px to ${EK_SCREEN_DIR}/.`);
+  // Back to a tall viewport for the interactions below — a short one plus react-native-web's own
+  // internal ScrollView inside the Sheet makes driving it unreliable (same reason buildOwnerSession
+  // in responsive_check.mjs stays tall throughout its own setup).
+  await page.setViewport({ width: 390, height: 3000 });
+
+  // === Step 1: batches — open one, edit one line, remove another, remove one "Used in" dish ===
+  const draft = await waitForEkDraft(page, businessId, scanId);
+  if (!draft.bases.length) fail('ek-setup: expected at least one suggested batch ("base")');
+  const base = draft.bases[0];
+  const editedLine = base.formula[0];
+  const removedLine = base.formula.length > 1 ? base.formula[1] : null;
+  const removedDish = base.dishes.length > 0 ? base.dishes[0] : null;
+
+  await clickAndSettle(await findVisible(page, `[aria-label="${base.name}"]`));
+  await waitForText(page, 'What goes into 1 kg / 1 L');
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/batch-open-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'batch-open');
+  console.log(`OK — opened "${base.name}"; saved its screenshot at 360/390px.`);
+  await page.setViewport({ width: 390, height: 3000 });
+
+  await typeInto(page, editedLine.name, '0.5');
+  console.log(`OK — edited "${editedLine.name}"'s amount to 0.5.`);
+  if (removedLine) {
+    await clickAndSettle(await findVisible(page, `[aria-label="Remove ${removedLine.name}"]`));
+    console.log(`OK — removed the "${removedLine.name}" line.`);
+  }
+
+  if (removedDish) {
+    // { last: true }: the batch ROW behind the sheet also contains the substring "Used in" (its
+    // own "Used in N dishes" meta line sits inside the row's own [role="button"]) and — like every
+    // other screen here — stays mounted, just visually covered, while the sheet is open
+    // (expo-router's web Stack/Modal never unmounts what's underneath); the sheet's own "Used in"
+    // link is the later one in DOM order.
+    await clickAndSettle(await findVisibleContaining(page, 'button', 'Used in', { last: true }));
+    await waitForText(page, 'Which dishes use this, and how much per portion');
+
+    for (const width of [360, 390]) {
+      await page.setViewport({ width, height: 900 });
+      await page.screenshot({ path: `${EK_SCREEN_DIR}/used-in-${width}.png` });
+    }
+    await assertNoEkLayoutIssues(page, 'used-in');
+    console.log(`OK — opened "Used in"; saved its screenshot at 360/390px.`);
+    await page.setViewport({ width: 390, height: 3000 });
+
+    await clickAndSettle(await findVisible(page, `[aria-label="Remove ${removedDish.name}"]`));
+    console.log(`OK — removed "${removedDish.name}" from "Used in".`);
+    await clickButton(page, 'Done');
+  } else {
+    console.log('OK — this batch has no "Used in" dishes yet; skipped the remove-dish check.');
+  }
+  await clickButton(page, 'Done');
+
+  // === Refresh mid-step-1 resumes with the owner's edits ===
+  await page.reload({ waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForText(page, 'Things you make in batches');
+  const draftAfterRefresh = await waitForEkDraft(page, businessId, scanId);
+  const baseAfterRefresh = draftAfterRefresh.bases.find((b) => b.key === base.key);
+  if (!baseAfterRefresh) fail('ek-setup: the edited batch is missing after a refresh');
+  const editedLineAfterRefresh = baseAfterRefresh.formula.find((l) => l.id === editedLine.id);
+  if (!editedLineAfterRefresh || Number(editedLineAfterRefresh.amount) !== 0.5) {
+    fail('ek-setup: refreshing mid-step-1 lost the edited line\'s amount');
+  }
+  if (removedLine && baseAfterRefresh.formula.some((l) => l.id === removedLine.id)) {
+    fail('ek-setup: refreshing mid-step-1 brought back a removed line');
+  }
+  if (removedDish && baseAfterRefresh.dishes.some((d) => d.dishId === removedDish.dishId)) {
+    fail('ek-setup: refreshing mid-step-1 brought back a removed "Used in" dish');
+  }
+  console.log('OK — refreshing mid-step-1 resumes with the owner\'s edits (amount, removed line, removed dish).');
+
+  // === Step 2: best sellers — untick two, add one from search; Back keeps step-1's edits ===
+  await clickButton(page, 'Continue');
+  await waitForText(page, 'Which dishes should we set up first?');
+
+  const draftAtStep2 = await waitForEkDraft(page, businessId, scanId);
+  const selectedPicks = draftAtStep2.bestSellers.filter((p) => p.selected);
+  const toUntick = selectedPicks.slice(0, 2);
+  for (const pick of toUntick) {
+    await clickAndSettle(await findVisibleContaining(page, 'checkbox', pick.name));
+  }
+  console.log(`OK — unticked ${toUntick.length} best-seller pick(s).`);
+
+  await clickAndSettle(await findVisible(page, '[aria-label="Go back"]'));
+  await waitForText(page, 'Things you make in batches');
+  const draftAfterBack = await waitForEkDraft(page, businessId, scanId);
+  const baseAfterBack = draftAfterBack.bases.find((b) => b.key === base.key);
+  const editedLineAfterBack = baseAfterBack?.formula.find((l) => l.id === editedLine.id);
+  if (!editedLineAfterBack || Number(editedLineAfterBack.amount) !== 0.5) {
+    fail('ek-setup: going Back from step 2 lost step 1\'s edits');
+  }
+  console.log('OK — Back from step 2 keeps step 1\'s edits.');
+
+  await clickButton(page, 'Continue');
+  await waitForText(page, 'Which dishes should we set up first?');
+  const draftOnReturn = await waitForEkDraft(page, businessId, scanId);
+  const stillSelected = new Set(
+    draftOnReturn.bestSellers.filter((p) => p.selected).map((p) => p.key),
+  );
+  if (toUntick.some((p) => stillSelected.has(p.key))) {
+    fail('ek-setup: going Back to step 1 and Continue-ing again lost step 2\'s unticked picks');
+  }
+
+  const bestSellerDishIds = new Set(draftOnReturn.bestSellers.map((p) => p.dishId));
+  const accessToken = await page.evaluate(() => localStorage.getItem('easykharcha.access'));
+  const sellItemsRes = await fetch(`${API_BASE}/businesses/${businessId}/sell-items/`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const sellItems = await sellItemsRes.json();
+  const otherDish = sellItems.find((item) => !bestSellerDishIds.has(item.id));
+  if (!otherDish) fail('ek-setup: expected at least one dish left over to add from search');
+  await typeInto(page, 'Search your other dishes', otherDish.name);
+  await clickAndSettle(await findVisibleContaining(page, 'checkbox', otherDish.name, { last: true }));
+  console.log(`OK — added "${otherDish.name}" from search.`);
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/best-sellers-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'best-sellers');
+  console.log(`OK — saved the best-sellers screenshot at 360/390px to ${EK_SCREEN_DIR}/.`);
+
+  // === Reads the saved draft and checks the shape EK-4b's apply payload is built from: the kept
+  // base's edited line (converted to base units), the removed line gone, and the final selected
+  // dishes (both best-sellers and the owner's edits above are all reflected in one place). ===
+  const finalDraft = await waitForEkDraft(page, businessId, scanId);
+  const finalBase = finalDraft.bases.find((b) => b.key === base.key);
+  if (!finalBase?.keep) fail('ek-setup: the edited batch should still be kept');
+  const finalLine = finalBase.formula.find((l) => l.id === editedLine.id);
+  if (!finalLine) fail('ek-setup: the edited line is missing from the apply-bound draft');
+  const finalBaseUnits = ekLineBaseUnits(finalLine.amount, finalLine.entryUnit);
+  if (!(finalBaseUnits > 0)) fail('ek-setup: the edited line converts to a non-positive base-unit qty');
+  if (removedLine && finalBase.formula.some((l) => l.id === removedLine.id)) {
+    fail('ek-setup: the removed line reappeared in the final draft');
+  }
+  const finalSelectedKeys = new Set(
+    finalDraft.bestSellers.filter((p) => p.selected).map((p) => p.key),
+  );
+  if (toUntick.some((p) => finalSelectedKeys.has(p.key))) {
+    fail('ek-setup: an unticked best-seller is still selected in the final draft');
+  }
+  const addedPick = finalDraft.bestSellers.find((p) => p.dishId === otherDish.id);
+  if (!addedPick?.selected) fail('ek-setup: the dish added from search is missing or not selected');
+  console.log(
+    `OK — the saved draft matches the apply payload's shape: "${base.name}" kept, its edited ` +
+      `line converts to ${finalBaseUnits} base units, the removed line is gone, and the selected ` +
+      'dishes reflect every edit above.',
+  );
+
+  // === Cap-reached: a throwaway scanId (never a real MenuScan — the POST is fully faked, so the
+  // real backend never sees it) on the same business, faking the 429 the daily AI cap returns. ===
+  const stopCapReached = await fakeNextEkSetupResponse(page, {
+    status: 429,
+    body: { error: { code: 'ai_daily_limit_reached', message: 'Daily limit reached' } },
+  });
+  await page.goto(
+    `${APP_URL}/menu-scan/ek?businessId=${businessId}&scanId=999999999&returnTo=onboarding&count=15`,
+    { waitUntil: 'networkidle0', timeout: TIMEOUT },
+  );
+  await waitForText(page, "reached today's limit");
+  await waitForText(page, 'Continue without EK suggestions');
+  const capReachedText = await page.evaluate(() => document.body.innerText);
+  if (capReachedText.includes('Try again')) {
+    fail('ek-setup: cap-reached has nothing to retry — it should not offer "Try again"');
+  }
+  await stopCapReached();
+  console.log('OK — cap-reached shows its own message with only "Continue without EK suggestions".');
+
+  await logoutFromAnywhere(page);
+}
+
 // Step O1: the DIY side of the fork — "I'll set it up myself" on a menuScanEnabled sector
 // (bakery_sweets) lands on brand exactly like a sector with no fork at all, step 3 shows its
 // default (non-quick) copy, and step 4 opens straight on the manual form, never the old
@@ -2017,6 +2394,7 @@ const FLOW_SCENARIOS = [
   { name: 'onboarding-menu', kind: 'solo' },
   { name: 'onboarding-diy', kind: 'solo' },
   { name: 'menu-scan-stuck', kind: 'solo' },
+  { name: 'ek-setup', kind: 'solo' },
   { name: 'bases', kind: 'solo' },
   { name: 'low-stock', kind: 'solo' },
 ];
@@ -2488,6 +2866,10 @@ async function main() {
     if (shouldRun('menu-scan-stuck'))
       await timed('menu-scan-stuck', async () => {
     await checkMenuScanStuckFlow(page);
+      });
+    if (shouldRun('ek-setup'))
+      await timed('ek-setup', async () => {
+    await checkEkSetupFlow(page);
       });
     if (shouldRun('bases'))
       await timed('bases', async () => {

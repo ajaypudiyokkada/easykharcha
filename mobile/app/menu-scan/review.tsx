@@ -344,8 +344,10 @@ export default function MenuScanReview() {
         method: 'POST',
         body: { items, skip_existing: true },
       });
+      // Step EK-4c-1: the dish list is confirmed ("Looks good") — on to EK setup, which starts
+      // (and polls) its own run; its stuck/failed states fall back to this same done screen.
       router.replace(
-        `/menu-scan/done?businessId=${business.id}&returnTo=${returnTo}&count=${created.length}`,
+        `/menu-scan/ek?businessId=${business.id}&scanId=${params.scanId}&returnTo=${returnTo}&count=${created.length}`,
       );
     } catch (err) {
       if (err instanceof ApiError && err.rowErrors) {

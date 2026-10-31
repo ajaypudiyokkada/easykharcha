@@ -337,6 +337,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   dish", "Add another photo" merges a second scan de-duplicated by name, skips dishes already on the
   sell-items list); save POSTs `sell-items/bulk/` (section name -> `group`, `skip_existing: true`);
   done shows the count and continues onboarding or returns to Settings
+- `menu-scan/ek.tsx` — Step EK-4c-1/1b: reached from `review.tsx` once dishes are confirmed; POSTs/
+  polls `ai/menu-scans/<id>/ek-setup/` (progress screen; a soft "taking longer" line past
+  `EXPO_PUBLIC_EK_SETUP_SLOW_AFTER_MS`/60s, Retry/Continue-without past `..._STUCK_AFTER_MS`/6min;
+  Retry re-runs the whole start-and-poll effect via an `attempt` dep, not its own POST), then
+  "Things you make in batches" and "Which dishes should we set up first?" — owner edits live in
+  `screens/ekSetupStore.ts` (persisted draft, `buildApplyPayload` for a later step); falls back to
+  `done.tsx` on failed/cap-reached/unavailable or Continue. `scripts/flow.mjs`'s `ek-setup` scenario
+  covers both screens plus the error states (`verify:ui -- --area ai --flow ek-setup`).
 - `setup/done.tsx` — wizard summary, "still to do" list
 - `home.tsx` — Home: OwnerHome (Owner/Manager) or TodayHome (Head chef/Helper), role-branched; Step
   23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`; Step

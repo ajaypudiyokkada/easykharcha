@@ -990,6 +990,61 @@ export const strings = {
       subtitle: 'They need ingredients so EasyKharcha can track stock. We will do this next.',
       continueLabel: 'Continue',
     },
+    /** Step EK-4c-1: the EK setup screens (progress, batches, best sellers) shown right after the
+     * dish review is saved. Owner-facing copy only ever says "things you make in batches" — never
+     * base/formula/BOM/sub-recipe — and every suggested quantity is labelled an estimate until the
+     * owner confirms it. */
+    ek: {
+      progress: {
+        title: 'EK is setting up your kitchen...',
+        takingAWhile: 'This is taking longer than usual. You can wait.',
+        stuckBanner: 'This is taking longer than usual.',
+        tryAgain: 'Try again',
+        continueWithout: 'Continue without EK suggestions',
+        capReached: (sellNounPlural: string) =>
+          `EK setup has reached today's limit. You can set up your ${sellNounPlural} the usual way.`,
+        unavailable: (sellNounPlural: string) =>
+          `EK setup is not available right now. You can set up your ${sellNounPlural} the usual way.`,
+        failed: 'Something went wrong setting up your kitchen.',
+        incompleteNotice: (n: number) =>
+          `EK could not suggest for ${n} dish${n === 1 ? '' : 'es'}. You can add them later.`,
+      },
+      stepHeader: (step: number) => `Step ${step} of 4`,
+      batches: {
+        title: 'Things you make in batches',
+        subtitle: 'EK suggests these — check them before you rely on them.',
+        usedInDishes: (n: number) => `Used in ${n} dish${n === 1 ? '' : 'es'}`,
+        keep: 'Keep',
+        remove: 'Remove',
+        addOwn: '+ Add my own',
+        addOwnTitle: 'Name your batch',
+        addOwnPlaceholder: 'e.g. Onion-tomato masala',
+        whatGoesIn: 'What goes into 1 kg / 1 L',
+        estimateLabel: 'estimate',
+        addLine: '+ Add ingredient',
+        addLineTitle: 'Choose an item',
+        searchIngredients: 'Search',
+        addNewIngredient: '+ Add something new',
+        removeLine: 'Remove',
+        usedIn: 'Used in',
+        usedInSubtitle: 'Which dishes use this, and how much per portion',
+        addDish: '+ Add a dish',
+        pickDishTitle: 'Choose a dish',
+        searchDishes: 'Search dishes',
+        removeDish: 'Remove',
+        portionLabel: 'Amount per portion',
+        done: 'Done',
+        continueLabel: 'Continue',
+      },
+      bestSellers: {
+        title: 'Which dishes should we set up first?',
+        subtitle: 'EK suggests starting with your best sellers — tick or untick any dish.',
+        selectedCount: (n: number) => `${n} dish${n === 1 ? '' : 'es'} selected`,
+        searchPlaceholder: 'Search your other dishes',
+        otherDishes: 'Other dishes',
+        continueLabel: 'Continue',
+      },
+    },
   },
   settings: {
     hub: {
