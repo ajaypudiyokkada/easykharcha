@@ -176,6 +176,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   returns the existing run idempotently, GET polls), Owner-only (`sellitems.manage`), gated by the
   monthly cap and the same daily-scan bucket as menu scans (`AI_DAILY_SCANS_PER_BUSINESS`). No
   StockItem/SellItem/Recipe/Base writes — unchanged from suggest_setup's own contract.
+  Step EK-4a2: `suggest_setup`'s `on_progress` keeps `heartbeat` fresh across a long run;
+  `provider/base.py`'s `run_with_fallback` retries a provider-call failure once before the fallback
+  model, with stage/label logging; `compose_family_recipes` skips (never fails the run for) one bad
+  family past that, up to a 20% failure cap (`MAX_FAMILY_FAILURE_RATIO`); `pick_best_sellers`/
+  `_merge_ingredient_entries` degrade to their existing deterministic paths on a failed call instead
+  of raising; new `EkSetupRun.error_detail` (diagnostic only, never owner-facing);
+  `build_owner_result` gained `incomplete`/`dishes_without_suggestion`. `fake.py`'s
+  `FORCE_PROVIDER_ERROR` family-name marker (smoke's `check_recipe_composer_flow`) proves it.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/

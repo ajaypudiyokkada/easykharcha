@@ -71,6 +71,10 @@ class EkSetupRun(models.Model):
     heartbeat = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     error = models.CharField(max_length=40, blank=True, default="")
+    # Step EK-4a2: the last failure's own detail (stage, exception class/message, HTTP status) for
+    # diagnosing an "ai_provider_error"/"worker_error" code after the fact — internal only, never
+    # returned to the owner (see views._ek_setup_payload), never the API key or prompt/response text.
+    error_detail = models.TextField(blank=True, default="")
     result = models.JSONField(null=True, blank=True)
     # Cost fields, same shape as AiUsage — suggest_setup's own cost_summary totalled across every
     # real call it made (classification, best-sellers, family recipes, ingredient merge); the

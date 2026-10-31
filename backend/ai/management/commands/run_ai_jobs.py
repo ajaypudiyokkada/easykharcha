@@ -91,6 +91,7 @@ class Command(BaseCommand):
             EkSetupRun.objects.filter(id=run.id, status=EkSetupRunStatus.RUNNING).update(
                 status=EkSetupRunStatus.FAILED,
                 error="worker_error",
+                error_detail=f"{type(exc).__name__}: {str(exc)[:500]}",
                 finished_at=timezone.now(),
             )
             self.stdout.write(f"EK setup run {run.id} failed: {exc}")

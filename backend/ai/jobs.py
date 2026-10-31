@@ -86,24 +86,32 @@ def process_ek_setup_run(run_id: int) -> None:
     sell items (ek_setup.build_dish_input — the owner's reviewed list, edits/deletions respected),
     called inline by the view when AI_FAKE and by run_ai_jobs's poll loop otherwise, same split as
     process_menu_scan. Never writes to StockItem/SellItem/Recipe/Base — suggest_setup's own
-    contract, unchanged here."""
+    contract, unchanged here. Step EK-4a2: `on_progress` refreshes `heartbeat` once per family
+    recipe call (and after each other stage) — a real menu's worth of family calls can genuinely
+    take longer than the worker's 10-minute stuck-job window, and a heartbeat set only once at the
+    start made that look stuck when it wasn't."""
     run = EkSetupRun.objects.select_related("business").get(id=run_id)
     run.status = EkSetupRunStatus.RUNNING
     run.started_at = timezone.now()
     run.heartbeat = run.started_at
     run.save(update_fields=["status", "started_at", "heartbeat"])
 
+    def _touch_heartbeat() -> None:
+        EkSetupRun.objects.filter(id=run.id).update(heartbeat=timezone.now())
+
     try:
         dishes, dish_id_by_norm = build_dish_input(run.business)
-        raw = suggest_setup(dishes, run.business.business_type, run.business)
+        raw = suggest_setup(
+            dishes, run.business.business_type, run.business, on_progress=_touch_heartbeat
+        )
     except AiUnavailable:
         _fail_ek_setup(run, "ai_unavailable")
         return
     except AiDailyLimitReached:
         _fail_ek_setup(run, "ai_daily_limit_reached")
         return
-    except (AiProviderCallError, AiSchemaError):
-        _fail_ek_setup(run, "ai_provider_error")
+    except (AiProviderCallError, AiSchemaError) as exc:
+        _fail_ek_setup(run, "ai_provider_error", exc)
         return
 
     save_cost_summary(run, raw["cost_summary"])
@@ -123,8 +131,10 @@ def process_ek_setup_run(run_id: int) -> None:
     )
 
 
-def _fail_ek_setup(run: EkSetupRun, error_code: str) -> None:
+def _fail_ek_setup(run: EkSetupRun, error_code: str, exc: Exception | None = None) -> None:
     run.status = EkSetupRunStatus.FAILED
     run.error = error_code
+    if exc is not None:
+        run.error_detail = f"{type(exc).__name__}: {str(exc)[:500]}"
     run.finished_at = timezone.now()
-    run.save(update_fields=["status", "error", "finished_at"])
+    run.save(update_fields=["status", "error", "error_detail", "finished_at"])

@@ -84,7 +84,9 @@ def _get_raw(
                 messages=messages,
             )
         except anthropic.APIError as exc:
-            raise AiProviderCallError(str(exc)) from exc
+            raise AiProviderCallError(
+                str(exc), status_code=getattr(exc, "status_code", None), exc_type=type(exc).__name__
+            ) from exc
 
         input_tokens += response.usage.input_tokens
         output_tokens += response.usage.output_tokens
@@ -111,6 +113,7 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
             max_tokens=_MAX_TOKENS_MENU,
         ),
         parse=lambda raw: MenuExtractionResult.model_validate(raw).sanitized(),
+        stage="menu_extraction",
     )
 
 
@@ -129,6 +132,7 @@ def extract_menu_groups(files: list[dict], business_type: str) -> AiCallResult:
             max_tokens=_MAX_TOKENS_MENU,
         ),
         parse=lambda raw: GroupExtractionResult.model_validate(raw).sanitized(),
+        stage="menu_group_extraction",
     )
 
 
@@ -149,6 +153,7 @@ def suggest_recipes(
             max_tokens=_MAX_TOKENS_RECIPE,
         ),
         parse=lambda raw: RecipeSuggestionsResult.model_validate(raw).model_dump(),
+        stage="recipe_suggestion",
     )
 
 
@@ -167,6 +172,7 @@ def classify_dishes(dish_names: list[str], sector: str, dish_types: list[str]) -
             max_tokens=_MAX_TOKENS_KITCHEN,
         ),
         parse=lambda raw: DishClassificationResult.model_validate(raw).model_dump(),
+        stage="classify_dishes",
     )
 
 
@@ -185,6 +191,7 @@ def pick_best_sellers(shortlist: list[dict], business_type: str) -> AiCallResult
             max_tokens=_MAX_TOKENS_BEST_SELLER,
         ),
         parse=lambda raw: BestSellersResult.model_validate(raw).model_dump(),
+        stage="best_sellers",
     )
 
 
@@ -211,6 +218,8 @@ def compose_family_recipe(
             max_tokens=_MAX_TOKENS_FAMILY_RECIPE,
         ),
         parse=lambda raw: FamilyRecipeSuggestion.model_validate(raw).model_dump(),
+        stage="family_recipe",
+        label=family_name,
     )
 
 
@@ -229,4 +238,5 @@ def merge_ingredients(items: list[dict]) -> AiCallResult:
             max_tokens=_MAX_TOKENS_MERGE,
         ),
         parse=lambda raw: IngredientMergeResult.model_validate(raw).model_dump(),
+        stage="merge_ingredients",
     )

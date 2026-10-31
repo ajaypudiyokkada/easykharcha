@@ -6311,7 +6311,9 @@ def check_recipe_composer_flow() -> None:
     flagged; the resolver canonicalises and merges near-duplicate ingredient names, drops a
     cooked-derived name, matches an existing stock item, proposes new ones with a unit family and
     low-stock category, and records "used in"; more families than the cap is still capped;
-    suggest_setup never writes to StockItem/SellItem/Base/Recipe tables."""
+    suggest_setup never writes to StockItem/SellItem/Base/Recipe tables. Step EK-4a2: a family whose
+    AI call fails on every attempt is skipped (not invented, not fatal) and flagged, the run still
+    completes flagged incomplete, unless over 20% of families fail, which still fails the whole call."""
     backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
     sys.path.insert(0, os.path.abspath(backend_dir))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -6331,6 +6333,7 @@ def check_recipe_composer_flow() -> None:
         _resolve_slash_name,
     )
     from ai.provider.base import AiCallResult
+    from ai.provider.errors import AiProviderCallError
     from ai.recipe_composer import (
         MAX_FAMILIES_PER_MENU,
         _build_alias_lookup,
@@ -6914,6 +6917,57 @@ def check_recipe_composer_flow() -> None:
             f"{before_base_count}->{after_base_count} base"
         )
     print("OK — suggest_setup proposes but never writes to StockItem/SellItem/Base — nothing applied until a later step.")
+
+    # --- Step EK-4a2: 3 of 20 family calls failing (every attempt, past provider/base.py's own
+    #     retry+fallback) must not fail the whole run — those 3 families are skipped (members get no
+    #     main item, same shape as a dish the model legitimately gave none) and the result is flagged
+    #     incomplete; failing more than 20% of families must still fail the whole call ---
+    resilience_families = [
+        {"name": f"Resilience family {i}", "type": "gravy_nonveg", "dishes": [f"Chicken dish {i}"]}
+        for i in range(17)
+    ] + [
+        {
+            "name": f"FORCE_PROVIDER_ERROR family {i}",
+            "type": "gravy_nonveg",
+            "dishes": [f"Failing chicken dish {i}"],
+        }
+        for i in range(3)
+    ]
+    resilience_result = compose_family_recipes(resilience_families, [], "restaurant_cafe", [])
+    if not resilience_result["incomplete"]:
+        fail("recipe composer: expected incomplete=True with 3/20 family calls failing")
+    failed = [f for f in resilience_result["families"] if f["ai_failed"]]
+    if len(failed) != 3 or not all(f["name"].startswith("FORCE_PROVIDER_ERROR") for f in failed):
+        fail(f"recipe composer: expected exactly the 3 FORCE_PROVIDER_ERROR families marked ai_failed, got {[f['name'] for f in failed]}")
+    for family in failed:
+        if family["members"][0]["main_item_name"] or family["members"][0]["qty"]:
+            fail(f"recipe composer: expected a failed family's dish to get no main item, got {family['members'][0]}")
+        if not any("check this" in flag for flag in family["flags"]):
+            fail(f"recipe composer: expected a failed family to be flagged 'check this', got {family['flags']}")
+    succeeded = [f for f in resilience_result["families"] if not f["ai_failed"]]
+    if len(succeeded) != 17 or any(not f["members"][0]["main_item_name"] for f in succeeded):
+        fail("recipe composer: expected the other 17 families to compose normally despite the 3 failures")
+    print("OK — 3/20 failed family recipe calls are skipped (flagged 'check this', no main item invented), the run still completes with incomplete=True, and the other 17 families compose normally.")
+
+    # --- more than 20% of families failing must still fail the whole call ---
+    too_many_failing = [
+        {"name": f"Resilience family {i}", "type": "gravy_nonveg", "dishes": [f"Chicken dish {i}"]}
+        for i in range(15)
+    ] + [
+        {
+            "name": f"FORCE_PROVIDER_ERROR family {i}",
+            "type": "gravy_nonveg",
+            "dishes": [f"Failing chicken dish {i}"],
+        }
+        for i in range(5)
+    ]
+    try:
+        compose_family_recipes(too_many_failing, [], "restaurant_cafe", [])
+    except AiProviderCallError:
+        pass
+    else:
+        fail("recipe composer: expected more than 20% of families failing to raise AiProviderCallError, not be silently absorbed")
+    print("OK — more than 20% of family recipe calls failing still fails the whole call, rather than returning a mostly-empty result as if it worked.")
 
 
 def check_ek_setup_flow() -> None:

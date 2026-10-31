@@ -99,7 +99,12 @@ def build_owner_result(raw: dict, dish_id_by_norm: dict[str, int], business=None
         )
 
     families = []
+    dishes_without_suggestion = []
     for family in raw["families"]:
+        if family.get("ai_failed"):
+            dishes_without_suggestion.extend(
+                _dish_ref(name, dish_id_by_norm) for name in family["dishes"]
+            )
         members = []
         for member in family["members"]:
             qty_display = ""
@@ -166,6 +171,8 @@ def build_owner_result(raw: dict, dish_id_by_norm: dict[str, int], business=None
         "families": families,
         "ingredients": ingredients,
         "estimate_note": "Every quantity here is an estimate — check it before you rely on it.",
+        "incomplete": raw.get("incomplete", False),
+        "dishes_without_suggestion": dishes_without_suggestion,
     }
 
 

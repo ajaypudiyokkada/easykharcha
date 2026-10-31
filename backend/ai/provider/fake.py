@@ -46,6 +46,9 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
   (8 final dishes: Fried Rice/Noodles x Veg/Egg/Chicken/Mixed) — proves base_discovery.apply_groups's
   _is_choice_fragment drops the 3 bare fragments (never a real dish on their own) while leaving
   "Something Else" alone.
+- A family name containing "FORCE_PROVIDER_ERROR" (Step EK-4a2) always raises AiProviderCallError,
+  every attempt — proves recipe_composer.compose_family_recipes skips a family that genuinely never
+  succeeds (after the retry+fallback in provider/base.py) rather than failing the whole setup run.
 """
 
 from django.conf import settings
@@ -60,6 +63,7 @@ from ..schemas import (
     RecipeSuggestionsResult,
 )
 from .base import AiCallResult, run_with_fallback
+from .errors import AiProviderCallError
 
 _FAKE_MODEL = "fake-ai-model"
 _MENU_INPUT_TOKENS = 2500
@@ -487,7 +491,26 @@ def compose_family_recipe(
     50,000 g qty (proves the sanity fallback-and-flag). "FORCE_FULL_QTY" gives the first member a
     real but large 1,000 g qty (proves a genuinely big portion, like a whole tandoori chicken, is
     accepted, not corrected). "FORCE_MISMATCH" gives every member a Chicken main item regardless of
-    its own name (proves the veg/protein mismatch guard drops it and flags "check this")."""
+    its own name (proves the veg/protein mismatch guard drops it and flags "check this").
+    Step EK-4a2: "FORCE_PROVIDER_ERROR" in family_name always raises AiProviderCallError (every
+    attempt, primary and fallback alike) — proves recipe_composer.compose_family_recipes skips a
+    family that genuinely never succeeds instead of failing the whole run."""
+    if "FORCE_PROVIDER_ERROR" in family_name:
+
+        def get_raw(_attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+            raise AiProviderCallError(
+                "simulated provider failure", status_code=529, exc_type="Overloaded"
+            )
+
+        return run_with_fallback(
+            primary_model=settings.AI_MODEL_RECIPE,
+            fallback_model=settings.AI_MODEL_FALLBACK,
+            get_raw=get_raw,
+            parse=lambda raw: FamilyRecipeSuggestion.model_validate(raw).model_dump(),
+            stage="family_recipe",
+            label=family_name,
+        )
+
     default_match = stock_items[0][0] if stock_items else None
     force_silly = "FORCE_SILLY_QTY" in family_name
     force_full = "FORCE_FULL_QTY" in family_name
