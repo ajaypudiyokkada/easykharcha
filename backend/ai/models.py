@@ -42,6 +42,53 @@ class MenuScan(models.Model):
         return f"Menu scan {self.id} ({self.status}) for business {self.business_id}"
 
 
+class EkSetupRunStatus(models.TextChoices):
+    QUEUED = "queued", "queued"
+    RUNNING = "running", "running"
+    DONE = "done", "done"
+    FAILED = "failed", "failed"
+
+
+class EkSetupRun(models.Model):
+    """Step EK-4a: one "EK setup" job per MenuScan, running after the owner has reviewed and saved
+    their dishes — base discovery + recipe_composer.suggest_setup over the business's own current
+    (confirmed, edited, un-deleted) sell items, picked up by the same worker as MenuScan. A
+    OneToOne on menu_scan enforces "one run per scan": a second POST just returns the existing run,
+    never a second AI call. `result` holds the owner-facing shape (ek_setup.build_owner_result),
+    never the raw suggest_setup payload — see that function's docstring for why."""
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="ek_setup_runs")
+    menu_scan = models.OneToOneField(
+        MenuScan, on_delete=models.CASCADE, related_name="ek_setup_run"
+    )
+    status = models.CharField(
+        max_length=10, choices=EkSetupRunStatus.choices, default=EkSetupRunStatus.QUEUED
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    # Updated when the job starts and finishes — the stuck-job sweep (same 10-minute window as
+    # MenuScan's started_at check) compares against this, not started_at, so a future step could add
+    # mid-job heartbeats without changing the recovery logic.
+    heartbeat = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error = models.CharField(max_length=40, blank=True, default="")
+    # Step EK-4a2: the last failure's own detail (stage, exception class/message, HTTP status) for
+    # diagnosing an "ai_provider_error"/"worker_error" code after the fact — internal only, never
+    # returned to the owner (see views._ek_setup_payload), never the API key or prompt/response text.
+    error_detail = models.TextField(blank=True, default="")
+    result = models.JSONField(null=True, blank=True)
+    # Cost fields, same shape as AiUsage — suggest_setup's own cost_summary totalled across every
+    # real call it made (classification, best-sellers, family recipes, ingredient merge); the
+    # individual AiUsage rows are still written by recipe_composer.py/base_discovery.py as normal.
+    call_count = models.PositiveSmallIntegerField(default=0)
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    est_cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"EK setup run {self.id} ({self.status}) for business {self.business_id}"
+
+
 class AiUsageKind(models.TextChoices):
     MENU_SCAN = "menu_scan", "menu_scan"
     RECIPE_SUGGESTION = "recipe_suggestion", "recipe_suggestion"

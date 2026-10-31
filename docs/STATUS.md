@@ -906,3 +906,26 @@ both say so in the UI.
   `DishRecipeForm`'s `stepLabel`/`onSkip` card-flow props exist as extension points but nothing
   creates or drives the recipe-suggestions call or a guided per-dish ingredients flow yet — Step C2b,
   which also owns best-sellers.
+
+- **Step EK-4a — EK setup runs as a real job, backend only.** New `EkSetupRun` (one per MenuScan,
+  OneToOne), `POST`/`GET businesses/<id>/ai/menu-scans/<scan_id>/ek-setup/` (Owner-only, same
+  monthly cap and `AI_DAILY_SCANS_PER_BUSINESS` bucket as menu scans; a second POST returns the
+  existing run, never a second AI call). Input is the business's own current active sell items (an
+  owner's edit/deletion is respected with no FK back to the scan needed); `ai/ek_setup.py` maps
+  `suggest_setup`'s result to dish ids and formats every quantity via `stock/units.py` — never cost,
+  model names or vendor wording. `run_ai_jobs` now also polls EkSetupRun (same heartbeat/10-minute
+  stuck-`running` recovery/per-job try-except as MenuScan). New `scripts/ai_try_ek_setup.py` (real
+  key, HTTP end to end: scan, confirm dishes, start+poll EK setup). Proved via `verify --area ai`'s
+  new `check_ek_setup_flow` (AI_FAKE).
+- **Step EK-4a2 — fixed the real-key `ai_provider_error`/`timeout` failures.** Two causes: `heartbeat`
+  was only set once at job start, so the worker's 10-minute stuck sweep killed a run genuinely still
+  working through a real menu's many family calls; and a single transient provider failure (429/529/
+  timeout) anywhere in those calls aborted the whole run. Fixed: `suggest_setup`'s `on_progress`
+  refreshes the heartbeat per stage/family; `provider/base.py` retries a provider-call failure once
+  (backoff) before the fallback model, logging stage/model/exception/status; a family that still
+  fails is skipped (flagged "check this", not invented), failing the run only past 20% of families
+  failing; best-sellers/merge degrade to their existing deterministic fallback instead of raising.
+  New `EkSetupRun.error_detail`, result's `incomplete`/`dishes_without_suggestion`. Proved via
+  `check_recipe_composer_flow`'s new 3-of-20 failure scenario (`FORCE_PROVIDER_ERROR`) and a real-key
+  run on `_private/menus/kavan.pdf` (104 dishes): 101s total, 60 families, 0 unmapped, incomplete:
+  false, ~$0.18 spend.

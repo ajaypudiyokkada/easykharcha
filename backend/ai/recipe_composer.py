@@ -7,6 +7,7 @@ schemas.py validation and this module's own sanity rules before being trusted; n
 that wasn't in the dish list or a sector's own knowledge library."""
 
 import hashlib
+import logging
 import re
 from decimal import Decimal
 
@@ -23,6 +24,17 @@ from .prompts import FAMILY_RECIPE_PROMPT_VERSION
 from .provider import compose_family_recipe as provider_compose_family_recipe
 from .provider import merge_ingredients as provider_merge_ingredients
 from .provider import pick_best_sellers as provider_pick_best_sellers
+from .provider.errors import AiProviderCallError, AiSchemaError
+
+logger = logging.getLogger(__name__)
+
+# Step EK-4a2: a menu with many distinct recipe shapes makes one family-recipe call each (up to
+# MAX_FAMILIES_PER_MENU) — real-run testing found a single transient provider failure (429/529/
+# timeout, past provider/base.py's own retry+fallback) anywhere in that loop aborted the whole run,
+# throwing away every already-cached family. A failed family is skipped instead (its dishes end up
+# with no main item, same shape as a dish the model legitimately gave none), and only a genuinely
+# broken run (more than this fraction of families failing) still fails outright.
+MAX_FAMILY_FAILURE_RATIO = 0.20
 
 # Step EK-3b Fix B: raised from 25 — a family-recipe call costs about Rs 0.2, so the real limit is
 # how many genuinely distinct recipe shapes a menu has, not AI spend. _merge_small_families still
@@ -249,35 +261,44 @@ def pick_best_sellers(
     can_call_ai = bool(shortlist) and (business is None or not limits.monthly_cost_cap_exceeded())
     if can_call_ai:
         pick = pick_fn or provider_pick_best_sellers
-        result = pick(shortlist, sector)
-        usage.append(
-            {
-                "model": result.model,
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "used_fallback": result.used_fallback,
-            }
-        )
-        if business is not None:
-            limits.record_usage(
-                business=business,
-                kind=AiUsageKind.SETUP_BEST_SELLERS,
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
+        try:
+            result = pick(shortlist, sector)
+        except (AiProviderCallError, AiSchemaError) as exc:
+            # The deterministic round-robin fill below covers the gap the same way it covers a
+            # model that simply didn't pick enough — a failed call here must not fail the run.
+            logger.warning(
+                "ai_best_sellers_failed exc_type=%s msg=%s", type(exc).__name__, str(exc)[:500]
             )
-        for raw_pick in result.data["picks"]:
-            key = normalise(raw_pick["name"])
-            if key not in shortlist_by_norm or key in seen:
-                continue
-            seen.add(key)
-            picks.append(
+            result = None
+        if result is not None:
+            usage.append(
                 {
-                    "name": shortlist_by_norm[key]["name"],
-                    "category": shortlist_by_norm[key]["category"],
-                    "reason": raw_pick.get("reason", ""),
+                    "model": result.model,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                    "used_fallback": result.used_fallback,
                 }
             )
+            if business is not None:
+                limits.record_usage(
+                    business=business,
+                    kind=AiUsageKind.SETUP_BEST_SELLERS,
+                    model=result.model,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
+            for raw_pick in result.data["picks"]:
+                key = normalise(raw_pick["name"])
+                if key not in shortlist_by_norm or key in seen:
+                    continue
+                seen.add(key)
+                picks.append(
+                    {
+                        "name": shortlist_by_norm[key]["name"],
+                        "category": shortlist_by_norm[key]["category"],
+                        "reason": raw_pick.get("reason", ""),
+                    }
+                )
 
     categories_covered = {p["category"] for p in picks}
     if len(picks) < MIN_BEST_SELLERS or len(categories_covered) < MIN_BEST_SELLER_CATEGORIES:
@@ -497,18 +518,22 @@ def compose_family_recipes(
     business=None,
     *,
     compose_fn=None,
+    on_progress=None,
 ) -> dict:
     """One AI call per family (cached by (sector, family-members-hash) so a repeated family on a
     repeat run never pays twice), returning [{"name", "type", "dishes", "portion_label", "members":
     [{"dish_name", "main_item_name", "main_item_unit", "qty"}, ...], "bases_used": [...],
     "ingredients": [...], "minor_ingredients": [...], "excluded_base_ingredients": [...],
-    "corrections": [...], "flags": [...]}]. Fix A: every family dish gets its own members entry — a
-    family's "main item" is only a label, each member can use a different one (or none: empty
-    main_item_name/0 qty). Caps at MAX_FAMILIES_PER_MENU, merging the smallest families first.
-    `bases` is base_discovery.discover_bases's own result — used only to look up each family's
+    "corrections": [...], "flags": [...], "ai_failed": bool}]. Fix A: every family dish gets its own
+    members entry — a family's "main item" is only a label, each member can use a different one (or
+    none: empty main_item_name/0 qty). Caps at MAX_FAMILIES_PER_MENU, merging the smallest families
+    first. `bases` is base_discovery.discover_bases's own result — used only to look up each family's
     already-known base-grams-per-portion (deterministic, never asked of the model again) and which
     ingredient names to tell the model not to repeat (and to strip out again afterward, in case the
-    model repeats one anyway — Fix D's final pass)."""
+    model repeats one anyway — Fix D's final pass). Step EK-4a2: `on_progress`, when given, is called
+    once per family (cached or not) so a caller (ai/jobs.py) can refresh a long run's heartbeat;
+    `ai_failed` families count toward the returned "incomplete" flag — see MAX_FAMILY_FAILURE_RATIO
+    for when that instead fails the whole call."""
     capped = _merge_small_families(families, MAX_FAMILIES_PER_MENU)
     sector = business_type
 
@@ -532,43 +557,69 @@ def compose_family_recipes(
                 }
             )
 
+    failed_family_count = 0
     for family in capped:
+        if on_progress is not None:
+            on_progress()
         excluded = _base_ingredient_names_for_family(family["dishes"], bases)
         excluded_keys = {_merge_key(n) for n in excluded}
         cache_key = _family_cache_key(sector, family["name"], family["dishes"])
         cached = AiFamilyRecipeCache.objects.filter(
             sector=sector, family_hash=cache_key, prompt_version=FAMILY_RECIPE_PROMPT_VERSION
         ).first()
+        call_failed = False
         if cached:
             recipe = cached.result
         else:
-            result = compose(family["name"], family["dishes"], business_type, stock_items, excluded)
-            usage.append(
-                {
-                    "model": result.model,
-                    "input_tokens": result.input_tokens,
-                    "output_tokens": result.output_tokens,
-                    "used_fallback": result.used_fallback,
-                }
-            )
-            if business is not None:
-                limits.record_usage(
-                    business=business,
-                    kind=AiUsageKind.SETUP_FAMILY_RECIPE,
-                    model=result.model,
-                    input_tokens=result.input_tokens,
-                    output_tokens=result.output_tokens,
+            try:
+                result = compose(
+                    family["name"], family["dishes"], business_type, stock_items, excluded
                 )
-            recipe = result.data
-            AiFamilyRecipeCache.objects.update_or_create(
-                sector=sector,
-                family_hash=cache_key,
-                prompt_version=FAMILY_RECIPE_PROMPT_VERSION,
-                defaults={"result": recipe},
-            )
+            except (AiProviderCallError, AiSchemaError) as exc:
+                # provider/base.py's run_with_fallback has already retried the same model once and
+                # tried the fallback model — this is a genuinely failed family, not a transient blip.
+                # Skip it rather than lose every other family's already-cached work.
+                logger.warning(
+                    "ai_family_recipe_failed family=%s dish_count=%s exc_type=%s msg=%s",
+                    family["name"],
+                    len(family["dishes"]),
+                    type(exc).__name__,
+                    str(exc)[:500],
+                )
+                call_failed = True
+                failed_family_count += 1
+                recipe = {}
+            else:
+                usage.append(
+                    {
+                        "model": result.model,
+                        "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens,
+                        "used_fallback": result.used_fallback,
+                    }
+                )
+                if business is not None:
+                    limits.record_usage(
+                        business=business,
+                        kind=AiUsageKind.SETUP_FAMILY_RECIPE,
+                        model=result.model,
+                        input_tokens=result.input_tokens,
+                        output_tokens=result.output_tokens,
+                    )
+                recipe = result.data
+                AiFamilyRecipeCache.objects.update_or_create(
+                    sector=sector,
+                    family_hash=cache_key,
+                    prompt_version=FAMILY_RECIPE_PROMPT_VERSION,
+                    defaults={"result": recipe},
+                )
 
         corrections: list[str] = []
         flags: list[str] = []
+        if call_failed:
+            flags.append(
+                f'"{family["name"]}": no AI recipe suggestion — check this (no suggestion yet)'
+            )
         family_dish_norms = {normalise(d) for d in family["dishes"]}
         seen_members: set[str] = set()
         members = []
@@ -653,10 +704,17 @@ def compose_family_recipes(
                 "excluded_base_ingredients": excluded,
                 "corrections": corrections,
                 "flags": flags,
+                "ai_failed": call_failed,
             }
         )
 
-    return {"families": results, "usage": usage}
+    if capped and failed_family_count / len(capped) > MAX_FAMILY_FAILURE_RATIO:
+        raise AiProviderCallError(
+            f"{failed_family_count}/{len(capped)} family recipe calls failed "
+            f"(over {int(MAX_FAMILY_FAILURE_RATIO * 100)}%)"
+        )
+
+    return {"families": results, "usage": usage, "incomplete": failed_family_count > 0}
 
 
 def _merge_key(name: str) -> str:
@@ -838,24 +896,33 @@ def _merge_ingredient_entries(
             {"name": entry["display_name"], "unit_family": _unit_family_guess(entry["unit"])}
             for _key, entry in entries
         ]
-        result = merge(items)
-        usage.append(
-            {
-                "model": result.model,
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "used_fallback": result.used_fallback,
-            }
-        )
-        if business is not None:
-            limits.record_usage(
-                business=business,
-                kind=AiUsageKind.SETUP_INGREDIENT_MERGE,
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
+        try:
+            result = merge(items)
+        except (AiProviderCallError, AiSchemaError) as exc:
+            # Same contract as an entry the call never mentions — every item stays its own entry,
+            # keyword-categorised below, rather than failing the whole run over one merge call.
+            logger.warning(
+                "ai_merge_ingredients_failed exc_type=%s msg=%s", type(exc).__name__, str(exc)[:500]
             )
-        groups = result.data.get("groups", [])
+            result = None
+        if result is not None:
+            usage.append(
+                {
+                    "model": result.model,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                    "used_fallback": result.used_fallback,
+                }
+            )
+            if business is not None:
+                limits.record_usage(
+                    business=business,
+                    kind=AiUsageKind.SETUP_INGREDIENT_MERGE,
+                    model=result.model,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
+            groups = result.data.get("groups", [])
 
     new_raw: dict[str, dict] = {}
     merges_log: list[dict] = []
@@ -1000,19 +1067,30 @@ def suggest_setup(
     compose_fn=None,
     merge_fn=None,
     menu_scan=None,
+    on_progress=None,
 ) -> dict:
     """The one orchestrator entry point for Step EK-3. `dishes` must already be expanded
     (base_discovery.expand_dish_options + apply_groups), same contract as discover_bases. Returns
-    {"best_sellers", "families", "bases", "ingredients", "cost_summary"} and, when `menu_scan` is
-    given, also saves it onto menu_scan.result["setup"] so a later step (EK-4) can read it from
-    there. Never writes to StockItem/SellItem/Recipe/Base — those only happen once the owner
-    confirms, in a later step."""
+    {"best_sellers", "families", "bases", "ingredients", "cost_summary", "incomplete"} and, when
+    `menu_scan` is given, also saves it onto menu_scan.result["setup"] so a later step (EK-4) can
+    read it from there. Never writes to StockItem/SellItem/Recipe/Base — those only happen once the
+    owner confirms, in a later step. Step EK-4a2: `on_progress`, when given, is called after each
+    major stage and once per family recipe call — ai/jobs.py uses it to refresh EkSetupRun.heartbeat
+    so the worker's stuck-job sweep (10 minutes since the last heartbeat) doesn't kill a run that's
+    still genuinely making progress through a menu with many distinct recipe families."""
+
+    def _progress() -> None:
+        if on_progress is not None:
+            on_progress()
+
     # discover_bases does its own daily/monthly limit gating around the (only) real classify call —
     # call it FIRST so classify_dishes below (same dish set) is always a cache hit, never a second
     # ungated call.
     bases_data = discover_bases(dishes, sector, [], business=business, classify_fn=classify_fn)
     bases = bases_data["bases"]
+    _progress()
     classifications, classify_usage = classify_dishes(dishes, sector, classify_fn=classify_fn)
+    _progress()
 
     stock_items: list[tuple[str, str]] = []
     if business is not None:
@@ -1026,13 +1104,15 @@ def suggest_setup(
     best_sellers_data = pick_best_sellers(
         dishes, classifications, sector, business, pick_fn=pick_fn
     )
+    _progress()
     families = build_families(dishes, classifications)
     family_data = compose_family_recipes(
-        families, bases, sector, stock_items, business, compose_fn=compose_fn
+        families, bases, sector, stock_items, business, compose_fn=compose_fn, on_progress=_progress
     )
     ingredients = resolve_ingredients(
         family_data["families"], bases, business, sector=sector, merge_fn=merge_fn
     )
+    _progress()
 
     all_usage = (
         classify_usage
@@ -1059,6 +1139,7 @@ def suggest_setup(
             "output_tokens": total_output,
             "est_cost_usd": str(est_cost_usd),
         },
+        "incomplete": family_data.get("incomplete", False),
     }
 
     if menu_scan is not None:

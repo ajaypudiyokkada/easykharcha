@@ -15,9 +15,16 @@ from businesses.permissions import require_permission
 from . import files as ai_files
 from . import limits, prompts
 from .exceptions import AiDailyLimitReached, AiProviderUnavailable, AiUnavailable, InvalidMenuFile
-from .jobs import process_menu_scan
+from .jobs import process_ek_setup_run, process_menu_scan
 from .matching import match_stock_item, normalise, stock_items_by_normalised_name, unit_family
-from .models import AiRecipeCache, AiUsageKind, MenuScan, MenuScanStatus
+from .models import (
+    AiRecipeCache,
+    AiUsageKind,
+    EkSetupRun,
+    EkSetupRunStatus,
+    MenuScan,
+    MenuScanStatus,
+)
 from .provider import suggest_recipes
 from .provider.errors import AiProviderCallError, AiSchemaError
 from .serializers import RecipeSuggestionRequestSerializer
@@ -141,6 +148,52 @@ class MenuScanDetailView(APIView):
         elif scan.status == MenuScanStatus.FAILED:
             data["error_code"] = scan.error_code
         return Response(data)
+
+
+def _ek_setup_payload(run: EkSetupRun) -> dict:
+    data = {"id": run.id, "status": run.status}
+    if run.status == EkSetupRunStatus.DONE:
+        data.update(run.result)
+    elif run.status == EkSetupRunStatus.FAILED:
+        data["error_code"] = run.error
+    return data
+
+
+class EkSetupView(APIView):
+    """Step EK-4a: POST starts (or returns the existing) EK setup run for a menu scan, GET polls
+    it — one URL, same Owner-only/cross-business gate as the menu scan itself."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id, scan_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        scan = get_object_or_404(MenuScan, id=scan_id, business=business)
+
+        existing = EkSetupRun.objects.filter(menu_scan=scan).first()
+        if existing:
+            return Response(_ek_setup_payload(existing), status=200)
+
+        if limits.monthly_cost_cap_exceeded():
+            raise AiUnavailable()
+        # Shares the same daily bucket as menu scans (AI_DAILY_SCANS_PER_BUSINESS) — EK setup is
+        # another heavy multi-call AI operation on this business, not a separate allowance.
+        if not limits.check_daily_scan_limit(business.id):
+            raise AiDailyLimitReached()
+
+        run = EkSetupRun.objects.create(business=business, menu_scan=scan)
+        if settings.AI_FAKE:
+            process_ek_setup_run(run.id)
+            run.refresh_from_db()
+
+        return Response(_ek_setup_payload(run), status=202)
+
+    def get(self, request, business_id, scan_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        scan = get_object_or_404(MenuScan, id=scan_id, business=business)
+        run = get_object_or_404(EkSetupRun, menu_scan=scan)
+        return Response(_ek_setup_payload(run))
 
 
 class RecipeSuggestionView(APIView):
