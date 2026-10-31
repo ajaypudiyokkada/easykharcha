@@ -341,10 +341,13 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   polls `ai/menu-scans/<id>/ek-setup/` (progress screen; a soft "taking longer" line past
   `EXPO_PUBLIC_EK_SETUP_SLOW_AFTER_MS`/60s, Retry/Continue-without past `..._STUCK_AFTER_MS`/6min;
   Retry re-runs the whole start-and-poll effect via an `attempt` dep, not its own POST), then
-  "Things you make in batches" and "Which dishes should we set up first?" — owner edits live in
-  `screens/ekSetupStore.ts` (persisted draft, `buildApplyPayload` for a later step); falls back to
-  `done.tsx` on failed/cap-reached/unavailable or Continue. `scripts/flow.mjs`'s `ek-setup` scenario
-  covers both screens plus the error states (`verify:ui -- --area ai --flow ek-setup`).
+  "Things you make in batches", "Which dishes should we set up first?" and (Step EK-4c-2, part)
+  "Check the recipes" (step 3: one card per family with a selected dish, editable main item/batches-
+  used/other-ingredients; `buildApplyPayload`'s recipes now carry `main`/`bases`/`others`) — owner
+  edits live in `screens/ekSetupStore.ts` (persisted draft). Step 3's Continue still falls back to
+  `done.tsx` as a placeholder — apply/success/hand-off and ingredients-review aren't built yet.
+  `scripts/flow.mjs`'s `ek-setup` scenario covers all three screens plus the error states
+  (`verify:ui -- --area ai --flow ek-setup`).
 - `setup/done.tsx` — wizard summary, "still to do" list
 - `home.tsx` — Home: OwnerHome (Owner/Manager) or TodayHome (Head chef/Helper), role-branched; Step
   23d's Owner-only "Count your starting stock" nudge, from `today/`'s `is_first_count`; Step

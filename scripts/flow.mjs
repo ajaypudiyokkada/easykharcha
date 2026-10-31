@@ -1933,6 +1933,41 @@ async function checkEkSetupFlow(page) {
       'dishes reflect every edit above.',
   );
 
+  // === Step 3: recipes — one family card per family with a selected dish; edit the first
+  // member's main-item quantity and check it persists to the draft. ===
+  await clickButton(page, 'Continue');
+  await waitForText(page, 'Check the recipes');
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/recipes-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'recipes');
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — reached the recipes screen; saved its screenshot at 360/390px to ${EK_SCREEN_DIR}/.`);
+
+  const draftAtStep3 = await waitForEkDraft(page, businessId, scanId);
+  if (draftAtStep3.step !== 3) fail('ek-setup: Continue from best sellers should land on step 3');
+  const selectedKeys3 = new Set(
+    draftAtStep3.bestSellers.filter((p) => p.selected).map((p) => p.dishId),
+  );
+  const familyWithSelection = draftAtStep3.families.find((f) =>
+    f.members.some((m) => selectedKeys3.has(m.dishId)),
+  );
+  if (!familyWithSelection) fail('ek-setup: expected at least one family card with a selected dish');
+  const member = familyWithSelection.members.find((m) => selectedKeys3.has(m.dishId));
+  await typeInto(page, `Main item — ${member.main.name}`, '0.2');
+  const draftAfterMainEdit = await waitForEkDraft(page, businessId, scanId);
+  const familyAfterEdit = draftAfterMainEdit.families.find((f) => f.key === familyWithSelection.key);
+  const memberAfterEdit = familyAfterEdit?.members.find((m) => m.dishId === member.dishId);
+  if (Number(memberAfterEdit?.main.amount) !== 0.2) {
+    fail("ek-setup: editing a recipe card's main-item quantity did not persist to the draft");
+  }
+  console.log(
+    `OK — "${familyWithSelection.name}" shows a recipe card; edited "${member.name}"'s main item ` +
+      'quantity and it persisted to the draft.',
+  );
+
   // === Cap-reached: a throwaway scanId (never a real MenuScan — the POST is fully faked, so the
   // real backend never sees it) on the same business, faking the 429 the daily AI cap returns. ===
   const stopCapReached = await fakeNextEkSetupResponse(page, {

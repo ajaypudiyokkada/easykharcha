@@ -11,18 +11,25 @@ import {
   addBaseLine,
   addBestSeller,
   addCustomBase,
+  addFamilyOtherLine,
   addUsedInDish,
+  bestSellerKeyForDish,
   draftFromResult,
   ekSetupDraftStorage,
   removeBaseLine,
+  removeFamilyOtherLine,
   removeUsedInDish,
   setStep,
   toggleBaseKeep,
   toggleBestSeller,
   unitStockItemFor,
   updateBaseLine,
+  updateFamilyBaseUse,
+  updateFamilyMainQty,
+  updateFamilyOtherLine,
   updateUsedInPortion,
   type EkBaseDraft,
+  type EkFamilyDraft,
   type EkSetupDraft,
 } from '../../src/screens/ekSetupStore';
 import { sectorCopyFor } from '../../src/sectorCopy';
@@ -357,6 +364,17 @@ export default function MenuScanEk() {
     );
   }
 
+  if (draft.step === 3) {
+    return (
+      <RecipesStep
+        draft={draft}
+        onBack={() => update((d) => setStep(d, 2))}
+        onChange={update}
+        onFinish={() => router.replace(donePath)}
+      />
+    );
+  }
+
   // Step 2: best sellers
   const selectedDishIds = new Set(draft.bestSellers.filter((p) => p.selected).map((p) => p.dishId));
   const bestSellerDishIds = new Set(draft.bestSellers.map((p) => p.dishId));
@@ -370,7 +388,7 @@ export default function MenuScanEk() {
       onBack={() => update((d) => setStep(d, 1))}
       onToggle={(key) => update((d) => toggleBestSeller(d, key))}
       onAdd={(dish) => update((d) => addBestSeller(d, dish))}
-      onFinish={() => router.replace(donePath)}
+      onFinish={() => update((d) => setStep(d, 3))}
       selectedCount={selectedDishIds.size}
     />
   );
@@ -740,6 +758,247 @@ function BestSellersStep({
   );
 }
 
+function RecipesStep({
+  draft,
+  onBack,
+  onChange,
+  onFinish,
+}: {
+  draft: EkSetupDraft;
+  onBack: () => void;
+  onChange: (mutator: (d: EkSetupDraft) => EkSetupDraft) => void;
+  onFinish: () => void;
+}) {
+  const selectedDishIds = new Set(
+    draft.bestSellers
+      .filter(
+        (pick): pick is typeof pick & { dishId: number } => pick.selected && pick.dishId != null,
+      )
+      .map((pick) => pick.dishId),
+  );
+  const familiesWithSelection = draft.families.filter((family) =>
+    family.members.some((member) => selectedDishIds.has(member.dishId)),
+  );
+  const unsuggestedSelected = draft.dishesWithoutSuggestion.filter(
+    (dish) => dish.dish_id != null && selectedDishIds.has(dish.dish_id),
+  );
+
+  return (
+    <Screen bottomBar={<Button label={sek.recipes.continueLabel} onPress={onFinish} />}>
+      <StepHeader current={3} total={4} onBack={onBack} />
+      <Heading level={1}>{sek.recipes.title}</Heading>
+      <Small style={styles.muted}>{sek.recipes.subtitle}</Small>
+
+      <View style={styles.list}>
+        {familiesWithSelection.map((family) => (
+          <FamilyCard
+            key={family.key}
+            family={family}
+            draft={draft}
+            selectedDishIds={selectedDishIds}
+            onChange={onChange}
+          />
+        ))}
+      </View>
+
+      {unsuggestedSelected.length > 0 ? (
+        <View style={styles.familyCard}>
+          <Body style={styles.batchName}>{sek.recipes.noSuggestionTitle}</Body>
+          {unsuggestedSelected.map((dish) => (
+            <Small key={dish.dish_id ?? dish.name} style={styles.muted}>
+              {dish.name}
+            </Small>
+          ))}
+          <Small style={styles.muted}>{sek.recipes.noSuggestionNote}</Small>
+        </View>
+      ) : null}
+    </Screen>
+  );
+}
+
+function FamilyCard({
+  family,
+  draft,
+  selectedDishIds,
+  onChange,
+}: {
+  family: EkFamilyDraft;
+  draft: EkSetupDraft;
+  selectedDishIds: Set<number>;
+  onChange: (mutator: (d: EkSetupDraft) => EkSetupDraft) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [newName, setNewName] = useState('');
+
+  const members = family.members.filter((member) => selectedDishIds.has(member.dishId));
+  if (members.length === 0) return null;
+
+  const usedKeys = new Set(family.otherIngredients.map((line) => line.ingredientKey));
+  const pickable = draft.ingredients.filter(
+    (ing) => !usedKeys.has(ing.key) && ing.name.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
+  return (
+    <View style={styles.familyCard}>
+      <Heading level={3}>{family.name}</Heading>
+
+      <View style={styles.list}>
+        {members.map((member) => {
+          const bsKey = bestSellerKeyForDish(draft, member.dishId);
+          if (!bsKey) return null;
+          return (
+            <View key={member.dishId} style={styles.memberRow}>
+              <Checkbox
+                checked
+                onChange={() => onChange((d) => toggleBestSeller(d, bsKey))}
+                title={member.name}
+              />
+              <View style={styles.formulaField}>
+                <QuantityInput
+                  label={sek.recipes.mainItemLabel(member.main.name)}
+                  quantity={member.main.amount}
+                  onQuantityChange={(amount) =>
+                    onChange((d) => updateFamilyMainQty(d, family.key, member.dishId, { amount }))
+                  }
+                  entryUnit={member.main.entryUnit}
+                  onEntryUnitChange={(entryUnit) =>
+                    onChange((d) =>
+                      updateFamilyMainQty(d, family.key, member.dishId, { entryUnit }),
+                    )
+                  }
+                  stockItem={unitStockItemFor(
+                    draft.ingredients.find((ing) => ing.key === member.main.ingredientKey)
+                      ?.unit_family ?? 'g',
+                  )}
+                />
+                <Small style={styles.estimateLabel}>{sek.recipes.estimateLabel}</Small>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      {family.basesUsed.length > 0 ? (
+        <View style={styles.list}>
+          <Small style={styles.sectionLabel}>{sek.recipes.usedBatches}</Small>
+          {family.basesUsed.map((use) => (
+            <View key={use.baseKey ?? use.name} style={styles.formulaField}>
+              <QuantityInput
+                label={use.name}
+                quantity={use.amount}
+                onQuantityChange={(amount) =>
+                  use.baseKey &&
+                  onChange((d) =>
+                    updateFamilyBaseUse(d, family.key, use.baseKey as string, { amount }),
+                  )
+                }
+                entryUnit={use.entryUnit}
+                onEntryUnitChange={(entryUnit) =>
+                  use.baseKey &&
+                  onChange((d) =>
+                    updateFamilyBaseUse(d, family.key, use.baseKey as string, { entryUnit }),
+                  )
+                }
+                stockItem={unitStockItemFor('g')}
+              />
+              <Small style={styles.estimateLabel}>{sek.recipes.estimateLabel}</Small>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={styles.list}>
+        <Small style={styles.sectionLabel}>{sek.recipes.otherIngredients}</Small>
+        {family.otherIngredients.map((line) => (
+          <View key={line.id} style={styles.formulaRow}>
+            <View style={styles.formulaField}>
+              <QuantityInput
+                label={line.name}
+                quantity={line.amount}
+                onQuantityChange={(amount) =>
+                  onChange((d) => updateFamilyOtherLine(d, family.key, line.id, { amount }))
+                }
+                entryUnit={line.entryUnit}
+                onEntryUnitChange={(entryUnit) =>
+                  onChange((d) => updateFamilyOtherLine(d, family.key, line.id, { entryUnit }))
+                }
+                stockItem={unitStockItemFor(
+                  draft.ingredients.find((ing) => ing.key === line.ingredientKey)?.unit_family ??
+                    'g',
+                )}
+              />
+              <Small style={styles.estimateLabel}>{sek.recipes.estimateLabel}</Small>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${sek.recipes.removeLine} ${line.name}`}
+              onPress={() => onChange((d) => removeFamilyOtherLine(d, family.key, line.id))}
+              style={styles.formulaRemove}
+            >
+              <Icon name="delete" size={18} colour={colours.danger} />
+            </Pressable>
+          </View>
+        ))}
+      </View>
+
+      {pickerOpen ? (
+        <View style={styles.pickerPanel}>
+          <TextField
+            label={sek.recipes.searchIngredients}
+            value={search}
+            onChangeText={setSearch}
+            placeholder={sek.recipes.searchIngredients}
+          />
+          <View style={styles.pickerList}>
+            {pickable.map((ing) => (
+              <Pressable
+                key={ing.key}
+                accessibilityRole="button"
+                onPress={() => {
+                  onChange((d) => addFamilyOtherLine(d, family.key, { ingredientKey: ing.key }));
+                  setPickerOpen(false);
+                  setSearch('');
+                }}
+                style={styles.pickerChip}
+              >
+                <Small style={styles.pickerChipText}>{ing.name}</Small>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.addNewRow}>
+            <TextField
+              label={sek.recipes.addNewIngredient}
+              value={newName}
+              onChangeText={setNewName}
+              placeholder={sek.recipes.addNewIngredient}
+            />
+            <Button
+              label={sek.recipes.addNewIngredient}
+              variant="secondary"
+              onPress={() => {
+                if (!newName.trim()) return;
+                onChange((d) => addFamilyOtherLine(d, family.key, { newName }));
+                setNewName('');
+                setPickerOpen(false);
+              }}
+            />
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setPickerOpen(true)}
+          style={styles.addButton}
+        >
+          <Icon name="plus" size={18} colour={colours.primary} />
+          <Body style={styles.addButtonText}>{sek.recipes.addIngredient}</Body>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
@@ -896,6 +1155,19 @@ const styles = StyleSheet.create({
     borderColor: colours.mint,
     borderRadius: radii.md,
     padding: spacing.md,
+  },
+  familyCard: {
+    gap: spacing.md,
+    borderWidth: 2,
+    borderColor: colours.mint,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+  },
+  memberRow: {
+    gap: spacing.xs,
+  },
+  sectionLabel: {
+    fontFamily: fonts.bodyExtraBold,
   },
   rowHead: {
     flexDirection: 'row',

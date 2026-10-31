@@ -952,3 +952,12 @@ both say so in the UI.
   wrongly 60s); Retry now re-runs the whole start-and-poll effect (an `attempt` counter in its deps)
   instead of its own separate POST, so it actually resumes polling after a failure. New `flow.mjs`
   `ek-setup` scenario (`verify:ui`) drives the full screen set incl. the failed/cap-reached states.
+- **Step EK-4c-2 (part, recipe cards only) — "Check the recipes" screen.** `ek.tsx` step 3: one card
+  per family with a selected dish (tick/untick a member, edit its main item's qty, the family's
+  shared batches-used portions and other ingredients — add/remove, same picker as a base's formula);
+  a selected dish with no family gets a gentle note instead. `ekSetupStore.ts` gained `EkFamilyDraft`
+  + mutators, `draftFromResult` now builds `families`, `buildApplyPayload`'s recipes carry
+  `main`/`bases`/`others` per EK-4b's shape. Best sellers' Continue now goes to step 3; step 3's own
+  Continue still goes straight to `done.tsx` as a placeholder — apply/success/hand-off and the
+  ingredients-review step aren't built yet (the step brief was cut off before describing them).
+  `flow.mjs`'s `ek-setup` scenario extended to cover the new screen.

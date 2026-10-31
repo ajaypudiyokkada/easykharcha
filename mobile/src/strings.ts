@@ -1044,6 +1044,23 @@ export const strings = {
         otherDishes: 'Other dishes',
         continueLabel: 'Continue',
       },
+      recipes: {
+        title: 'Check the recipes',
+        subtitle:
+          'EK grouped similar dishes together — check what goes into each before you rely on it.',
+        mainItemLabel: (dishName: string) => `Main item — ${dishName}`,
+        estimateLabel: 'estimate',
+        usedBatches: 'Batches this uses',
+        otherIngredients: 'Other ingredients',
+        addIngredient: '+ Add ingredient',
+        addIngredientTitle: 'Choose an item',
+        searchIngredients: 'Search',
+        addNewIngredient: '+ Add something new',
+        removeLine: 'Remove',
+        noSuggestionTitle: "EK couldn't suggest a recipe for these",
+        noSuggestionNote: 'Add these later from the dish screen.',
+        continueLabel: 'Continue',
+      },
     },
   },
   settings: {
