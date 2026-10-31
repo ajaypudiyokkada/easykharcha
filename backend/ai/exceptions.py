@@ -25,3 +25,15 @@ class AiProviderUnavailable(APIException):
     status_code = 502
     default_detail = "The AI service could not process this request. Try again in a moment."
     default_code = "ai_provider_error"
+
+
+class EkSetupNotDone(APIException):
+    status_code = 400
+    default_detail = "This setup run isn't ready yet."
+    default_code = "ek_setup_not_done"
+
+
+class EkApplyInvalid(APIException):
+    status_code = 400
+    default_detail = "That setup can't be applied as sent."
+    default_code = "ek_apply_invalid"

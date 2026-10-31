@@ -84,6 +84,17 @@ class EkSetupRun(models.Model):
     output_tokens = models.PositiveIntegerField(default=0)
     est_cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Step EK-4b: set once the Owner's confirmed setup screens have been applied (ai/ek_apply.py) —
+    # null until then. A second apply only ever updates its own still-unconfirmed rows (see
+    # StockItem/Base/SellItem.ek_key), so these two fields always reflect the first apply.
+    applied_at = models.DateTimeField(null=True, blank=True)
+    applied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
 
     def __str__(self) -> str:
         return f"EK setup run {self.id} ({self.status}) for business {self.business_id}"

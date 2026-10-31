@@ -184,6 +184,14 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   of raising; new `EkSetupRun.error_detail` (diagnostic only, never owner-facing);
   `build_owner_result` gained `incomplete`/`dishes_without_suggestion`. `fake.py`'s
   `FORCE_PROVIDER_ERROR` family-name marker (smoke's `check_recipe_composer_flow`) proves it.
+  Step EK-4b: `ek_apply.py`'s `apply_ek_setup` — the owner's confirmed ingredients/bases/recipes
+  payload to real StockItem/Base/SellItem rows, one transaction, create-only-what's-used (rule A),
+  a base only if a recipe in the same call links to it (rule B), never touching a `CONFIRMED` dish
+  (rule C — skipped + reported); `StockItem`/`Base`/`SellItem.ek_key` (`stock/models.py`) scope
+  idempotency to one run (rule D); `views.EkSetupApplyView` (POST, Owner-only, run must be DONE) at
+  `.../ek-setup/apply/`; `exceptions.EkSetupNotDone`/`EkApplyInvalid`. `EkSetupRun.applied_at`/
+  `applied_by` set on first apply. `scripts/ek_apply_local_proof.py` — direct-ORM proof against a
+  real EkSetupRun already in the dev DB, no AI spend.
 - Step 21a: Django admin (platform staff only, not business roles) at env `ADMIN_URL_PATH` (default
   `manage-ek/`); `admin.py` in accounts/businesses/stock/alerts (editable) and counts/purchases/
   sales/wastage/audit (read-only); `config/admin_security.py` (login rate limit), `config/
@@ -281,6 +289,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `POST/GET businesses/<id>/ai/menu-scans/<scan_id>/ek-setup/` — EkSetupView — Step EK-4a: starts
   (or idempotently returns) the EK setup run for this scan / polls it; `sellitems.manage`, same
   429/503 caps as above, owner-facing result shape in docs/STATUS.md
+- `POST businesses/<id>/ai/menu-scans/<scan_id>/ek-setup/apply/` — EkSetupApplyView — Step EK-4b:
+  writes the owner's confirmed setup (real StockItem/Base/SellItem rows); `sellitems.manage`, run
+  must be DONE (400 `ek_setup_not_done` otherwise)
 
 ## Mobile routes (mobile/app/, file-based via expo-router)
 
