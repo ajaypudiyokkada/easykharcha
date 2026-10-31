@@ -1,6 +1,12 @@
 from django.urls import path
 
-from .views import EkSetupView, MenuScanCreateView, MenuScanDetailView, RecipeSuggestionView
+from .views import (
+    EkSetupApplyView,
+    EkSetupView,
+    MenuScanCreateView,
+    MenuScanDetailView,
+    RecipeSuggestionView,
+)
 
 urlpatterns = [
     path(
@@ -17,6 +23,11 @@ urlpatterns = [
         "businesses/<int:business_id>/ai/menu-scans/<int:scan_id>/ek-setup/",
         EkSetupView.as_view(),
         name="ai-ek-setup",
+    ),
+    path(
+        "businesses/<int:business_id>/ai/menu-scans/<int:scan_id>/ek-setup/apply/",
+        EkSetupApplyView.as_view(),
+        name="ai-ek-setup-apply",
     ),
     path(
         "businesses/<int:business_id>/ai/recipe-suggestions/",

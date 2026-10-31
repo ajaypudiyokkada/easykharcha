@@ -929,3 +929,16 @@ both say so in the UI.
   `check_recipe_composer_flow`'s new 3-of-20 failure scenario (`FORCE_PROVIDER_ERROR`) and a real-key
   run on `_private/menus/kavan.pdf` (104 dishes): 101s total, 60 families, 0 unmapped, incomplete:
   false, ~$0.18 spend.
+- **Step EK-4b — apply the owner's confirmed EK setup, backend only.** New `POST
+  businesses/<id>/ai/menu-scans/<scan_id>/ek-setup/apply/` (Owner-only, run must be DONE);
+  `ai/ek_apply.py` creates StockItem/Base/SellItem rows for the owner's final payload in one
+  transaction — only ingredients a kept, dish-linked base or a selected recipe actually uses; a base
+  only if a recipe created in the same call links to it; a dish's recipe as `RecipeStatus.
+  UNCONFIRMED`, never touching one already `CONFIRMED` (skipped + reported). New `ek_key`
+  (StockItem/Base/SellItem) scopes idempotency to one run — a repeat call creates nothing new, only
+  replaces its own still-unconfirmed rows; a name clash or other DB error rolls the whole call back
+  (400, never a raw 500). New `EkSetupRun.applied_at`/`applied_by`. Response reuses `reports.service.
+  _recipe_coverage_pct`. Proved via `verify --area ai`'s new `check_ek_setup_apply_flow` (the exact
+  chicken-curry base-formula regression from the brief) and `scripts/ek_apply_local_proof.py` against
+  the real `kavan.pdf` run already in the local DB (42 items, 5 bases, 19 recipes applied; idempotent
+  on replay).

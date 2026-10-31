@@ -7254,6 +7254,289 @@ def check_ek_setup_flow() -> None:
     print("OK — display units roll up (1,200 g shows as 1.2 kg), and every result carries an estimate note.")
 
 
+def check_ek_setup_apply_flow() -> None:
+    """Step EK-4b: EkSetupApplyView — applying the owner's confirmed EK setup screens writes real
+    StockItem/Base/SellItem rows in one atomic call (ai/ek_apply.py). Covers: the chicken-curry
+    regression (direct + base-routed expected usage math), a confirmed dish is left untouched and
+    skipped, a deleted dish is skipped, an unused ingredient is never created, a removed base is
+    never created, a base with no linked recipe is never created, a second identical apply creates
+    nothing new, a mid-call failure rolls back the whole call, and Manager/Helper get 403."""
+    owner_mobile, owner_access, _ = signup_and_login("EK Apply Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "EK Apply Biz", "business_type": "restaurant_cafe", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ek apply flow: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "EK Apply Manager", "manager")
+    _, helper_access, _ = _add_team_member(business_id, owner_access, "EK Apply Helper", "helper")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Rice", "unit": "kg"}, {"name": "Collide Item", "unit": "kg"}]},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ek apply flow: stock bulk create expected 201, got {status} ({body})")
+    rice_id = next(i["id"] for i in body if i["name"] == "Rice")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/sell-items/bulk/",
+        {
+            "items": [
+                {"name": "Chicken Curry", "selling_price": "180.00"},
+                {"name": "Already Confirmed Dish", "selling_price": "120.00"},
+                {"name": "Will Delete Dish", "selling_price": "90.00"},
+                {"name": "Bad Rollback Dish", "selling_price": "90.00"},
+            ]
+        },
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"ek apply flow: sell item bulk create expected 201, got {status} ({body})")
+    dish_ids = {d["name"]: d["id"] for d in body}
+
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{dish_ids['Already Confirmed Dish']}/",
+        {"ingredients": [{"stock_item": rice_id, "quantity": "0.05"}]},
+        token=owner_access,
+    )
+    if status != 200 or body["recipe_status"] != "confirmed":
+        fail(f"ek apply flow: confirm dish by hand expected 200/confirmed, got {status} ({body})")
+
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/sell-items/{dish_ids['Will Delete Dish']}/",
+        {"active": False},
+        token=owner_access,
+    )
+    if status != 200:
+        fail(f"ek apply flow: deactivate dish expected 200, got {status} ({body})")
+    print("OK — test fixtures: 4 no-recipe dishes, one confirmed by hand, one then deactivated.")
+
+    # A MenuScan + done EkSetupRun, built directly (no AI call) — EkSetupApplyView only reads the
+    # owner's own POST body, never run.result, so a dummy result is fine here.
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+
+    from ai.models import EkSetupRun as DjEkSetupRun
+    from ai.models import EkSetupRunStatus as DjEkSetupRunStatus
+    from ai.models import MenuScan as DjMenuScan
+    from ai.models import MenuScanStatus as DjMenuScanStatus
+    from businesses.models import Business as DjBusiness
+    from stock.base_expansion import quantity_per_portion_by_sell_item
+    from stock.models import SellItem as DjSellItem
+    from stock.models import StockItem as DjStockItem
+
+    business = DjBusiness.objects.get(id=business_id)
+    scan = DjMenuScan.objects.create(
+        business=business,
+        created_by_id=business.created_by_id,
+        temp_dir="smoke-ek-apply",
+        status=DjMenuScanStatus.DONE,
+        result={"is_menu": True, "sections": []},
+    )
+    run = DjEkSetupRun.objects.create(
+        business=business, menu_scan=scan, status=DjEkSetupRunStatus.DONE, result={}
+    )
+
+    def apply(payload, token=owner_access):
+        return request(
+            "POST",
+            f"/businesses/{business_id}/ai/menu-scans/{scan.id}/ek-setup/apply/",
+            payload,
+            token=token,
+        )
+
+    base_payload = {"ingredients": [], "bases": [], "recipes": []}
+    for role_name, token in (("manager", manager_access), ("helper", helper_access)):
+        status, body, _ = apply(base_payload, token=token)
+        if status != 403:
+            fail(f"ek apply flow: {role_name} apply expected 403, got {status} ({body})")
+    print("OK — Manager/Helper can't apply an EK setup run (Owner-only).")
+
+    payload = {
+        "ingredients": [
+            {
+                "key": "chicken", "create": True, "name": "Chicken",
+                "unit_family": "g", "low_stock_category": "perishable",
+            },
+            {
+                "key": "onion", "create": True, "name": "Onion",
+                "unit_family": "g", "low_stock_category": "dry_staples",
+            },
+            {
+                "key": "tomato", "create": True, "name": "Tomato",
+                "unit_family": "g", "low_stock_category": "perishable",
+            },
+            {
+                "key": "oil", "create": True, "name": "Oil",
+                "unit_family": "ml", "low_stock_category": "dry_staples",
+            },
+            {
+                "key": "cashew", "create": True, "name": "Cashew",
+                "unit_family": "g", "low_stock_category": "dry_staples",
+            },
+            {
+                "key": "spices", "create": True, "name": "Spices",
+                "unit_family": "g", "low_stock_category": "dry_staples",
+            },
+            {
+                "key": "unused-thing", "create": True, "name": "Unused Thing",
+                "unit_family": "g", "low_stock_category": "dry_staples",
+            },
+        ],
+        "bases": [
+            {
+                "key": "curry-base",
+                "keep": True,
+                "name": "Curry Base",
+                "formula": [
+                    {"ingredient_key": "onion", "qty_base_units": 450},
+                    {"ingredient_key": "tomato", "qty_base_units": 400},
+                    {"ingredient_key": "oil", "qty_base_units": 90},
+                    {"ingredient_key": "cashew", "qty_base_units": 40},
+                    {"ingredient_key": "spices", "qty_base_units": 20},
+                ],
+                "dish_ids": [dish_ids["Chicken Curry"]],
+            },
+            {
+                "key": "removed-base",
+                "keep": False,
+                "name": "Removed Base",
+                "formula": [{"ingredient_key": "onion", "qty_base_units": 100}],
+                "dish_ids": [],
+            },
+            {
+                "key": "orphan-base",
+                "keep": True,
+                "name": "Orphan Base",
+                "formula": [{"ingredient_key": "onion", "qty_base_units": 100}],
+                "dish_ids": [],
+            },
+        ],
+        "recipes": [
+            {
+                "dish_id": dish_ids["Chicken Curry"],
+                "selected": True,
+                "main": {"ingredient_key": "chicken", "qty": 180},
+                "others": [],
+                "bases": [{"base_key": "curry-base", "qty_per_portion": 200}],
+            },
+            {
+                "dish_id": dish_ids["Already Confirmed Dish"],
+                "selected": True,
+                "main": {"ingredient_key": "onion", "qty": 50},
+                "others": [],
+                "bases": [],
+            },
+            {
+                "dish_id": dish_ids["Will Delete Dish"],
+                "selected": True,
+                "main": {"ingredient_key": "onion", "qty": 50},
+                "others": [],
+                "bases": [],
+            },
+        ],
+    }
+    status, body, _ = apply(payload)
+    if status != 200:
+        fail(f"ek apply flow: apply expected 200, got {status} ({body})")
+    if body["created_items"] != 6:
+        fail(f"ek apply flow: expected 6 created stock items (not the unused one), got {body}")
+    if body["created_bases"] != 1:
+        fail(f"ek apply flow: expected 1 created base (curry-base only), got {body}")
+    if body["recipes_applied"] != 1:
+        fail(f"ek apply flow: expected 1 recipe applied (Chicken Curry only), got {body}")
+
+    skipped_reasons = {
+        (row["type"], row.get("key") or row.get("dish_id"), row["reason"]) for row in body["skipped"]
+    }
+    expected_skips = {
+        ("ingredient", "unused-thing", "not_used"),
+        ("base", "removed-base", "removed"),
+        ("base", "orphan-base", "not_linked"),
+        ("recipe", dish_ids["Already Confirmed Dish"], "already_confirmed"),
+        ("recipe", dish_ids["Will Delete Dish"], "dish_deleted"),
+    }
+    if not expected_skips <= skipped_reasons:
+        fail(f"ek apply flow: expected skips {expected_skips}, got {skipped_reasons}")
+    print(
+        "OK — create-only-what's-used, removed/orphan bases skipped, confirmed/deleted dishes skipped."
+    )
+
+    business.refresh_from_db()
+    chicken_curry = DjSellItem.objects.get(business=business, name="Chicken Curry")
+    expected_usage = {"Chicken": 1800, "Onion": 900, "Tomato": 800, "Oil": 180, "Cashew": 80, "Spices": 40}
+    for name, want_total in expected_usage.items():
+        stock_item = DjStockItem.objects.get(business=business, name=name)
+        per_portion = quantity_per_portion_by_sell_item(business, stock_item).get(chicken_curry)
+        got_total = (per_portion or 0) * 10
+        if got_total != want_total:
+            fail(f"ek apply flow: expected {name} usage {want_total} for 10 sales, got {got_total}")
+    print("OK — regression: 10 Chicken Curries give the exact expected usage for every ingredient.")
+
+    already_confirmed = DjSellItem.objects.get(id=dish_ids["Already Confirmed Dish"])
+    if already_confirmed.ingredients.count() != 1 or already_confirmed.ingredients.first().stock_item_id != rice_id:
+        fail("ek apply flow: expected the hand-confirmed dish's own ingredients to be left untouched")
+    print("OK — a confirmed dish's own recipe is left untouched.")
+
+    items_before = DjStockItem.objects.filter(business=business).count()
+    bases_before = business.bases.count()
+    status, body, _ = apply(payload)
+    if status != 200 or body["created_items"] != 0 or body["created_bases"] != 0:
+        fail(f"ek apply flow: second identical apply expected 0 created, got {status} ({body})")
+    items_after = DjStockItem.objects.filter(business=business).count()
+    bases_after = business.bases.count()
+    if (items_before, bases_before) != (items_after, bases_after):
+        fail("ek apply flow: second apply changed row counts — not idempotent")
+    print("OK — a second identical apply creates nothing new.")
+
+    rollback_payload = {
+        "ingredients": payload["ingredients"]
+        + [
+            {
+                "key": "collide", "create": True, "name": "Collide Item",
+                "unit_family": "g", "low_stock_category": "dry_staples",
+            }
+        ],
+        "bases": payload["bases"],
+        "recipes": payload["recipes"]
+        + [
+            {
+                "dish_id": dish_ids["Bad Rollback Dish"],
+                "selected": True,
+                "main": {"ingredient_key": "collide", "qty": 10},
+                "others": [],
+                "bases": [],
+            }
+        ],
+    }
+    status, body, _ = apply(rollback_payload)
+    if status == 200:
+        fail(f"ek apply flow: expected the name-clash apply to fail, got 200 ({body})")
+    bad_dish = DjSellItem.objects.get(id=dish_ids["Bad Rollback Dish"])
+    if bad_dish.recipe_status != "none" or bad_dish.ingredients.exists():
+        fail("ek apply flow: expected the failed call to roll back entirely, Bad Rollback Dish got touched")
+    items_after_rollback = DjStockItem.objects.filter(business=business).count()
+    if items_after_rollback != items_after:
+        fail(
+            "ek apply flow: expected no new stock items after a rolled-back call, "
+            f"before {items_after}, after {items_after_rollback}"
+        )
+    print("OK — a mid-call failure (duplicate stock item name) rolls back the entire apply.")
+
+
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
@@ -7453,6 +7736,7 @@ ALL_CHECKS = [
     check_kitchen_base_discovery,
     check_recipe_composer_flow,
     check_ek_setup_flow,
+    check_ek_setup_apply_flow,
     check_admin_delete_flow,
 ]
 
@@ -7489,6 +7773,7 @@ AREA_CHECKS: dict[str, list] = {
         check_kitchen_base_discovery,
         check_recipe_composer_flow,
         check_ek_setup_flow,
+        check_ek_setup_apply_flow,
     ],
     "admin": [check_admin_delete_flow],
 }

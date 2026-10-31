@@ -107,6 +107,10 @@ class StockItem(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="stock_items_created"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Step EK-4b: `ek:<run_id>:ing:<key>` for an item this business's EK setup apply created, blank
+    # otherwise (including an item an apply call merely *linked* via `existing_item_id`) — lets a
+    # repeated apply call for the same run recognise its own earlier work instead of re-creating it.
+    ek_key = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         ordering = ("name",)
@@ -152,6 +156,11 @@ class SellItem(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sell_items_created"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Step EK-4b: `ek:<run_id>:recipe:<dish_id>` once an EK setup apply has written this dish's
+    # ingredient/base rows as an UNCONFIRMED estimate — blank for a dish whose recipe the owner
+    # built by hand, or one an EK apply call skipped (already confirmed, or the dish was deleted).
+    # A second apply for the same run only ever touches a dish still carrying its own ek_key.
+    ek_key = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         ordering = ("name",)
@@ -220,6 +229,9 @@ class Base(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="bases_created"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Step EK-4b: `ek:<run_id>:base:<key>` for a base an EK setup apply created — see
+    # StockItem.ek_key's docstring, same idempotency role.
+    ek_key = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         ordering = ("name",)

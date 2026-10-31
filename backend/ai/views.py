@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pypdf
 from django.conf import settings
+from django.db import IntegrityError
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from PIL import Image
@@ -14,7 +15,15 @@ from businesses.permissions import require_permission
 
 from . import files as ai_files
 from . import limits, prompts
-from .exceptions import AiDailyLimitReached, AiProviderUnavailable, AiUnavailable, InvalidMenuFile
+from .ek_apply import apply_ek_setup
+from .exceptions import (
+    AiDailyLimitReached,
+    AiProviderUnavailable,
+    AiUnavailable,
+    EkApplyInvalid,
+    EkSetupNotDone,
+    InvalidMenuFile,
+)
 from .jobs import process_ek_setup_run, process_menu_scan
 from .matching import match_stock_item, normalise, stock_items_by_normalised_name, unit_family
 from .models import (
@@ -194,6 +203,33 @@ class EkSetupView(APIView):
         scan = get_object_or_404(MenuScan, id=scan_id, business=business)
         run = get_object_or_404(EkSetupRun, menu_scan=scan)
         return Response(_ek_setup_payload(run))
+
+
+class EkSetupApplyView(APIView):
+    """Step EK-4b: POST applies the owner's confirmed choices from the EK setup screens — real
+    StockItem/Base/SellItem writes, one transaction (see ek_apply.apply_ek_setup). Owner-only, same
+    gate as the run itself; the run must already be DONE."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id, scan_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sellitems.manage")
+        scan = get_object_or_404(MenuScan, id=scan_id, business=business)
+        run = get_object_or_404(EkSetupRun, menu_scan=scan)
+
+        if run.status != EkSetupRunStatus.DONE:
+            raise EkSetupNotDone()
+
+        try:
+            result = apply_ek_setup(run, request.data, request.user)
+        except IntegrityError as exc:
+            # A name clash the payload itself couldn't see coming (e.g. the owner created a
+            # same-named stock item by hand between review and apply) — the whole call has already
+            # rolled back (transaction.atomic in apply_ek_setup); surface it as a clean 400, not a
+            # raw 500.
+            raise EkApplyInvalid(f"Couldn't apply this setup: {exc}") from exc
+        return Response(result, status=200)
 
 
 class RecipeSuggestionView(APIView):
