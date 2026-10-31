@@ -47,7 +47,13 @@ import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 const sek = strings.menuScan.ek;
 
 const POLL_INTERVAL_MS = 2000;
-const STUCK_AFTER_MS = Number(process.env.EXPO_PUBLIC_EK_SETUP_STUCK_AFTER_MS) || 60_000;
+// Step EK-4c-1b: a real run takes 100+ seconds (longer for a bigger menu) — the plain progress
+// screen alone covers that. SLOW_AFTER_MS only adds a reassuring line once a run runs long even by
+// that standard; STUCK_AFTER_MS is the much later point (minutes, not seconds) where something has
+// likely actually gone wrong and Retry / Continue without EK suggestions are offered. Both are
+// env-overridable so a test can shrink them instead of waiting for real.
+const SLOW_AFTER_MS = Number(process.env.EXPO_PUBLIC_EK_SETUP_SLOW_AFTER_MS) || 60_000;
+const STUCK_AFTER_MS = Number(process.env.EXPO_PUBLIC_EK_SETUP_STUCK_AFTER_MS) || 360_000;
 
 type Phase = 'starting' | 'progress' | 'ready';
 
@@ -75,10 +81,15 @@ export default function MenuScanEk() {
   const [editingBase, setEditingBase] = useState<EkBaseDraft | null>(null);
   const [addingBase, setAddingBase] = useState(false);
   const [newBaseName, setNewBaseName] = useState('');
+  // Step EK-4c-1b: bumped by retryStart to re-run the effect below from scratch — Retry restarts
+  // the whole start-and-poll cycle instead of issuing its own separate POST, so a run that failed
+  // (or is stuck) resumes exactly the same way a first attempt would, including picking up a
+  // "done" result returned instantly by the retried start call.
+  const [attempt, setAttempt] = useState(0);
   const stopped = useRef(false);
 
   // Start (idempotent — a repeat POST just returns the existing run) then poll GET until the run
-  // leaves queued/running.
+  // leaves queued/running. Re-runs from scratch whenever `attempt` changes (see retryStart).
   useEffect(() => {
     if (!business || !scanId) return;
     stopped.current = false;
@@ -128,7 +139,7 @@ export default function MenuScanEk() {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business?.id, scanId]);
+  }, [business?.id, scanId, attempt]);
 
   // Once the run is done, resume a saved draft or seed a fresh one from the result.
   useEffect(() => {
@@ -188,23 +199,9 @@ export default function MenuScanEk() {
     setStartError(null);
     setPhase('starting');
     setRun(null);
+    setElapsedMs(0);
     setDraftReady(false);
-    stopped.current = false;
-    // Re-mounts the start effect by forcing a param-equivalent state change is unnecessary — the
-    // effect already re-runs retry via the same business/scanId, so a direct re-invoke is simplest.
-    authedFetch<EkSetupRun>(`/businesses/${business.id}/ai/menu-scans/${scanId}/ek-setup/`, {
-      method: 'POST',
-    })
-      .then((started) => {
-        setRun(started);
-        setPhase('progress');
-      })
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 429) setStartError('limit');
-        else if (err instanceof ApiError && err.status === 503) setStartError('unavailable');
-        else setStartError('failed');
-        setPhase('progress');
-      });
+    setAttempt((a) => a + 1);
   }
 
   // --- Progress / error states -------------------------------------------------------------
@@ -248,7 +245,12 @@ export default function MenuScanEk() {
     );
   }
 
-  if (elapsedMs >= STUCK_AFTER_MS && phase === 'progress') {
+  // Only still-queued/running work can be "stuck" — once the run is actually done (or failed,
+  // handled above), elapsedMs may still read past STUCK_AFTER_MS from the last tick before the
+  // poll loop stopped, but there is nothing left to retry: fall straight through to the batches
+  // screen below instead of flashing the stuck banner on the way there.
+  const runIsActive = !run || run.status === 'queued' || run.status === 'running';
+  if (runIsActive && elapsedMs >= STUCK_AFTER_MS && phase === 'progress') {
     return (
       <Screen>
         <Banner kind="warning">{sek.progress.stuckBanner}</Banner>
@@ -272,7 +274,7 @@ export default function MenuScanEk() {
           <Heading level={2} style={styles.title}>
             {sek.progress.title}
           </Heading>
-          {elapsedMs >= 20_000 ? (
+          {elapsedMs >= SLOW_AFTER_MS ? (
             <Small style={styles.muted}>{sek.progress.takingAWhile}</Small>
           ) : null}
         </View>

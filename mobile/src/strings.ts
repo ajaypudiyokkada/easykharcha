@@ -997,7 +997,7 @@ export const strings = {
     ek: {
       progress: {
         title: 'EK is setting up your kitchen...',
-        takingAWhile: 'Taking a minute for a large menu.',
+        takingAWhile: 'This is taking longer than usual. You can wait.',
         stuckBanner: 'This is taking longer than usual.',
         tryAgain: 'Try again',
         continueWithout: 'Continue without EK suggestions',
