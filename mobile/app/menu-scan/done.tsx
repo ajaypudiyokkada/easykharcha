@@ -13,9 +13,18 @@ const sdone = strings.menuScan.done;
 export default function MenuScanDone() {
   const router = useRouter();
   const { status, businesses } = useAuth();
-  const params = useLocalSearchParams<{ businessId?: string; returnTo?: string; count?: string }>();
+  const params = useLocalSearchParams<{
+    businessId?: string;
+    returnTo?: string;
+    count?: string;
+    suggestCount?: string;
+  }>();
   const returnTo = params.returnTo === 'settings' ? 'settings' : 'onboarding';
   const count = Number(params.count ?? '0');
+  // Step EK-4c-2: EK apply's own hand-off — the starting-stock step (`/count`) couldn't take the
+  // newly created items right now (today's opening count is already done/locked), so this screen
+  // offers it as a prominent extra action instead of silently dropping the suggestion.
+  const suggestCount = params.suggestCount === '1';
 
   const business = businesses.find((b) => String(b.id) === params.businessId) ?? businesses[0];
 
@@ -56,7 +65,14 @@ export default function MenuScanDone() {
           {sdone.title(count, sector.sellNoun, sector.sellNounPlural)}
         </Body>
         <Body style={styles.subtitle}>{sdone.subtitle}</Body>
-        <Button label={sdone.continueLabel} onPress={handleContinue} />
+        {suggestCount ? (
+          <Button label={sdone.countStarting} onPress={() => router.replace('/count')} />
+        ) : null}
+        <Button
+          label={sdone.continueLabel}
+          variant={suggestCount ? 'secondary' : 'primary'}
+          onPress={handleContinue}
+        />
       </View>
     </Screen>
   );

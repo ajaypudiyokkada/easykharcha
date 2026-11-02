@@ -78,3 +78,36 @@ export type EkSetupRun = {
   status: EkSetupRunStatus;
   error_code?: string;
 } & Partial<EkSetupResult>;
+
+/** Step EK-4c-2: `ai/ek_apply.py`'s `apply_ek_setup` response shape — `POST
+ * .../ek-setup/apply/`'s body. `skipped[].reason` is one of a fixed small set of codes
+ * (`removed`/`not_linked`/`not_used`/`dish_deleted`/`already_confirmed`/`no_ingredients`),
+ * mapped to plain wording client-side (never shown raw). */
+export type EkApplySkippedReason =
+  'removed' | 'not_linked' | 'not_used' | 'dish_deleted' | 'already_confirmed' | 'no_ingredients';
+
+export type EkApplySkipped = {
+  type: 'base' | 'ingredient' | 'recipe';
+  key?: string;
+  dish_id?: number;
+  name: string;
+  reason: EkApplySkippedReason;
+};
+
+export type EkApplyCreatedItem = {
+  id: number;
+  name: string;
+  unit_family: string;
+  display_unit: string;
+};
+
+export type EkApplyResult = {
+  created_items: number;
+  linked_items: number;
+  created_bases: number;
+  recipes_applied: number;
+  skipped_count: number;
+  stock_items: EkApplyCreatedItem[];
+  skipped: EkApplySkipped[];
+  recipe_coverage_pct: string | null;
+};

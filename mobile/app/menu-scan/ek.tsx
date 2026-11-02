@@ -3,7 +3,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../../src/api/client';
-import type { EkSetupRun } from '../../src/api/ekSetup';
+import type { CountsTodayStatus } from '../../src/api/counts';
+import type { EkApplyResult, EkSetupRun } from '../../src/api/ekSetup';
 import type { SellItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { QuantityInput } from '../../src/forms/QuantityInput';
@@ -11,18 +12,27 @@ import {
   addBaseLine,
   addBestSeller,
   addCustomBase,
+  addFamilyOtherLine,
   addUsedInDish,
+  bestSellerKeyForDish,
+  buildApplyPayload,
   draftFromResult,
+  ekAppliedCoverageStorage,
   ekSetupDraftStorage,
   removeBaseLine,
+  removeFamilyOtherLine,
   removeUsedInDish,
   setStep,
   toggleBaseKeep,
   toggleBestSeller,
   unitStockItemFor,
   updateBaseLine,
+  updateFamilyBaseUse,
+  updateFamilyMainQty,
+  updateFamilyOtherLine,
   updateUsedInPortion,
   type EkBaseDraft,
+  type EkFamilyDraft,
   type EkSetupDraft,
 } from '../../src/screens/ekSetupStore';
 import { sectorCopyFor } from '../../src/sectorCopy';
@@ -86,6 +96,7 @@ export default function MenuScanEk() {
   // (or is stuck) resumes exactly the same way a first attempt would, including picking up a
   // "done" result returned instantly by the retried start call.
   const [attempt, setAttempt] = useState(0);
+  const [showApply, setShowApply] = useState(false);
   const stopped = useRef(false);
 
   // Start (idempotent — a repeat POST just returns the existing run) then poll GET until the run
@@ -287,6 +298,19 @@ export default function MenuScanEk() {
     setDraft((current) => (current ? mutator(current) : current));
   }
 
+  if (showApply) {
+    return (
+      <ApplyStep
+        draft={draft}
+        business={business}
+        scanId={scanId}
+        returnTo={returnTo}
+        dishCount={dishCount}
+        onBack={() => setShowApply(false)}
+      />
+    );
+  }
+
   const incompleteNotice =
     draft.dishesWithoutSuggestion.length > 0
       ? sek.progress.incompleteNotice(draft.dishesWithoutSuggestion.length)
@@ -357,6 +381,17 @@ export default function MenuScanEk() {
     );
   }
 
+  if (draft.step === 3) {
+    return (
+      <RecipesStep
+        draft={draft}
+        onBack={() => update((d) => setStep(d, 2))}
+        onChange={update}
+        onFinish={() => setShowApply(true)}
+      />
+    );
+  }
+
   // Step 2: best sellers
   const selectedDishIds = new Set(draft.bestSellers.filter((p) => p.selected).map((p) => p.dishId));
   const bestSellerDishIds = new Set(draft.bestSellers.map((p) => p.dishId));
@@ -370,7 +405,7 @@ export default function MenuScanEk() {
       onBack={() => update((d) => setStep(d, 1))}
       onToggle={(key) => update((d) => toggleBestSeller(d, key))}
       onAdd={(dish) => update((d) => addBestSeller(d, dish))}
-      onFinish={() => router.replace(donePath)}
+      onFinish={() => update((d) => setStep(d, 3))}
       selectedCount={selectedDishIds.size}
     />
   );
@@ -740,6 +775,381 @@ function BestSellersStep({
   );
 }
 
+function RecipesStep({
+  draft,
+  onBack,
+  onChange,
+  onFinish,
+}: {
+  draft: EkSetupDraft;
+  onBack: () => void;
+  onChange: (mutator: (d: EkSetupDraft) => EkSetupDraft) => void;
+  onFinish: () => void;
+}) {
+  const selectedDishIds = new Set(
+    draft.bestSellers
+      .filter(
+        (pick): pick is typeof pick & { dishId: number } => pick.selected && pick.dishId != null,
+      )
+      .map((pick) => pick.dishId),
+  );
+  const familiesWithSelection = draft.families.filter((family) =>
+    family.members.some((member) => selectedDishIds.has(member.dishId)),
+  );
+  const unsuggestedSelected = draft.dishesWithoutSuggestion.filter(
+    (dish) => dish.dish_id != null && selectedDishIds.has(dish.dish_id),
+  );
+
+  return (
+    <Screen bottomBar={<Button label={sek.recipes.continueLabel} onPress={onFinish} />}>
+      <StepHeader current={3} total={4} onBack={onBack} />
+      <Heading level={1}>{sek.recipes.title}</Heading>
+      <Small style={styles.muted}>{sek.recipes.subtitle}</Small>
+
+      <View style={styles.list}>
+        {familiesWithSelection.map((family) => (
+          <FamilyCard
+            key={family.key}
+            family={family}
+            draft={draft}
+            selectedDishIds={selectedDishIds}
+            onChange={onChange}
+          />
+        ))}
+      </View>
+
+      {unsuggestedSelected.length > 0 ? (
+        <View style={styles.familyCard}>
+          <Body style={styles.batchName}>{sek.recipes.noSuggestionTitle}</Body>
+          {unsuggestedSelected.map((dish) => (
+            <Small key={dish.dish_id ?? dish.name} style={styles.muted}>
+              {dish.name}
+            </Small>
+          ))}
+          <Small style={styles.muted}>{sek.recipes.noSuggestionNote}</Small>
+        </View>
+      ) : null}
+    </Screen>
+  );
+}
+
+function FamilyCard({
+  family,
+  draft,
+  selectedDishIds,
+  onChange,
+}: {
+  family: EkFamilyDraft;
+  draft: EkSetupDraft;
+  selectedDishIds: Set<number>;
+  onChange: (mutator: (d: EkSetupDraft) => EkSetupDraft) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [newName, setNewName] = useState('');
+
+  const members = family.members.filter((member) => selectedDishIds.has(member.dishId));
+  if (members.length === 0) return null;
+
+  const usedKeys = new Set(family.otherIngredients.map((line) => line.ingredientKey));
+  const pickable = draft.ingredients.filter(
+    (ing) => !usedKeys.has(ing.key) && ing.name.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
+  return (
+    <View style={styles.familyCard}>
+      <Heading level={3}>{family.name}</Heading>
+
+      <View style={styles.list}>
+        {members.map((member) => {
+          const bsKey = bestSellerKeyForDish(draft, member.dishId);
+          if (!bsKey) return null;
+          return (
+            <View key={member.dishId} style={styles.memberRow}>
+              <Checkbox
+                checked
+                onChange={() => onChange((d) => toggleBestSeller(d, bsKey))}
+                title={member.name}
+              />
+              <View style={styles.formulaField}>
+                <QuantityInput
+                  label={sek.recipes.mainItemLabel(member.main.name)}
+                  quantity={member.main.amount}
+                  onQuantityChange={(amount) =>
+                    onChange((d) => updateFamilyMainQty(d, family.key, member.dishId, { amount }))
+                  }
+                  entryUnit={member.main.entryUnit}
+                  onEntryUnitChange={(entryUnit) =>
+                    onChange((d) =>
+                      updateFamilyMainQty(d, family.key, member.dishId, { entryUnit }),
+                    )
+                  }
+                  stockItem={unitStockItemFor(
+                    draft.ingredients.find((ing) => ing.key === member.main.ingredientKey)
+                      ?.unit_family ?? 'g',
+                  )}
+                />
+                <Small style={styles.estimateLabel}>{sek.recipes.estimateLabel}</Small>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      {family.basesUsed.length > 0 ? (
+        <View style={styles.list}>
+          <Small style={styles.sectionLabel}>{sek.recipes.usedBatches}</Small>
+          {family.basesUsed.map((use) => (
+            <View key={use.baseKey ?? use.name} style={styles.formulaField}>
+              <QuantityInput
+                label={use.name}
+                quantity={use.amount}
+                onQuantityChange={(amount) =>
+                  use.baseKey &&
+                  onChange((d) =>
+                    updateFamilyBaseUse(d, family.key, use.baseKey as string, { amount }),
+                  )
+                }
+                entryUnit={use.entryUnit}
+                onEntryUnitChange={(entryUnit) =>
+                  use.baseKey &&
+                  onChange((d) =>
+                    updateFamilyBaseUse(d, family.key, use.baseKey as string, { entryUnit }),
+                  )
+                }
+                stockItem={unitStockItemFor('g')}
+              />
+              <Small style={styles.estimateLabel}>{sek.recipes.estimateLabel}</Small>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={styles.list}>
+        <Small style={styles.sectionLabel}>{sek.recipes.otherIngredients}</Small>
+        {family.otherIngredients.map((line) => (
+          <View key={line.id} style={styles.formulaRow}>
+            <View style={styles.formulaField}>
+              <QuantityInput
+                label={line.name}
+                quantity={line.amount}
+                onQuantityChange={(amount) =>
+                  onChange((d) => updateFamilyOtherLine(d, family.key, line.id, { amount }))
+                }
+                entryUnit={line.entryUnit}
+                onEntryUnitChange={(entryUnit) =>
+                  onChange((d) => updateFamilyOtherLine(d, family.key, line.id, { entryUnit }))
+                }
+                stockItem={unitStockItemFor(
+                  draft.ingredients.find((ing) => ing.key === line.ingredientKey)?.unit_family ??
+                    'g',
+                )}
+              />
+              <Small style={styles.estimateLabel}>{sek.recipes.estimateLabel}</Small>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${sek.recipes.removeLine} ${line.name}`}
+              onPress={() => onChange((d) => removeFamilyOtherLine(d, family.key, line.id))}
+              style={styles.formulaRemove}
+            >
+              <Icon name="delete" size={18} colour={colours.danger} />
+            </Pressable>
+          </View>
+        ))}
+      </View>
+
+      {pickerOpen ? (
+        <View style={styles.pickerPanel}>
+          <TextField
+            label={sek.recipes.searchIngredients}
+            value={search}
+            onChangeText={setSearch}
+            placeholder={sek.recipes.searchIngredients}
+          />
+          <View style={styles.pickerList}>
+            {pickable.map((ing) => (
+              <Pressable
+                key={ing.key}
+                accessibilityRole="button"
+                onPress={() => {
+                  onChange((d) => addFamilyOtherLine(d, family.key, { ingredientKey: ing.key }));
+                  setPickerOpen(false);
+                  setSearch('');
+                }}
+                style={styles.pickerChip}
+              >
+                <Small style={styles.pickerChipText}>{ing.name}</Small>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.addNewRow}>
+            <TextField
+              label={sek.recipes.addNewIngredient}
+              value={newName}
+              onChangeText={setNewName}
+              placeholder={sek.recipes.addNewIngredient}
+            />
+            <Button
+              label={sek.recipes.addNewIngredient}
+              variant="secondary"
+              onPress={() => {
+                if (!newName.trim()) return;
+                onChange((d) => addFamilyOtherLine(d, family.key, { newName }));
+                setNewName('');
+                setPickerOpen(false);
+              }}
+            />
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setPickerOpen(true)}
+          style={styles.addButton}
+        >
+          <Icon name="plus" size={18} colour={colours.primary} />
+          <Body style={styles.addButtonText}>{sek.recipes.addIngredient}</Body>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+type ApplyStage = 'summary' | 'applying' | 'success' | 'error';
+
+function ApplyStep({
+  draft,
+  business,
+  scanId,
+  returnTo,
+  dishCount,
+  onBack,
+}: {
+  draft: EkSetupDraft;
+  business: { id: number };
+  scanId: number;
+  returnTo: string;
+  dishCount: number;
+  onBack: () => void;
+}) {
+  const router = useRouter();
+  const { authedFetch } = useAuth();
+  const [stage, setStage] = useState<ApplyStage>('summary');
+  const [result, setResult] = useState<EkApplyResult | null>(null);
+
+  const payload = useMemo(() => buildApplyPayload(draft), [draft]);
+  const dishesN = payload.recipes.length;
+  const batchesN = payload.bases.length;
+  const ingredientsN = payload.ingredients.length;
+
+  async function apply() {
+    setStage('applying');
+    try {
+      const res = await authedFetch<EkApplyResult>(
+        `/businesses/${business.id}/ai/menu-scans/${scanId}/ek-setup/apply/`,
+        { method: 'POST', body: payload },
+      );
+      await ekSetupDraftStorage.clear(business.id, scanId);
+      if (res.recipe_coverage_pct != null) {
+        await ekAppliedCoverageStorage.save(business.id, res.recipe_coverage_pct);
+      }
+      setResult(res);
+      setStage('success');
+    } catch {
+      setStage('error');
+    }
+  }
+
+  async function handleContinue() {
+    try {
+      const today = await authedFetch<CountsTodayStatus>(
+        `/businesses/${business.id}/counts/today/`,
+      );
+      if (today.next_action === 'opening') {
+        router.replace('/count');
+        return;
+      }
+    } catch {
+      // Falls through to the done screen below.
+    }
+    router.replace(
+      `/menu-scan/done?businessId=${business.id}&returnTo=${returnTo}&count=${dishCount}&suggestCount=1`,
+    );
+  }
+
+  if (stage === 'success' && result) {
+    return (
+      <Screen bottomBar={<Button label={sek.apply.continueLabel} onPress={handleContinue} />}>
+        <View style={styles.savedWrap}>
+          <View style={styles.savedIcon}>
+            <Icon name="success" size={32} colour={colours.card} />
+          </View>
+          <Heading level={1}>{sek.apply.successTitle}</Heading>
+          <View style={styles.list}>
+            {result.created_items > 0 ? (
+              <Body>{sek.apply.successCreated(result.created_items)}</Body>
+            ) : null}
+            {result.linked_items > 0 ? (
+              <Body>{sek.apply.successLinked(result.linked_items)}</Body>
+            ) : null}
+            {result.created_bases > 0 ? (
+              <Body>{sek.apply.successBases(result.created_bases)}</Body>
+            ) : null}
+            {result.recipes_applied > 0 ? (
+              <Body>{sek.apply.successRecipes(result.recipes_applied)}</Body>
+            ) : null}
+          </View>
+          <Small style={styles.muted}>{sek.apply.estimateNote}</Small>
+
+          {result.skipped.length > 0 ? (
+            <View style={styles.familyCard}>
+              <Body style={styles.batchName}>{sek.apply.skippedTitle}</Body>
+              {result.skipped.map((item, index) => (
+                <Small
+                  key={`${item.type}-${item.key ?? item.dish_id ?? index}`}
+                  style={styles.muted}
+                >
+                  {item.name} — {sek.apply.skippedReason[item.reason] ?? item.reason}
+                </Small>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      bottomBar={
+        <Button
+          label={stage === 'error' ? sek.apply.tryAgain : sek.apply.setupButton}
+          onPress={apply}
+          loading={stage === 'applying'}
+        />
+      }
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={sek.apply.back}
+        onPress={onBack}
+        style={styles.applyBack}
+      >
+        <Icon name="back" size={24} colour={colours.text} />
+      </Pressable>
+      <Heading level={1}>{sek.apply.title}</Heading>
+      <Body style={styles.counter}>{sek.apply.summary(dishesN, batchesN, ingredientsN)}</Body>
+      <Small style={styles.muted}>{sek.apply.estimateNote}</Small>
+      {stage === 'error' ? (
+        <Banner kind="error">
+          {sek.apply.errorTitle} — {sek.apply.errorBody}
+        </Banner>
+      ) : null}
+    </Screen>
+  );
+}
+
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
@@ -766,6 +1176,28 @@ const styles = StyleSheet.create({
   },
   counter: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  applyBack: {
+    width: spacing.huge,
+    height: spacing.huge,
+    borderRadius: radii.pill,
+    backgroundColor: colours.mint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savedWrap: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxl,
+  },
+  savedIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: radii.pill,
+    backgroundColor: colours.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
   },
   batchRow: {
     flexDirection: 'row',
@@ -896,6 +1328,19 @@ const styles = StyleSheet.create({
     borderColor: colours.mint,
     borderRadius: radii.md,
     padding: spacing.md,
+  },
+  familyCard: {
+    gap: spacing.md,
+    borderWidth: 2,
+    borderColor: colours.mint,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+  },
+  memberRow: {
+    gap: spacing.xs,
+  },
+  sectionLabel: {
+    fontFamily: fonts.bodyExtraBold,
   },
   rowHead: {
     flexDirection: 'row',
