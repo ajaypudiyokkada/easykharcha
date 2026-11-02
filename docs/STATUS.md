@@ -952,3 +952,22 @@ both say so in the UI.
   wrongly 60s); Retry now re-runs the whole start-and-poll effect (an `attempt` counter in its deps)
   instead of its own separate POST, so it actually resumes polling after a failure. New `flow.mjs`
   `ek-setup` scenario (`verify:ui`) drives the full screen set incl. the failed/cap-reached states.
+- **Step EK-4c-2 (part, recipe cards only) — "Check the recipes" screen.** `ek.tsx` step 3: one card
+  per family with a selected dish (tick/untick a member, edit its main item's qty, the family's
+  shared batches-used portions and other ingredients — add/remove, same picker as a base's formula);
+  a selected dish with no family gets a gentle note instead. `ekSetupStore.ts` gained `EkFamilyDraft`
+  + mutators, `draftFromResult` now builds `families`, `buildApplyPayload`'s recipes carry
+  `main`/`bases`/`others` per EK-4b's shape. Best sellers' Continue now goes to step 3.
+  `flow.mjs`'s `ek-setup` scenario extended to cover the new screen.
+- **Step EK-4c-2 (part 2) — apply, success and hand-off.** `ek.tsx`'s `ApplyStep` (reached via local
+  `showApply` state, not a numbered step): summary ("N dishes, N batches, N ingredients") + "Set up
+  my kitchen" (`POST .../ek-setup/apply/`), then success (counts, skipped items with plain reasons,
+  an estimate note) or a retryable error, draft untouched either way until success. On success:
+  clears the saved draft, seeds `ekAppliedCoverageStorage` (`home.tsx` reads it once — a just-
+  applied recipe is UNCONFIRMED, so the live reports-based coverage banner wouldn't show it yet),
+  then hands off to `/count` if today's opening count is still due, else `menu-scan/done.tsx` (new
+  `?suggestCount=1` adds a prominent "Count your starting stock" button there). `flow.mjs`'s
+  `ek-setup` scenario extended: summary/success screenshots, a real apply round-trip (only-used
+  items created, recipes UNCONFIRMED, edited qty in base units, repeat-apply creates nothing new).
+  Step 4 "Ingredients EK found" (review/rename/remove before the summary) still isn't built — out of
+  time this step.

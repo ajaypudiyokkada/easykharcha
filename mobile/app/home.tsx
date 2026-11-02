@@ -12,6 +12,7 @@ import type { WastageListResponse } from '../src/api/wastage';
 import { useAuth } from '../src/auth/AuthContext';
 import { can, isLimitedRole } from '../src/auth/permissions';
 import { formatDateTime, formatQty, formatRupees } from '../src/format';
+import { ekAppliedCoverageStorage } from '../src/screens/ekSetupStore';
 import { RecordPurchaseSheet } from '../src/screens/RecordPurchaseSheet';
 import { RecordSalesSheet } from '../src/screens/RecordSalesSheet';
 import { RecordWastageSheet } from '../src/screens/RecordWastageSheet';
@@ -364,9 +365,17 @@ function OwnerHome() {
         .catch(() => {});
     }
     if (canSeeReports) {
-      authedFetch<ReportsSummary>(`/businesses/${business.id}/reports/summary/?period=30d`)
-        .then((response) => setRecipeCoveragePct(response.recipe_coverage_pct))
-        .catch(() => {});
+      // Step EK-4c-2: a just-applied EK setup's own coverage number (its recipes are UNCONFIRMED,
+      // so the live report below — CONFIRMED-only — wouldn't show it yet) wins once, then clears.
+      ekAppliedCoverageStorage.takeAndClear(business.id).then((applied) => {
+        if (applied != null) {
+          setRecipeCoveragePct(applied);
+          return;
+        }
+        authedFetch<ReportsSummary>(`/businesses/${business.id}/reports/summary/?period=30d`)
+          .then((response) => setRecipeCoveragePct(response.recipe_coverage_pct))
+          .catch(() => {});
+      });
     }
     authedFetch<TodayStatus>(`/businesses/${business.id}/today/`)
       .then(setToday)
