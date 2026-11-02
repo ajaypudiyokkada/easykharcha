@@ -971,3 +971,15 @@ both say so in the UI.
   items created, recipes UNCONFIRMED, edited qty in base units, repeat-apply creates nothing new).
   Step 4 "Ingredients EK found" (review/rename/remove before the summary) still isn't built — out of
   time this step.
+- **Step O2 — the quick path skips the DIY steps it already answered.** A successful EK apply now
+  marks onboarding steps 3 ("What you buy") and 4 ("What you sell") `done` and brand's own Next
+  skips straight to team when 3 is already done; a failed/declined EK setup instead falls back to
+  step 3 only (never 4 — dishes already exist). `routing.ts`'s `nextRouteAfterAuth` resumes mid-scan
+  at `/menu-scan` and, via a reused step-4 marker, at `/count` right after an apply; new
+  `wizardStepDisplay` gives the quick path its own shorter "Step n of m" (4, or 5 if the buy
+  fallback ran) instead of the DIY wizard's fixed 6. Home/`setup/done.tsx`'s "still to do" list is
+  unaffected (these are marked `done`, not `skipped`). **Known gap, not fixed this step** (out of
+  scope/time — would need changes to `app/count.tsx`, excluded from this step's file list): once the
+  starting-stock count is actually submitted, nothing advances onboarding past it automatically, so
+  a business that closes the app only after finishing the count (not right after apply) resumes at
+  `/count` again rather than brand — `flow.mjs`'s own check only covers resuming right after apply.

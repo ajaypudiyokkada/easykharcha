@@ -1504,33 +1504,37 @@ async function checkMenuScanFlow(page) {
   await typeInto(page, 'Selling price — Mango Kulfi', '60');
   console.log('OK — added a dish by hand, filled in from the review list itself.');
 
+  // Step EK-4c-1: confirming the dish list now goes straight on to EK setup, not Done — Done is
+  // only reached from there (menu-scan/ek.tsx's own hand-off). EK setup's own UI (a real run) is
+  // checkEkSetupFlow ("ek-setup")'s concern; this scenario stays focused on the scan/review UI, so
+  // its run is faked straight to "failed" to reach the decline fallback without waiting on one.
+  const stopEkFailure = await fakeNextEkSetupResponse(page, {
+    status: 202,
+    body: { id: 0, status: 'failed', error_code: 'ai_provider_error' },
+  });
   await clickButton(page, 'Add 3 dishes');
-  await waitForPath(page, '/menu-scan/done');
-  console.log('OK — saving the ticked dishes goes through sell-items/bulk/ and lands on Done.');
+  await waitForPath(page, '/menu-scan/ek');
+  await waitForText(page, 'Continue without EK suggestions');
+  await stopEkFailure();
+  console.log('OK — saving the ticked dishes goes through sell-items/bulk/ and on to EK setup.');
+  await clickButton(page, 'Continue without EK suggestions');
 
-  // === Done screen ===
-  await waitForText(page, '3 dishes added.');
-  await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/done-390.png` });
-  console.log(`OK — saved Step C2a screenshots at 390px to ${STEP25C2A_SCREEN_DIR}/.`);
-
-  await clickButton(page, 'Continue');
-  // Step O1: the quick path reaches brand (step 2) next, not step 5 — scanning happens before
-  // brand now, so nothing about step 2 itself changes.
+  // Step O2: declining EK falls back to "What you buy" (dishes already exist, but nothing suggests
+  // their ingredients) — brand (2) comes first, since scanning happens before it on the quick path.
   await waitForPath(page, '/setup/2');
-  console.log('OK — Continue resumes the onboarding wizard at step 2 (brand).');
+  console.log('OK — Step O2: declining EK resumes the onboarding wizard at step 2 (brand).');
 
   await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
   await clickButton(page, 'Next');
   await waitForPath(page, '/setup/3');
   await waitForText(page, 'still need ingredients');
-  console.log('OK — Step O1: step 3 names how many scanned dishes still need ingredients.');
+  await page.screenshot({ path: `${STEP25C2A_SCREEN_DIR}/fallback-buy-390.png` });
+  console.log(`OK — step 3 names how many scanned dishes still need ingredients; saved a screenshot to ${STEP25C2A_SCREEN_DIR}/.`);
   await clickButton(page, 'Skip for now');
-  await waitForPath(page, '/setup/4');
-  await waitForText(page, 'Fake Dish 2');
-  await waitForText(page, 'Mango Kulfi');
-  console.log('OK — Step O1: step 4 already lists the scanned dishes, with no choice card.');
-  await clickButton(page, 'Skip for now');
+  // Step O2: "What you sell" (4) is never shown on the quick path — its dishes already came from
+  // the menu scan — so Skip here lands straight on team (5), not step 4.
   await waitForPath(page, '/setup/5');
+  console.log('OK — Step O2: step 3\'s Skip goes straight to team — "What you sell" never shows.');
 
   await logoutFromAnywhere(page);
 }
@@ -2026,6 +2030,47 @@ async function checkEkSetupFlow(page) {
   await page.setViewport({ width: 390, height: 3000 });
   console.log(`OK — apply succeeded; saved the success screenshot at 360/390px to ${EK_SCREEN_DIR}/.`);
 
+  // === Step O2: EK succeeded, so "What you buy" and "What you sell" are both already done — the
+  // hand-off goes straight to the starting-stock count (this business's opening count is due), and
+  // resuming (closing and reopening) right after apply returns there too, not brand or the scan. ===
+  await clickButton(page, 'Continue');
+  await waitForPath(page, '/count');
+  console.log('OK — Step O2: a successful apply hands off straight to the starting-stock count.');
+
+  await page.goto(`${APP_URL}/`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
+  await waitForPath(page, '/count');
+  console.log(
+    'OK — Step O2: resuming right after an EK apply returns to the starting-stock count, not ' +
+      'brand or the menu-scan detour.',
+  );
+
+  // Once the count is offered but not taken right now (menu-scan/done.tsx's own hand-off, reached
+  // when today's count is already locked/done), its Continue resumes brand next.
+  await page.goto(
+    `${APP_URL}/menu-scan/done?businessId=${businessId}&returnTo=onboarding&count=15&suggestCount=1`,
+    { waitUntil: 'networkidle0', timeout: TIMEOUT },
+  );
+  await clickButton(page, 'Continue');
+  await waitForPath(page, '/setup/2');
+  for (const width of [360]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/quick-path-brand-step-header-${width}.png` });
+  }
+  await page.setViewport({ width: 390, height: 3000 });
+  await clickAndSettle(await findVisible(page, '[role="radio"][aria-label="#8E3B6E"]'));
+  await clickButton(page, 'Next');
+  await waitForPath(page, '/setup/5');
+  const afterBrandText = await page.evaluate(() => document.body.innerText);
+  if (afterBrandText.includes('What you buy') || afterBrandText.includes('What you sell')) {
+    fail(
+      'ek-setup: the quick path must never show "What you buy"/"What you sell" once EK has succeeded',
+    );
+  }
+  console.log(
+    'OK — Step O2: brand\'s Next skips straight to team — the normal quick-path route never shows ' +
+      '"What you buy" or "What you sell".',
+  );
+
   const sellItemsAfterApplyRes = await fetch(
     `${API_BASE}/businesses/${businessId}/sell-items/?include_inactive=1`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
@@ -2135,6 +2180,27 @@ async function checkEkSetupFlow(page) {
   await stopCapReached();
   console.log('OK — cap-reached shows its own message with only "Continue without EK suggestions".');
 
+  // === Step O2: declining EK (same fallback as a failed run) must not leave the owner with an
+  // empty kitchen — it falls back to "What you buy", never "What you sell" (dishes already exist
+  // from the menu scan either way). ===
+  await clickButton(page, 'Continue without EK suggestions');
+  await waitForPath(page, '/setup/3');
+  await waitForText(page, 'What you buy');
+  for (const width of [360]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/quick-path-fallback-buy-step-header-${width}.png` });
+  }
+  await page.setViewport({ width: 390, height: 3000 });
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, '/setup/5');
+  const afterFallbackText = await page.evaluate(() => document.body.innerText);
+  if (afterFallbackText.includes('What you sell')) {
+    fail('ek-setup: the EK-declined fallback must still skip "What you sell" — dishes already exist');
+  }
+  console.log(
+    'OK — Step O2: declining EK falls back to "What you buy" only, then skips straight to team.',
+  );
+
   await logoutFromAnywhere(page);
 }
 
@@ -2177,6 +2243,18 @@ async function checkOnboardingDiyFlow(page) {
   await waitForPath(page, '/setup/4');
   await waitForText(page, 'Add your own');
   console.log('OK — Step O1: step 4 opens straight on the manual form on the DIY path too.');
+
+  // Step O2: the DIY path's own step order and count are untouched by the quick path's skips.
+  for (const width of [360]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${STEPO1_SCREEN_DIR}/diy-step4-step-header-${width}.png` });
+  }
+  await page.setViewport({ width: 390, height: 3000 });
+  await waitForText(page, 'Step 4 of 6');
+  await clickButton(page, 'Skip for now');
+  await waitForPath(page, '/setup/5');
+  await waitForText(page, 'Step 5 of 6');
+  console.log('OK — Step O2: the DIY path still runs steps 1-6 in the old order, unaffected.');
 
   await logoutFromAnywhere(page);
 }

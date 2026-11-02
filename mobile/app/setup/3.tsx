@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { ApiError } from '../../src/api/client';
 import type { SellItem, StarterPack, StockItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
-import { getOnboardingBusiness } from '../../src/business/routing';
+import { getOnboardingBusiness, wizardStepDisplay } from '../../src/business/routing';
 import { groupItems } from '../../src/forms/groupItems';
 import { itemDraftStorage } from '../../src/forms/itemDraftStorage';
 import { sectorCopyFor } from '../../src/sectorCopy';
@@ -152,9 +152,12 @@ export default function SetupStepThree() {
         method: 'PATCH',
         body: { status: 'done' },
       });
+      // Step O2: the quick path's "What you sell" (4) is already marked done by the time this
+      // fallback screen runs (menu-scan/ek.tsx, which is the only way a quick-path business ever
+      // reaches here) — its own dishes already came from the menu scan, so skip straight to team.
       await authedFetch(`/businesses/${business.id}/`, {
         method: 'PATCH',
-        body: { onboarding_step: 4 },
+        body: { onboarding_step: isQuickPath ? 5 : 4 },
       });
       await refreshMe();
       if (draftScope) await itemDraftStorage.clear(draftScope);
@@ -169,7 +172,7 @@ export default function SetupStepThree() {
   }
 
   async function handleNext() {
-    if (await save()) router.push('/setup/4');
+    if (await save()) router.push(isQuickPath ? '/setup/5' : '/setup/4');
   }
 
   async function handleSaveForLater() {
@@ -186,10 +189,10 @@ export default function SetupStepThree() {
       });
       await authedFetch(`/businesses/${business.id}/`, {
         method: 'PATCH',
-        body: { onboarding_step: 4 },
+        body: { onboarding_step: isQuickPath ? 5 : 4 },
       });
       await refreshMe();
-      router.push('/setup/4');
+      router.push(isQuickPath ? '/setup/5' : '/setup/4');
     } catch (err) {
       mapSubmitError(err);
     } finally {
@@ -214,8 +217,7 @@ export default function SetupStepThree() {
       }
     >
       <StepHeader
-        current={3}
-        total={s.totalSteps}
+        {...wizardStepDisplay(business, 3)}
         onBack={() => router.push('/setup/2')}
         onSaveForLater={handleSaveForLater}
       />

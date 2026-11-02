@@ -5,7 +5,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import type { BusinessSettings } from '../../src/api/business';
 import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
-import { getOnboardingBusiness } from '../../src/business/routing';
+import { getOnboardingBusiness, wizardStepDisplay } from '../../src/business/routing';
 import { DEFAULT_BUSINESS_SETTINGS } from '../../src/constants/businessSettings';
 import { targetCostHint } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
@@ -168,8 +168,7 @@ export default function SetupStepSix() {
       }
     >
       <StepHeader
-        current={6}
-        total={s.totalSteps}
+        {...wizardStepDisplay(business, 6)}
         onBack={() => router.push('/setup/5')}
         onSaveForLater={handleSaveForLater}
       />

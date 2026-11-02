@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import type { Business } from '../../src/api/business';
 import { ApiError, type ItemsSummary } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
-import { getOnboardingBusiness } from '../../src/business/routing';
+import { getOnboardingBusiness, wizardStepDisplay } from '../../src/business/routing';
 import { BUSINESS_TYPES } from '../../src/constants/businessTypes';
 import {
   BusinessForm,
@@ -223,7 +223,10 @@ export default function SetupStepOne() {
         />
       }
     >
-      <StepHeader current={1} total={s.totalSteps} onSaveForLater={handleSaveForLater} />
+      <StepHeader
+        {...(existing ? wizardStepDisplay(existing, 1) : { current: 1, total: s.totalSteps })}
+        onSaveForLater={handleSaveForLater}
+      />
 
       <Body style={styles.title}>{s1.title}</Body>
 

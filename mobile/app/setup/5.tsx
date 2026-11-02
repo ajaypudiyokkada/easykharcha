@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
-import { getOnboardingBusiness } from '../../src/business/routing';
+import { getOnboardingBusiness, wizardStepDisplay } from '../../src/business/routing';
 import { roleDescription, roleLabel } from '../../src/labels';
 import { strings } from '../../src/strings';
 import {
@@ -239,9 +239,8 @@ export default function SetupStepFive() {
       }
     >
       <StepHeader
-        current={5}
-        total={s.totalSteps}
-        onBack={() => router.push('/setup/4')}
+        {...wizardStepDisplay(business, 5)}
+        onBack={() => router.push(business.onboarding_path === 'quick' ? '/setup/2' : '/setup/4')}
         onSaveForLater={handleSaveForLater}
       />
 
