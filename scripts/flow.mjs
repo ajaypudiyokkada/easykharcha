@@ -1968,6 +1968,154 @@ async function checkEkSetupFlow(page) {
       'quantity and it persisted to the draft.',
   );
 
+  // === Step 4 (apply): summary -> "Set up my kitchen" -> success, then real backend round-trip
+  // checks. "Snack 1" above has no resolved main item (exercises the no_ingredients skip path);
+  // pick a second, "curry"-family member that DOES resolve one, for a base-units check. ===
+  const curryFamily = draftAtStep3.families.find((f) =>
+    f.basesUsed.some((use) => use.baseKey === base.key),
+  );
+  const curryMember = curryFamily?.members.find(
+    (m) => selectedKeys3.has(m.dishId) && m.main.ingredientKey,
+  );
+  if (curryMember) {
+    await typeInto(page, `Main item — ${curryMember.main.name}`, '0.3');
+    console.log(`OK — edited "${curryMember.main.name}"'s (${curryMember.name}'s main item) quantity to 0.3.`);
+  }
+
+  await clickButton(page, 'Continue');
+  await waitForText(page, 'Ready to set up your kitchen?');
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/apply-summary-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'apply-summary');
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — reached the apply summary screen; saved its screenshot at 360/390px to ${EK_SCREEN_DIR}/.`);
+
+  const stockItemsBeforeApplyRes = await fetch(
+    `${API_BASE}/businesses/${businessId}/stock-items/?include_inactive=1`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const stockItemsBeforeApply = await stockItemsBeforeApplyRes.json();
+
+  // Captures the exact body of the real apply POST (continuing it to the real backend
+  // untouched) so it can be re-sent verbatim below to prove a repeat apply creates nothing new.
+  let capturedApplyBody = null;
+  await page.setRequestInterception(true);
+  const captureApplyBody = (req) => {
+    if (!capturedApplyBody && req.method() === 'POST' && req.url().includes('/ek-setup/apply/')) {
+      capturedApplyBody = req.postData();
+    }
+    req.continue();
+  };
+  page.on('request', captureApplyBody);
+
+  await clickButton(page, 'Set up my kitchen');
+  await waitForText(page, 'Your kitchen is set up');
+
+  page.off('request', captureApplyBody);
+  await page.setRequestInterception(false);
+  if (!capturedApplyBody) fail('ek-setup apply: never saw the apply POST to capture its body');
+
+  for (const width of [360, 390]) {
+    await page.setViewport({ width, height: 900 });
+    await page.screenshot({ path: `${EK_SCREEN_DIR}/apply-success-${width}.png` });
+  }
+  await assertNoEkLayoutIssues(page, 'apply-success');
+  await page.setViewport({ width: 390, height: 3000 });
+  console.log(`OK — apply succeeded; saved the success screenshot at 360/390px to ${EK_SCREEN_DIR}/.`);
+
+  const sellItemsAfterApplyRes = await fetch(
+    `${API_BASE}/businesses/${businessId}/sell-items/?include_inactive=1`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const sellItemsAfterApply = await sellItemsAfterApplyRes.json();
+  const stockItemsAfterApplyRes = await fetch(
+    `${API_BASE}/businesses/${businessId}/stock-items/?include_inactive=1`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const stockItemsAfterApply = await stockItemsAfterApplyRes.json();
+
+  // --- only used stock items were created: diff the before/after stock-item lists and check
+  // every newly created one is exactly one the apply payload itself asked to create. ---
+  const sentPayload = JSON.parse(capturedApplyBody);
+  const beforeIds = new Set(stockItemsBeforeApply.map((item) => item.id));
+  const newlyCreated = stockItemsAfterApply.filter((item) => !beforeIds.has(item.id));
+  const expectedCreateNames = new Set(
+    sentPayload.ingredients.filter((ing) => ing.create).map((ing) => ing.name),
+  );
+  if (newlyCreated.length !== expectedCreateNames.size) {
+    fail(
+      `ek-setup apply: expected ${expectedCreateNames.size} new stock item(s), got ${newlyCreated.length}`,
+    );
+  }
+  for (const item of newlyCreated) {
+    if (!expectedCreateNames.has(item.name)) {
+      fail(`ek-setup apply: unexpected stock item created: "${item.name}"`);
+    }
+  }
+  console.log(
+    `OK — apply created exactly the ${newlyCreated.length} used-and-new ingredient(s) the payload asked for.`,
+  );
+
+  // --- recipes are UNCONFIRMED, base links exist only for recipe dishes, edited quantity in
+  // base units. ---
+  if (curryMember) {
+    const curryDish = sellItemsAfterApply.find((item) => item.id === curryMember.dishId);
+    if (!curryDish) fail('ek-setup apply: the edited recipe dish is missing after apply');
+    if (curryDish.recipe_status !== 'unconfirmed') {
+      fail(`ek-setup apply: expected recipe_status 'unconfirmed', got '${curryDish.recipe_status}'`);
+    }
+    const expectedMainBaseUnits = ekLineBaseUnits('0.3', curryMember.main.entryUnit);
+    const mainLine = curryDish.ingredients.find(
+      (line) => Number(line.quantity) === expectedMainBaseUnits,
+    );
+    if (!mainLine) {
+      fail(
+        `ek-setup apply: the edited main-item quantity (0.3 ${curryMember.main.entryUnit}) should ` +
+          `be stored as ${expectedMainBaseUnits} base units; got ` +
+          `[${curryDish.ingredients.map((l) => l.quantity).join(', ')}]`,
+      );
+    }
+    if (curryDish.bases.length === 0) {
+      fail('ek-setup apply: a recipe dish with a kept, linked batch should carry a base link');
+    }
+    console.log(
+      `OK — "${curryDish.name}"'s recipe applied as unconfirmed, its edited main item stored as ` +
+        `300 base units, and its batch link exists.`,
+    );
+  } else {
+    console.log('OK — no family member resolved a main item this run; skipped the base-units check.');
+  }
+
+  const snackDish = sellItemsAfterApply.find((item) => item.id === member.dishId);
+  if (snackDish?.recipe_status === 'unconfirmed') {
+    fail('ek-setup apply: a dish with no resolved main item should have been skipped, not applied');
+  }
+  if (snackDish?.bases.length) {
+    fail('ek-setup apply: a skipped (non-recipe) dish should carry no batch link');
+  }
+  console.log('OK — a selected dish with no resolved main item was skipped, with no batch link.');
+
+  // --- applying again (the exact same payload) creates nothing new (rule D). ---
+  const secondApplyRes = await fetch(
+    `${API_BASE}/businesses/${businessId}/ai/menu-scans/${scanId}/ek-setup/apply/`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: capturedApplyBody,
+    },
+  );
+  const secondApply = await secondApplyRes.json();
+  if (secondApply.created_items !== 0 || secondApply.created_bases !== 0) {
+    fail(
+      `ek-setup apply: a second identical apply should create nothing new, got ` +
+        `created_items=${secondApply.created_items} created_bases=${secondApply.created_bases}`,
+    );
+  }
+  console.log('OK — applying the same payload again created no new stock items or batches.');
+
   // === Cap-reached: a throwaway scanId (never a real MenuScan — the POST is fully faked, so the
   // real backend never sees it) on the same business, faking the 429 the daily AI cap returns. ===
   const stopCapReached = await fakeNextEkSetupResponse(page, {

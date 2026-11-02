@@ -3,7 +3,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ApiError } from '../../src/api/client';
-import type { EkSetupRun } from '../../src/api/ekSetup';
+import type { CountsTodayStatus } from '../../src/api/counts';
+import type { EkApplyResult, EkSetupRun } from '../../src/api/ekSetup';
 import type { SellItem } from '../../src/api/stock';
 import { useAuth } from '../../src/auth/AuthContext';
 import { QuantityInput } from '../../src/forms/QuantityInput';
@@ -14,7 +15,9 @@ import {
   addFamilyOtherLine,
   addUsedInDish,
   bestSellerKeyForDish,
+  buildApplyPayload,
   draftFromResult,
+  ekAppliedCoverageStorage,
   ekSetupDraftStorage,
   removeBaseLine,
   removeFamilyOtherLine,
@@ -93,6 +96,7 @@ export default function MenuScanEk() {
   // (or is stuck) resumes exactly the same way a first attempt would, including picking up a
   // "done" result returned instantly by the retried start call.
   const [attempt, setAttempt] = useState(0);
+  const [showApply, setShowApply] = useState(false);
   const stopped = useRef(false);
 
   // Start (idempotent — a repeat POST just returns the existing run) then poll GET until the run
@@ -294,6 +298,19 @@ export default function MenuScanEk() {
     setDraft((current) => (current ? mutator(current) : current));
   }
 
+  if (showApply) {
+    return (
+      <ApplyStep
+        draft={draft}
+        business={business}
+        scanId={scanId}
+        returnTo={returnTo}
+        dishCount={dishCount}
+        onBack={() => setShowApply(false)}
+      />
+    );
+  }
+
   const incompleteNotice =
     draft.dishesWithoutSuggestion.length > 0
       ? sek.progress.incompleteNotice(draft.dishesWithoutSuggestion.length)
@@ -370,7 +387,7 @@ export default function MenuScanEk() {
         draft={draft}
         onBack={() => update((d) => setStep(d, 2))}
         onChange={update}
-        onFinish={() => router.replace(donePath)}
+        onFinish={() => setShowApply(true)}
       />
     );
   }
@@ -999,6 +1016,140 @@ function FamilyCard({
   );
 }
 
+type ApplyStage = 'summary' | 'applying' | 'success' | 'error';
+
+function ApplyStep({
+  draft,
+  business,
+  scanId,
+  returnTo,
+  dishCount,
+  onBack,
+}: {
+  draft: EkSetupDraft;
+  business: { id: number };
+  scanId: number;
+  returnTo: string;
+  dishCount: number;
+  onBack: () => void;
+}) {
+  const router = useRouter();
+  const { authedFetch } = useAuth();
+  const [stage, setStage] = useState<ApplyStage>('summary');
+  const [result, setResult] = useState<EkApplyResult | null>(null);
+
+  const payload = useMemo(() => buildApplyPayload(draft), [draft]);
+  const dishesN = payload.recipes.length;
+  const batchesN = payload.bases.length;
+  const ingredientsN = payload.ingredients.length;
+
+  async function apply() {
+    setStage('applying');
+    try {
+      const res = await authedFetch<EkApplyResult>(
+        `/businesses/${business.id}/ai/menu-scans/${scanId}/ek-setup/apply/`,
+        { method: 'POST', body: payload },
+      );
+      await ekSetupDraftStorage.clear(business.id, scanId);
+      if (res.recipe_coverage_pct != null) {
+        await ekAppliedCoverageStorage.save(business.id, res.recipe_coverage_pct);
+      }
+      setResult(res);
+      setStage('success');
+    } catch {
+      setStage('error');
+    }
+  }
+
+  async function handleContinue() {
+    try {
+      const today = await authedFetch<CountsTodayStatus>(
+        `/businesses/${business.id}/counts/today/`,
+      );
+      if (today.next_action === 'opening') {
+        router.replace('/count');
+        return;
+      }
+    } catch {
+      // Falls through to the done screen below.
+    }
+    router.replace(
+      `/menu-scan/done?businessId=${business.id}&returnTo=${returnTo}&count=${dishCount}&suggestCount=1`,
+    );
+  }
+
+  if (stage === 'success' && result) {
+    return (
+      <Screen bottomBar={<Button label={sek.apply.continueLabel} onPress={handleContinue} />}>
+        <View style={styles.savedWrap}>
+          <View style={styles.savedIcon}>
+            <Icon name="success" size={32} colour={colours.card} />
+          </View>
+          <Heading level={1}>{sek.apply.successTitle}</Heading>
+          <View style={styles.list}>
+            {result.created_items > 0 ? (
+              <Body>{sek.apply.successCreated(result.created_items)}</Body>
+            ) : null}
+            {result.linked_items > 0 ? (
+              <Body>{sek.apply.successLinked(result.linked_items)}</Body>
+            ) : null}
+            {result.created_bases > 0 ? (
+              <Body>{sek.apply.successBases(result.created_bases)}</Body>
+            ) : null}
+            {result.recipes_applied > 0 ? (
+              <Body>{sek.apply.successRecipes(result.recipes_applied)}</Body>
+            ) : null}
+          </View>
+          <Small style={styles.muted}>{sek.apply.estimateNote}</Small>
+
+          {result.skipped.length > 0 ? (
+            <View style={styles.familyCard}>
+              <Body style={styles.batchName}>{sek.apply.skippedTitle}</Body>
+              {result.skipped.map((item, index) => (
+                <Small
+                  key={`${item.type}-${item.key ?? item.dish_id ?? index}`}
+                  style={styles.muted}
+                >
+                  {item.name} — {sek.apply.skippedReason[item.reason] ?? item.reason}
+                </Small>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      bottomBar={
+        <Button
+          label={stage === 'error' ? sek.apply.tryAgain : sek.apply.setupButton}
+          onPress={apply}
+          loading={stage === 'applying'}
+        />
+      }
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={sek.apply.back}
+        onPress={onBack}
+        style={styles.applyBack}
+      >
+        <Icon name="back" size={24} colour={colours.text} />
+      </Pressable>
+      <Heading level={1}>{sek.apply.title}</Heading>
+      <Body style={styles.counter}>{sek.apply.summary(dishesN, batchesN, ingredientsN)}</Body>
+      <Small style={styles.muted}>{sek.apply.estimateNote}</Small>
+      {stage === 'error' ? (
+        <Banner kind="error">
+          {sek.apply.errorTitle} — {sek.apply.errorBody}
+        </Banner>
+      ) : null}
+    </Screen>
+  );
+}
+
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
@@ -1025,6 +1176,28 @@ const styles = StyleSheet.create({
   },
   counter: {
     fontFamily: fonts.bodyExtraBold,
+  },
+  applyBack: {
+    width: spacing.huge,
+    height: spacing.huge,
+    borderRadius: radii.pill,
+    backgroundColor: colours.mint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savedWrap: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxl,
+  },
+  savedIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: radii.pill,
+    backgroundColor: colours.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
   },
   batchRow: {
     flexDirection: 'row',

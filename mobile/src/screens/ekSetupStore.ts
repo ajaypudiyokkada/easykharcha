@@ -154,6 +154,35 @@ export const ekSetupDraftStorage = {
   },
 };
 
+function appliedCoverageKeyFor(businessId: number): string {
+  return `easykharcha.ek_setup_applied_coverage.${businessId}`;
+}
+
+/** Step EK-4c-2: a one-shot handoff for the recipe-coverage percent EK-4b's apply response
+ * returns — Home's own "Recipes cover X% of your sales" banner otherwise only ever sees
+ * CONFIRMED recipes (`reports/service.py`'s `_recipe_coverage_pct`), so a just-applied,
+ * still-UNCONFIRMED batch wouldn't move it. Home reads this once right after a successful apply
+ * and clears it, falling back to its normal live fetch every other time. */
+export const ekAppliedCoverageStorage = {
+  async save(businessId: number, pct: string): Promise<void> {
+    try {
+      await setItem(appliedCoverageKeyFor(businessId), pct);
+    } catch {
+      // Best-effort — Home's live fetch is always the fallback.
+    }
+  },
+  async takeAndClear(businessId: number): Promise<string | null> {
+    try {
+      const key = appliedCoverageKeyFor(businessId);
+      const value = await getItem(key);
+      if (value != null) await removeItem(key);
+      return value;
+    } catch {
+      return null;
+    }
+  },
+};
+
 let lineSeq = 0;
 function nextLineId(): string {
   lineSeq += 1;
