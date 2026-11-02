@@ -389,7 +389,15 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   `alerts/[key].tsx` — detail: plain-language detail line, the numbers, primary next action, "Mark
   as checked"
 - `sales.tsx` — Sales (Owner/Manager): summary strip, "Record sales", a date switcher, today's sales,
-  Owner-only delete via confirmation dialog
+  Owner-only delete via confirmation dialog; Step S2: "Record sales" routes to `/record-sale` instead
+  of opening `RecordSalesSheet` directly, forwarding the viewed `date`
+- `record-sale.tsx` — Step S2: the "Record a sale" hub (`sales.create`), reached from Home's quick
+  action and Sales' own button (`?returnTo=home|sales`); Record manually opens the unchanged
+  `RecordSalesSheet`, the other three options are "Coming soon" (a sheet pointing back at Record
+  manually); a save or the back arrow returns to `returnTo` (`?saved=sales` on save, read once by
+  that screen to show its own toast/reload — the Toast's `onHide` clears the query, not the save
+  itself, since expo-router's web Stack doesn't remount on the way back and clearing it immediately
+  would drop the just-set toast state before it paints)
 - `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
   — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —

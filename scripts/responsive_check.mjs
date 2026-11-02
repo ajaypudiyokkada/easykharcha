@@ -63,7 +63,7 @@ const SCREEN_MANIFEST = {
     'setup-1', 'setup-fork', 'setup-2', 'setup-3', 'setup-4', 'setup-5', 'setup-6', 'setup-done',
     'home-owner',
     'buy', 'buy-detail', 'stock', 'stock-detail', 'stock-low-stock', 'reports', 'reports-30d',
-    'sales', 'wastage',
+    'sales', 'record-sale-hub', 'wastage',
     'alerts', 'alert-detail', 'team', 'team-detail', 'settings', 'settings-business',
     'settings-brand', 'settings-stock', 'settings-sell', 'settings-bases', 'base-used-in',
     'settings-alerts', 'count', 'counts',
@@ -1083,6 +1083,8 @@ async function main() {
       { name: 'reports', url: `${APP_URL}/reports` },
       { name: 'reports-30d', url: `${APP_URL}/reports?period=30d` },
       { name: 'sales', url: `${APP_URL}/sales` },
+      // Step 62s2
+      { name: 'record-sale-hub', url: `${APP_URL}/record-sale?returnTo=sales` },
       { name: 'wastage', url: `${APP_URL}/wastage` },
       { name: 'alerts', url: `${APP_URL}/alerts` },
       { name: 'alert-detail', url: `${APP_URL}${alertDetailPath}` },
@@ -1285,6 +1287,8 @@ async function main() {
         open: async (page) => {
           await waitForText(page, 'Sales');
           await clickButton(page, 'Record sales');
+          await waitForText(page, 'Choose how you want to add this sale.');
+          await clickAndSettle(await findVisible(page, '[aria-label="Record manually"]'));
           await waitForText(page, 'What did you sell?');
         },
       },

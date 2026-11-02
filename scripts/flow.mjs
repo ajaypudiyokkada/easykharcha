@@ -1042,6 +1042,8 @@ async function checkSalesFlow(page) {
   console.log('OK — /sales shows the Sales screen.');
 
   await clickButton(page, 'Record sales');
+  await waitForText(page, 'Choose how you want to add this sale.');
+  await clickAndSettle(await findVisible(page, '[aria-label="Record manually"]'));
   await waitForText(page, 'What did you sell?');
 
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Paneer Tikka'));
@@ -1102,6 +1104,11 @@ async function captureStep14Screens(page) {
   await page.screenshot({ path: `${STEP14_SCREEN_DIR}/sales-390.png` });
 
   await clickButton(page, 'Record sales');
+  await waitForText(page, 'Choose how you want to add this sale.');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await page.screenshot({ path: `${STEP14_SCREEN_DIR}/record-sale-hub-390.png` });
+
+  await clickAndSettle(await findVisible(page, '[aria-label="Record manually"]'));
   await waitForText(page, 'What did you sell?');
   await new Promise((resolve) => setTimeout(resolve, 300));
   await page.screenshot({ path: `${STEP14_SCREEN_DIR}/record-sales-390.png` });
@@ -2397,6 +2404,8 @@ async function checkBasesFlow(page) {
   await page.goto(`${APP_URL}/sales`, { waitUntil: 'networkidle0', timeout: TIMEOUT });
   await waitForText(page, 'Sales');
   await clickButton(page, 'Record sales');
+  await waitForText(page, 'Choose how you want to add this sale.');
+  await clickAndSettle(await findVisible(page, '[aria-label="Record manually"]'));
   await waitForText(page, 'What did you sell?');
   await clickAndSettle(await findVisibleByText(page, 'radio', 'Paneer Masala'));
   await typeInto(page, 'How many', '1');

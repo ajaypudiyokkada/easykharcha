@@ -1,4 +1,4 @@
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 
@@ -14,7 +14,6 @@ import { can, isLimitedRole } from '../src/auth/permissions';
 import { formatDateTime, formatQty, formatRupees } from '../src/format';
 import { ekAppliedCoverageStorage } from '../src/screens/ekSetupStore';
 import { RecordPurchaseSheet } from '../src/screens/RecordPurchaseSheet';
-import { RecordSalesSheet } from '../src/screens/RecordSalesSheet';
 import { RecordWastageSheet } from '../src/screens/RecordWastageSheet';
 import { bestTextOn, ensureContrast } from '../src/theme/brand';
 import { strings } from '../src/strings';
@@ -301,6 +300,7 @@ function TodayHome() {
  * stock count state, wastage entries, sales) and working quick actions. */
 function OwnerHome() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ saved?: string }>();
   const { user, businesses, authedFetch, refreshMe } = useAuth();
   const business = businesses[0]!;
   const [dismissing, setDismissing] = useState(false);
@@ -315,7 +315,6 @@ function OwnerHome() {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [purchaseSheetVisible, setPurchaseSheetVisible] = useState(false);
   const [wasteSheetVisible, setWasteSheetVisible] = useState(false);
-  const [salesSheetVisible, setSalesSheetVisible] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const permissions = business.permissions;
@@ -395,6 +394,15 @@ function OwnerHome() {
   useEffect(() => {
     loadToday();
   }, [loadToday]);
+
+  // Doesn't strip the `saved` query param immediately — replacing the URL right away can remount
+  // this screen before the toast state it just set has painted, losing it. The Toast's own onHide
+  // cleans it up instead, once it's actually been shown.
+  useEffect(() => {
+    if (params.saved !== 'sales') return;
+    setToast(strings.salesForm.savedToast);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.saved]);
 
   const skippedSteps = business.skipped_steps;
   const checklistDismissed = Boolean(business.checklist_dismissed_at);
@@ -683,7 +691,7 @@ function OwnerHome() {
               <ActionCard
                 label={s.recordSales}
                 icon="sales"
-                onPress={() => setSalesSheetVisible(true)}
+                onPress={() => router.push('/record-sale?returnTo=home')}
               />
             ) : null}
           </View>
@@ -708,16 +716,13 @@ function OwnerHome() {
           loadToday();
         }}
       />
-      <RecordSalesSheet
-        visible={salesSheetVisible}
-        onClose={() => setSalesSheetVisible(false)}
-        onSaved={() => {
-          setSalesSheetVisible(false);
-          setToast(strings.salesForm.savedToast);
-          loadToday();
+      <Toast
+        message={toast}
+        onHide={() => {
+          setToast(null);
+          if (params.saved) router.replace('/home');
         }}
       />
-      <Toast message={toast} onHide={() => setToast(null)} />
     </AppShell>
   );
 }

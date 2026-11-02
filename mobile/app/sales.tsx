@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -6,7 +6,6 @@ import type { Sale, SaleListResponse } from '../src/api/sales';
 import { useAuth } from '../src/auth/AuthContext';
 import { can } from '../src/auth/permissions';
 import { formatDate, formatDateTime, formatRupees } from '../src/format';
-import { RecordSalesSheet } from '../src/screens/RecordSalesSheet';
 import { strings } from '../src/strings';
 import { colours, fonts, radii, spacing } from '../src/theme/tokens';
 import {
@@ -41,6 +40,8 @@ function addDays(dateStr: string, delta: number): string {
 }
 
 export default function Sales() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ saved?: string; date?: string }>();
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
@@ -51,7 +52,6 @@ export default function Sales() {
   const [data, setData] = useState<SaleListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [sheetVisible, setSheetVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -71,6 +71,17 @@ export default function Sales() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Returning here from the Record a sale hub after a save — restore the date being viewed when
+  // the hub was opened and show the same toast the inline sheet used to show. Doesn't strip the
+  // query params immediately — replacing the URL right away can remount this screen before the
+  // toast state it just set has painted, losing it.
+  useEffect(() => {
+    if (!params.saved && !params.date) return;
+    if (params.date) setDate(params.date);
+    if (params.saved === 'sales') setToast(strings.salesForm.savedToast);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.saved, params.date]);
 
   if (status === 'bootstrapping') {
     return (
@@ -141,7 +152,11 @@ export default function Sales() {
         ) : null}
 
         {canRecord ? (
-          <Button label={s.recordSales} variant="primary" onPress={() => setSheetVisible(true)} />
+          <Button
+            label={s.recordSales}
+            variant="primary"
+            onPress={() => router.push(`/record-sale?returnTo=sales&date=${date}`)}
+          />
         ) : null}
 
         <View style={styles.dateSwitcher}>
@@ -187,23 +202,12 @@ export default function Sales() {
             icon="sales"
             title={s.empty.message}
             buttonLabel={s.empty.button}
-            onPress={() => setSheetVisible(true)}
+            onPress={() => router.push(`/record-sale?returnTo=sales&date=${date}`)}
           />
         ) : (
           <Body style={styles.subtitle}>{s.empty.message}</Body>
         )}
       </Screen>
-
-      <RecordSalesSheet
-        visible={sheetVisible}
-        onClose={() => setSheetVisible(false)}
-        initialDate={date}
-        onSaved={() => {
-          setSheetVisible(false);
-          setToast(strings.salesForm.savedToast);
-          load();
-        }}
-      />
 
       <ConfirmDialog
         visible={Boolean(deleteTarget)}
@@ -215,7 +219,13 @@ export default function Sales() {
         onCancel={() => setDeleteTarget(null)}
         confirmLoading={deleting}
       />
-      <Toast message={toast} onHide={() => setToast(null)} />
+      <Toast
+        message={toast}
+        onHide={() => {
+          setToast(null);
+          if (params.saved || params.date) router.replace('/sales');
+        }}
+      />
     </AppShell>
   );
 }
