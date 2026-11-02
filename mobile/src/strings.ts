@@ -445,6 +445,35 @@ export const strings = {
       generic: 'Something went wrong. Please try again.',
     },
   },
+  saleHub: {
+    title: 'Record a sale',
+    subtitle: 'Choose how you want to add this sale.',
+    fastestBadge: 'Fastest',
+    comingSoonBadge: 'Coming soon',
+    options: {
+      manual: {
+        title: 'Record manually',
+        desc: 'Pick items and enter what you sold.',
+      },
+      scan: {
+        title: 'Scan invoice',
+        desc: 'Take a photo or upload a customer bill.',
+      },
+      report: {
+        title: 'Upload daily sales report',
+        desc: 'Add your day’s sales report from your billing system.',
+      },
+      invoice: {
+        title: 'Create invoice',
+        desc: 'Make a bill for a customer in EasyKharcha.',
+      },
+    },
+    comingSoonSheet: {
+      message: "Coming soon. We're building this. For now, use Record manually.",
+      recordManually: 'Record manually',
+      close: 'Close',
+    },
+  },
   countReview: {
     title: "Today's counts",
     subtitle: 'Who counted and what needs review',

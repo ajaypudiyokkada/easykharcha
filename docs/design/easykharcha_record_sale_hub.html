@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>EasyKharcha — Record a sale</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--primary:#1F6F63;--secondary:#6F72C9;--highlight:#F28C45;--mint:#EAF6F2;--background:#FFF9F2;--card:#FFFFFF;--text:#22312E;--muted:#65736F;--success:#2F7D5A;--warning:#A96008;--danger:#B34242}
+*{box-sizing:border-box;min-width:0}html,body{margin:0;min-height:100%;background:#e7edf0}body{color:var(--text);font:17px/1.4 "Nunito Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit}button,[role=button]{min-height:44px;min-width:44px}button{cursor:pointer}h1{font-family:"Poppins",system-ui,sans-serif;margin:0;line-height:1.12;font-size:30px;letter-spacing:-.03em}p{margin:0}:focus-visible{outline:4px solid var(--highlight);outline-offset:3px;border-radius:12px}
+.phone{width:min(390px,100%);min-height:100dvh;margin:0 auto;background:var(--background);position:relative;box-shadow:0 0 24px rgba(34,49,46,.12)}
+.topbar{padding:calc(12px + env(safe-area-inset-top)) 16px 10px;background:var(--card);border-bottom:1px solid var(--mint)}
+.toprow{display:flex;align-items:center;gap:12px}.iconbtn{width:48px;height:48px;border:0;border-radius:50%;background:var(--mint);color:var(--text);display:grid;place-items:center}
+.icon{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.wordmark{flex:1;font:700 20px/1 "Poppins",system-ui,sans-serif;color:var(--text)}.avatar{width:44px;height:44px;border-radius:50%;border:0;background:var(--primary);color:var(--card);font-weight:900}
+.content{padding:18px 16px 24px}.lead{margin-top:7px;color:var(--muted);font-size:16px}.options{display:grid;gap:10px;margin-top:18px}
+.option{width:100%;min-height:84px;background:var(--card);border:1px solid var(--mint);border-radius:20px;padding:12px;display:grid;grid-template-columns:48px minmax(0,1fr) 36px;gap:12px;align-items:center;text-align:left;color:var(--text)}
+.option-icon{width:48px;height:48px;border-radius:15px;background:var(--mint);color:var(--primary);display:grid;place-items:center}.option:first-child .option-icon{background:var(--highlight);color:var(--text)}
+.option-copy{align-self:center}.title-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.option-title{font-family:"Poppins",system-ui,sans-serif;font-size:16px;font-weight:700;line-height:1.2}
+.badge{min-height:26px;display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:var(--mint);color:var(--primary);font-size:12px;font-weight:900}
+.option-desc{margin-top:4px;color:var(--muted);font-size:14px;line-height:1.25}.chev{width:36px;height:44px;display:grid;place-items:center;color:var(--muted)}
+.footer-note{margin-top:18px;padding:12px 14px;border-radius:16px;background:var(--mint);color:var(--text);font-size:14px}.footer-note strong{font-weight:900}
+@media(max-height:680px){.topbar{padding-top:8px}.content{padding-top:14px}h1{font-size:28px}.lead{font-size:15px}.options{gap:8px;margin-top:14px}.option{min-height:78px;padding:10px 11px}.option-desc{font-size:13.5px}.footer-note{display:none}}
+@media(max-width:359px){.content{padding-left:12px;padding-right:12px}.option{grid-template-columns:44px minmax(0,1fr) 32px;gap:9px}.option-icon{width:44px;height:44px}.option-title{font-size:15.5px}.option-desc{font-size:13px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="phone">
+<header class="topbar"><div class="toprow">
+<button class="iconbtn" type="button" aria-label="Back"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+<div class="wordmark">EasyKharcha</div>
+<button class="avatar" type="button" aria-label="Profile">AP</button>
+</div></header>
+
+<section class="content" aria-labelledby="page-title">
+<h1 id="page-title">Record a sale</h1>
+<p class="lead">Choose how you want to add this sale.</p>
+
+<div class="options">
+<button class="option" type="button" data-route="manual">
+<span class="option-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M6 3h12v18H6z"/><path d="M9 7h6M9 11h6M9 15h3"/><path d="M17 16v4M15 18h4"/></svg></span>
+<span class="option-copy"><span class="title-row"><span class="option-title">Record manually</span><span class="badge">Fastest</span></span><span class="option-desc">Pick items and enter what you sold.</span></span>
+<span class="chev"><svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+</button>
+
+<button class="option" type="button" data-route="scan">
+<span class="option-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h4l1.5-2h5L16 7h4v12H4z"/><circle cx="12" cy="13" r="3"/></svg></span>
+<span class="option-copy"><span class="title-row"><span class="option-title">Scan invoice</span></span><span class="option-desc">Take a photo or upload a customer bill.</span></span>
+<span class="chev"><svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+</button>
+
+<button class="option" type="button" data-route="report">
+<span class="option-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M15 3v4h4"/><path d="M9 11h6M9 15h6"/></svg></span>
+<span class="option-copy"><span class="title-row"><span class="option-title">Upload daily sales report</span></span><span class="option-desc">Add your day’s sales report from your billing system.</span></span>
+<span class="chev"><svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+</button>
+
+<button class="option" type="button" data-route="invoice">
+<span class="option-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h4"/><path d="M16 14v4M14 16h4"/></svg></span>
+<span class="option-copy"><span class="title-row"><span class="option-title">Create invoice</span></span><span class="option-desc">Make a bill for a customer in EasyKharcha.</span></span>
+<span class="chev"><svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+</button>
+</div>
+
+<div class="footer-note"><strong>Nothing is added yet.</strong> You will review and confirm before EK records a sale.</div>
+</section>
+</main>
+
+<script>
+document.querySelectorAll('[data-route]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const route=btn.dataset.route;
+    const labels={manual:'Manual entry',scan:'Scan invoice',report:'Daily sales report',invoice:'Create invoice'};
+    alert(labels[route]+' selected. This prototype currently shows the hub only.');
+  });
+});
+</script>
+</body>
+</html>

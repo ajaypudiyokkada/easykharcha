@@ -18,6 +18,7 @@ import {
   Pencil,
   Plus,
   Receipt,
+  ReceiptText,
   Search,
   Settings as SettingsIcon,
   ShoppingCart,
@@ -67,6 +68,7 @@ const REGISTRY = {
   image: ImageIcon,
   document: FileText,
   scan: Sparkles,
+  invoice: ReceiptText,
 } as const;
 
 export type IconName = keyof typeof REGISTRY;
