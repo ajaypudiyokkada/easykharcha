@@ -942,3 +942,13 @@ both say so in the UI.
   chicken-curry base-formula regression from the brief) and `scripts/ek_apply_local_proof.py` against
   the real `kavan.pdf` run already in the local DB (42 items, 5 bases, 19 recipes applied; idempotent
   on replay).
+- **Step EK-4c-1/1b — the EK setup client screens.** `mobile/app/menu-scan/ek.tsx` (reached from
+  `review.tsx` after dishes are confirmed): progress, "Things you make in batches" (keep/remove a
+  base, edit/add/remove its lines via `QuantityInput`, "Used in" dish checklist), "Which dishes
+  should we set up first?" (best sellers). `src/screens/ekSetupStore.ts` holds the owner's edits
+  (persisted, resumes after refresh) and builds EK-4b's apply payload — not called yet. 1b fixed two
+  bugs: the progress screen only adds a soft "taking longer" line past `EXPO_PUBLIC_EK_SETUP_
+  SLOW_AFTER_MS` (60s) and only offers Retry/Continue-without past `..._STUCK_AFTER_MS` (6 min, was
+  wrongly 60s); Retry now re-runs the whole start-and-poll effect (an `attempt` counter in its deps)
+  instead of its own separate POST, so it actually resumes polling after a failure. New `flow.mjs`
+  `ek-setup` scenario (`verify:ui`) drives the full screen set incl. the failed/cap-reached states.
