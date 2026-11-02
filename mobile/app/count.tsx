@@ -2,7 +2,8 @@ import { Redirect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { ApiError } from '../src/api/client';
+import { ApiError, type RequestOptions } from '../src/api/client';
+import type { Business, OnboardingStepStatus } from '../src/api/business';
 import type { CountFormItem, CountsTodayStatus, CountType } from '../src/api/counts';
 import { useAuth } from '../src/auth/AuthContext';
 import { can } from '../src/auth/permissions';
@@ -43,9 +44,37 @@ function isDone(line: LineState): boolean {
   return line.skipped || line.countedQty.trim() !== '';
 }
 
+// Steps 1-2 (business info, brand) can only ever be 'done'; 3-6 (buy/sell/team/settings) can be
+// 'skipped' — mirrors backend/businesses/models.py's SKIPPABLE_ONBOARDING_STEPS.
+const SKIPPABLE_ONBOARDING_STEPS = new Set([3, 4, 5, 6]);
+
+/** The starting-stock count has no wizard slot of its own — it's reached mid-detour on the quick
+ * path, or from Home's first-count nudge on the DIY path. Once it's submitted during onboarding,
+ * nothing else advances the wizard past it, so a business that closes the app right after finishing
+ * the count (rather than right after the quick-path EK apply) would otherwise keep resuming at
+ * /count forever. Finish whatever onboarding steps are still open (sensible defaults rather than
+ * forcing the owner back through brand/team/settings — they stay reachable via Settings, same as
+ * any other skipped step) and complete onboarding, so a reload lands on Home instead. Best-effort:
+ * a returning user with onboarding still incomplete simply resumes the wizard as before. */
+async function finishOnboardingAfterStartingStock(
+  business: Business,
+  authedFetch: <T>(path: string, options?: RequestOptions) => Promise<T>,
+): Promise<void> {
+  const progress = new Map(business.onboarding.map((step) => [step.step, step.status]));
+  for (let step = 1; step <= 6; step += 1) {
+    if ((progress.get(step) ?? 'todo') !== 'todo') continue;
+    const status: OnboardingStepStatus = SKIPPABLE_ONBOARDING_STEPS.has(step) ? 'skipped' : 'done';
+    await authedFetch(`/businesses/${business.id}/onboarding/${step}/`, {
+      method: 'PATCH',
+      body: { status },
+    });
+  }
+  await authedFetch(`/businesses/${business.id}/onboarding/complete/`, { method: 'POST' });
+}
+
 export default function Count() {
   const router = useRouter();
-  const { status, user, businesses, authedFetch } = useAuth();
+  const { status, user, businesses, authedFetch, refreshMe } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
 
@@ -200,6 +229,14 @@ export default function Count() {
       };
       await authedFetch(`/businesses/${business.id}/counts/`, { method: 'POST', body: payload });
       await countDraftStorage.clear(business.id, countType);
+      if (isFirstCount && !business.onboarding_completed_at) {
+        try {
+          await finishOnboardingAfterStartingStock(business, authedFetch);
+          await refreshMe();
+        } catch {
+          // Best-effort — worst case a reload resumes the wizard instead of landing on Home.
+        }
+      }
       setSaved(true);
     } catch (err) {
       if (err instanceof ApiError && err.code === 'needs_confirmation' && err.itemIds?.length) {

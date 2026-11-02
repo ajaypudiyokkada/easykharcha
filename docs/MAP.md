@@ -374,7 +374,9 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `wastage.tsx` — Wastage list, record, delete
 - `count.tsx` — Blind stock count form (opening or closing); Step 23d: a business's first-ever count
   is framed "Starting stock" with an intro card, Save enables at 1+ item counted (untouched items
-  submit as skipped)
+  submit as skipped); Step O2b: a successful first-ever count also finishes onboarding if it isn't
+  already complete (`finishOnboardingAfterStartingStock`), so "Go to Home" always lands on a
+  complete Home
 - `counts/index.tsx` — Count review list (Owner/Manager), remind sheet
 - `counts/[id].tsx` — Count detail: gap-flagged items first, then not-sure/confirmed-unusual, then
   the rest; Owner/Manager lines show expected used and the gap (qty + Rs value), red when flagged; a
