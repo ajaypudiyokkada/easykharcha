@@ -12,7 +12,7 @@ const sdone = strings.menuScan.done;
 
 export default function MenuScanDone() {
   const router = useRouter();
-  const { status, businesses } = useAuth();
+  const { status, businesses, authedFetch } = useAuth();
   const params = useLocalSearchParams<{
     businessId?: string;
     returnTo?: string;
@@ -44,14 +44,22 @@ export default function MenuScanDone() {
 
   const sector = sectorCopyFor(business.business_type);
 
-  function handleContinue() {
+  async function handleContinue() {
     if (returnTo === 'settings') {
       router.replace('/settings/sell');
       return;
     }
-    // Step O1: the quick path scans dishes before brand (step 2) — onboarding_step is still 2 from
-    // step 1, and step 4 (sell) is marked done by its own Next once actually reached, so nothing
-    // needs saving here.
+    // Step O2: menu-scan/ek.tsx leaves onboarding_step on its own "starting stock count offered"
+    // marker (4) while this screen is up — reset it to 2 (brand, the next real wizard screen) so a
+    // resume interrupted right after this point lands on brand, not back here or at /count again.
+    try {
+      await authedFetch(`/businesses/${business.id}/`, {
+        method: 'PATCH',
+        body: { onboarding_step: 2 },
+      });
+    } catch {
+      // Best-effort — setup/2 re-derives everything it needs from the business itself.
+    }
     router.replace('/setup/2');
   }
 

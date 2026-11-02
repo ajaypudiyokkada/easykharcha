@@ -467,7 +467,10 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   — the fetch itself is in `PincodeLocationField.tsx`, like every other screen-level `authedFetch`
   call; `menuScan.ts` is Step C2a's types only too — `ExtractedDish`/`ExtractedSection`/
   `MenuScanDetail`, fetches live in `app/menu-scan/*.tsx`)
-- `business/routing.ts` — where to send a signed-in user (wizard step vs /home)
+- `business/routing.ts` — where to send a signed-in user (wizard step vs /home); Step O2's
+  `wizardStepDisplay` gives the quick path its own shorter "Step n of m"; `nextRouteAfterAuth` resumes
+  a quick-path business mid-detour at `/menu-scan` and, via a reused step-4 marker, at `/count` right
+  after an EK apply
 - `screens/countDraftStorage.ts` — in-progress blind count draft, survives a reload;
   `screens/menuScanDraft.ts` — Step C2a: the in-progress menu scan's id per business (same
   web-localStorage/native-SecureStore split), so leaving and returning to the Analyzing screen

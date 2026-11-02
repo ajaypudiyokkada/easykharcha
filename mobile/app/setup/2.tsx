@@ -5,7 +5,7 @@ import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 import type { Business } from '../../src/api/business';
 import { ApiError } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
-import { getOnboardingBusiness } from '../../src/business/routing';
+import { getOnboardingBusiness, wizardStepDisplay } from '../../src/business/routing';
 import { BrandForm } from '../../src/forms/BrandForm';
 import { sectorCopyFor } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
@@ -76,12 +76,24 @@ export default function SetupStepTwo() {
     }
   }
 
+  // Step O2: a quick-path business whose EK setup already succeeded has "What you buy" (3) marked
+  // done automatically (menu-scan/ek.tsx) — nothing left to ask there, so skip straight to team
+  // (5). EK failing (or never running) leaves it "todo", so the DIY ingredient step still runs.
+  function nextStep(): number {
+    if (business.onboarding_path !== 'quick') return 3;
+    const buyAlreadyDone = business.onboarding.some(
+      (step) => step.step === 3 && step.status !== 'todo',
+    );
+    return buyAlreadyDone ? 5 : 3;
+  }
+
   async function handleNext() {
-    if (await save(3)) router.push('/setup/3');
+    const next = nextStep();
+    if (await save(next)) router.push(`/setup/${next}`);
   }
 
   async function handleSaveForLater() {
-    if (await save(3)) router.replace('/home');
+    if (await save(nextStep())) router.replace('/home');
   }
 
   const previewTextColour = bestTextOn(colour);
@@ -118,8 +130,7 @@ export default function SetupStepTwo() {
       }
     >
       <StepHeader
-        current={2}
-        total={s.totalSteps}
+        {...wizardStepDisplay(business, 2)}
         onBack={() =>
           router.push(
             sectorCopyFor(business.business_type).menuScanEnabled ? '/setup/fork' : '/setup/1',

@@ -4,14 +4,13 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import type { Business } from '../../src/api/business';
 import { useAuth } from '../../src/auth/AuthContext';
-import { getOnboardingBusiness } from '../../src/business/routing';
+import { getOnboardingBusiness, wizardStepDisplay } from '../../src/business/routing';
 import { sectorCopyFor } from '../../src/sectorCopy';
 import { strings } from '../../src/strings';
 import { Body, Icon, Screen, Small, StepHeader } from '../../src/ui';
 import { WIZARD_CONTENT_WIDTH } from '../../src/ui/constants';
 import { colours, fonts, radii, spacing, type } from '../../src/theme/tokens';
 
-const s = strings.setup;
 const sf = strings.setup.fork;
 
 export default function SetupFork() {
@@ -62,8 +61,7 @@ export default function SetupFork() {
   return (
     <Screen maxWidth={WIZARD_CONTENT_WIDTH}>
       <StepHeader
-        current={1}
-        total={s.totalSteps}
+        {...wizardStepDisplay(business, 1)}
         onBack={() => router.push('/setup/1')}
         onSaveForLater={() => router.replace('/home')}
       />

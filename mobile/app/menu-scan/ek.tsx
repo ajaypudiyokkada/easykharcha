@@ -69,7 +69,7 @@ type Phase = 'starting' | 'progress' | 'ready';
 
 export default function MenuScanEk() {
   const router = useRouter();
-  const { status, businesses, authedFetch } = useAuth();
+  const { status, businesses, authedFetch, refreshMe } = useAuth();
   const params = useLocalSearchParams<{
     businessId?: string;
     scanId?: string;
@@ -206,6 +206,30 @@ export default function MenuScanEk() {
   const sector = sectorCopyFor(business.business_type);
   const donePath = `/menu-scan/done?businessId=${business.id}&returnTo=${returnTo}&count=${dishCount}`;
 
+  // Step O2: EK failed (or was declined) — the owner must not be left with an empty kitchen, so
+  // fall back to the DIY "What you buy" step instead of continuing on as if nothing needed doing.
+  // Dishes still exist from the menu scan either way, so "What you sell" (4) is still skippable.
+  async function continueWithoutEk() {
+    if (returnTo !== 'onboarding') {
+      router.replace(donePath);
+      return;
+    }
+    try {
+      await authedFetch(`/businesses/${business.id}/onboarding/4/`, {
+        method: 'PATCH',
+        body: { status: 'done' },
+      });
+      await authedFetch(`/businesses/${business.id}/`, {
+        method: 'PATCH',
+        body: { onboarding_step: 2 },
+      });
+      await refreshMe();
+    } catch {
+      // Best-effort — setup/2 re-derives everything it needs from the business itself.
+    }
+    router.replace('/setup/2');
+  }
+
   function retryStart() {
     setStartError(null);
     setPhase('starting');
@@ -233,7 +257,7 @@ export default function MenuScanEk() {
           <Button
             label={sek.progress.continueWithout}
             variant="secondary"
-            onPress={() => router.replace(donePath)}
+            onPress={continueWithoutEk}
           />
         </View>
       </Screen>
@@ -249,7 +273,7 @@ export default function MenuScanEk() {
           <Button
             label={sek.progress.continueWithout}
             variant="secondary"
-            onPress={() => router.replace(donePath)}
+            onPress={continueWithoutEk}
           />
         </View>
       </Screen>
@@ -270,7 +294,7 @@ export default function MenuScanEk() {
           <Button
             label={sek.progress.continueWithout}
             variant="secondary"
-            onPress={() => router.replace(donePath)}
+            onPress={continueWithoutEk}
           />
         </View>
       </Screen>
@@ -1034,7 +1058,7 @@ function ApplyStep({
   onBack: () => void;
 }) {
   const router = useRouter();
-  const { authedFetch } = useAuth();
+  const { authedFetch, refreshMe } = useAuth();
   const [stage, setStage] = useState<ApplyStage>('summary');
   const [result, setResult] = useState<EkApplyResult | null>(null);
 
@@ -1062,6 +1086,28 @@ function ApplyStep({
   }
 
   async function handleContinue() {
+    // Step O2: EK succeeded, so both "What you buy" (ingredients, just handled by EK) and "What
+    // you sell" (dishes, already came from the menu scan) are done — skip them on the quick path.
+    // onboarding_step marks "starting stock count offered" so a resume lands on /count, not brand.
+    if (returnTo === 'onboarding') {
+      try {
+        await authedFetch(`/businesses/${business.id}/onboarding/3/`, {
+          method: 'PATCH',
+          body: { status: 'done' },
+        });
+        await authedFetch(`/businesses/${business.id}/onboarding/4/`, {
+          method: 'PATCH',
+          body: { status: 'done' },
+        });
+        await authedFetch(`/businesses/${business.id}/`, {
+          method: 'PATCH',
+          body: { onboarding_step: 4 },
+        });
+        await refreshMe();
+      } catch {
+        // Best-effort — worst case a resume lands one screen earlier/later than ideal.
+      }
+    }
     try {
       const today = await authedFetch<CountsTodayStatus>(
         `/businesses/${business.id}/counts/today/`,
