@@ -978,8 +978,10 @@ both say so in the UI.
   at `/menu-scan` and, via a reused step-4 marker, at `/count` right after an apply; new
   `wizardStepDisplay` gives the quick path its own shorter "Step n of m" (4, or 5 if the buy
   fallback ran) instead of the DIY wizard's fixed 6. Home/`setup/done.tsx`'s "still to do" list is
-  unaffected (these are marked `done`, not `skipped`). **Known gap, not fixed this step** (out of
-  scope/time — would need changes to `app/count.tsx`, excluded from this step's file list): once the
-  starting-stock count is actually submitted, nothing advances onboarding past it automatically, so
-  a business that closes the app only after finishing the count (not right after apply) resumes at
-  `/count` again rather than brand — `flow.mjs`'s own check only covers resuming right after apply.
+  unaffected (these are marked `done`, not `skipped`).
+- **Step O2b — finish the menu path.** Closed Step O2's known gap: `count.tsx`'s `submit` now finishes
+  onboarding right after a first-ever ("starting stock") count succeeds, if it isn't already complete
+  — any still-`todo` step (1-2 forced `done`, 3-6 `skipped`, same statuses Settings' own skip buttons
+  use) then `onboarding/complete/`, best-effort or a reload just resumes the wizard as before — so a
+  business that closes the app only after finishing the count (quick path) no longer resumes at
+  `/count` again; "Go to Home" lands on a real, complete Home for both the quick and DIY paths.
