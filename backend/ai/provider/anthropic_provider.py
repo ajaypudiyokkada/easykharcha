@@ -6,7 +6,7 @@ import anthropic
 from django.conf import settings
 
 from .. import invoice_prompts, prompts
-from ..invoice_schema import InvoiceExtractionResult
+from ..invoice_schema import BillMatchResult, InvoiceExtractionResult
 from ..schemas import (
     BestSellersResult,
     DishClassificationResult,
@@ -23,6 +23,7 @@ _REQUEST_TIMEOUT_SECONDS = 60.0
 _MAX_TOKENS_MENU = 8000
 _MAX_TOKENS_RECIPE = 4000
 _MAX_TOKENS_INVOICE = 4000
+_MAX_TOKENS_MATCH = 3000
 # A batch of ~60-80 dishes each needing a type/family/confidence echoed back needs real room.
 _MAX_TOKENS_KITCHEN = 8000
 _MAX_TOKENS_BEST_SELLER = 2000
@@ -137,6 +138,29 @@ def extract_invoice(files: list[dict], fixture: str = "") -> AiCallResult:
         ),
         parse=lambda raw: InvoiceExtractionResult.model_validate(raw).sanitized(),
         stage="invoice_read",
+    )
+
+
+def match_bill_lines(lines: list[dict], items: list[dict]) -> AiCallResult:
+    """ONE call for all the unresolved lines of one import: lines are [{line_id, name}], items are the
+    owner's [{id, name}]. The answer is cut down to the owner's own ids by the parse step."""
+    messages = invoice_prompts.match_messages(lines, items)
+    tool = invoice_prompts.match_tool()
+    valid_ids = {item["id"] for item in items}
+    line_ids = {line["line_id"] for line in lines}
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_INVOICE_MATCH,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=invoice_prompts.INVOICE_MATCH_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_MATCH,
+        ),
+        parse=lambda raw: BillMatchResult.model_validate(raw).sanitized(valid_ids, line_ids),
+        stage="invoice_match",
     )
 
 

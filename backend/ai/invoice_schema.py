@@ -225,3 +225,48 @@ def _iso_or_none(text: str | None) -> date | None:
         return date.fromisoformat(str(text).strip()[:10])
     except ValueError:
         return parse_bill_date(text)
+
+
+class LineMatch(_Base):
+    line_id: str
+    sell_item_id: int | None = None
+    confidence: float = 0.0
+
+    @field_validator("line_id", mode="before")
+    @classmethod
+    def _line_id(cls, value):
+        return _clean_text(value, 20)
+
+    @field_validator("sell_item_id", mode="before")
+    @classmethod
+    def _item_id(cls, value):
+        if isinstance(value, bool):
+            return None
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _confidence(cls, value):
+        return _clamp(value)
+
+
+class BillMatchResult(_Base):
+    matches: list[LineMatch] = Field(default_factory=list)
+
+    def sanitized(self, valid_item_ids: set[int], line_ids: set[str]) -> dict:
+        """One answer per known bill line, and an item id that is not in the owner's own list is
+        dropped to null: the model can never introduce an item that doesn't exist."""
+        by_line: dict[str, dict] = {}
+        for match in self.matches:
+            if match.line_id not in line_ids or match.line_id in by_line:
+                continue
+            item_id = match.sell_item_id if match.sell_item_id in valid_item_ids else None
+            by_line[match.line_id] = {
+                "line_id": match.line_id,
+                "sell_item_id": item_id,
+                "confidence": match.confidence if item_id is not None else 0.0,
+            }
+        return {"matches": list(by_line.values())}

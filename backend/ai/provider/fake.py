@@ -53,7 +53,9 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
 
 from django.conf import settings
 
-from ..invoice_schema import InvoiceExtractionResult
+from invoices.normalize import normalize_name, similarity
+
+from ..invoice_schema import BillMatchResult, InvoiceExtractionResult
 from ..schemas import (
     BestSellersResult,
     DishClassificationResult,
@@ -331,6 +333,50 @@ def extract_invoice(files: list[dict], fixture: str = "") -> AiCallResult:
         get_raw=get_raw,
         parse=lambda payload: InvoiceExtractionResult.model_validate(payload).sanitized(),
         stage="invoice_read",
+    )
+
+
+_FAKE_MATCH_THRESHOLD = 0.5
+
+
+def match_bill_lines(lines: list[dict], items: list[dict]) -> AiCallResult:
+    """The fake picks, deterministically, the owner's item most similar to each line when that is
+    above 0.5, else null. A line named with FORCE_AI_MATCH_ERROR makes the whole call fail on every
+    attempt: proves a failed match call leaves the import ready. A line named FORCE_FOREIGN_ID makes
+    it answer an id that isn't in the owner's list: proves that id is dropped."""
+    if any("FORCE_AI_MATCH_ERROR" in line["name"] for line in lines):
+        raise AiProviderCallError("forced match failure", exc_type="ForcedFailure")
+    valid_ids = {item["id"] for item in items}
+    line_ids = {line["line_id"] for line in lines}
+    normalised = [(item["id"], normalize_name(item["name"])) for item in items]
+
+    def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        matches = []
+        for line in lines:
+            if "FORCE_FOREIGN_ID" in line["name"]:
+                matches.append(
+                    {"line_id": line["line_id"], "sell_item_id": 987654321, "confidence": 0.99}
+                )
+                continue
+            wanted = normalize_name(line["name"])
+            scored = [(similarity(wanted, name), item_id) for item_id, name in normalised]
+            best = max(scored, default=(0.0, None))
+            if best[1] is not None and best[0] > _FAKE_MATCH_THRESHOLD:
+                matches.append(
+                    {"line_id": line["line_id"], "sell_item_id": best[1], "confidence": best[0]}
+                )
+            else:
+                matches.append({"line_id": line["line_id"], "sell_item_id": None, "confidence": 0})
+        return {"matches": matches}, model, 400, 150, False
+
+    return run_with_fallback(
+        primary_model=_FAKE_MODEL,
+        fallback_model=_FAKE_MODEL,
+        get_raw=get_raw,
+        parse=lambda payload: BillMatchResult.model_validate(payload).sanitized(
+            valid_ids, line_ids
+        ),
+        stage="invoice_match",
     )
 
 
