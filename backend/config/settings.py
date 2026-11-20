@@ -234,6 +234,10 @@ AI_MODEL_INVOICE_MATCH = env.str("AI_MODEL_INVOICE_MATCH", default=AI_MODEL_INVO
 # Tried once, only when the first call's result fails schema validation — see ai/provider/base.py.
 AI_MODEL_FALLBACK = env.str("AI_MODEL_FALLBACK", default="claude-sonnet-5-5")
 AI_FAKE = env.bool("AI_FAKE", default=DEBUG)
+# Dev only, and only while AI_FAKE is on: which canned bill (ai/provider/invoice_fixtures.py) an Import
+# invoice upload gets when it names none, so the app UI can run the whole import flow with no AI cost.
+# Has no effect at all when AI_FAKE is off.
+AI_FAKE_DEFAULT_FIXTURE = env.str("AI_FAKE_DEFAULT_FIXTURE", default="fomo_14753")
 # Where an uploaded menu's photos/PDF sit between being saved and being read — never MEDIA_ROOT,
 # since these are deleted right after the job finishes or fails (ai/files.py), not kept like a logo.
 AI_TEMP_ROOT = env.str("AI_TEMP_ROOT", default=str(BASE_DIR / "ai_tmp"))

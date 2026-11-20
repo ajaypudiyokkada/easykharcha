@@ -522,6 +522,9 @@ export default function ImportInvoice() {
               }}
               onManual={() => abandon('manual')}
               onBack={() => setLeaveVisible(true)}
+              onViewEarlier={(id) =>
+                router.push(`/invoices/${id}?from=import&returnTo=${returnTo}`)
+              }
             />
           ) : null}
           <ConfirmDialog
@@ -552,16 +555,6 @@ export default function ImportInvoice() {
             </View>
             <Heading level={2}>{partly ? s.success.titlePartly : s.success.title}</Heading>
             <Body style={styles.muted}>{partly ? s.success.bodyPartly : s.success.body}</Body>
-            <View style={styles.row}>
-              <View style={styles.badge}>
-                <Small style={styles.badgeText}>{s.success.fromBill}</Small>
-              </View>
-              {partly ? (
-                <View style={[styles.badge, styles.badgeWarn]}>
-                  <Small style={styles.badgeWarnText}>{s.success.partly}</Small>
-                </View>
-              ) : null}
-            </View>
             {partly ? (
               <Small style={styles.muted}>{s.success.notRecorded(notRecorded)}</Small>
             ) : null}

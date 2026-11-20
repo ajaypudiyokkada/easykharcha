@@ -148,7 +148,10 @@ class InvoiceImportCreateView(APIView):
 
         fixture = ""
         if settings.AI_FAKE:
-            fixture = str(request.data.get("fixture", "")).strip()[:40]
+            fixture = (
+                str(request.data.get("fixture", "")).strip()[:40]
+                or settings.AI_FAKE_DEFAULT_FIXTURE
+            )
 
         if kind == "pdf":
             imp = InvoiceImport.objects.create(

@@ -8,6 +8,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 import type { LineDecision } from '../api/invoiceImports';
+import type { PaymentModeKey } from '../api/invoices';
 import { newIdempotencyKey } from './draft';
 
 export type ImportProgress = {
@@ -19,6 +20,8 @@ export type ImportProgress = {
   decisions: Record<string, LineDecision>;
   addAnyway: boolean;
   acceptPartial: boolean;
+  /** Optional payment chosen on the review screen (Unpaid unless the owner picks Paid). */
+  payment: { paid: boolean; mode: PaymentModeKey | ''; proofId: number | null };
 };
 
 export function newProgress(importId: number): ImportProgress {
@@ -30,6 +33,7 @@ export function newProgress(importId: number): ImportProgress {
     decisions: {},
     addAnyway: false,
     acceptPartial: false,
+    payment: { paid: false, mode: '', proofId: null },
   };
 }
 
@@ -75,6 +79,13 @@ export const importProgressStorage = {
         decisions: p.decisions && typeof p.decisions === 'object' ? p.decisions : {},
         addAnyway: p.addAnyway === true,
         acceptPartial: p.acceptPartial === true,
+        payment: {
+          paid: p.payment?.paid === true,
+          mode: ['cash', 'upi', 'card', 'bank_transfer'].includes(p.payment?.mode ?? '')
+            ? p.payment.mode
+            : '',
+          proofId: typeof p.payment?.proofId === 'number' ? p.payment.proofId : null,
+        },
       };
     } catch {
       return null;
