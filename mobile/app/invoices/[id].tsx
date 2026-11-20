@@ -5,10 +5,8 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import type { Invoice } from '../../src/api/invoices';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
-import { billDate } from '../../src/invoices/billText';
 import { InvoiceActions } from '../../src/invoices/InvoiceActions';
-import { InvoiceItemsCard } from '../../src/invoices/InvoiceItemsCard';
-import { maskPhone } from '../../src/invoices/validate';
+import { InvoiceBody } from '../../src/invoices/InvoiceBody';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
@@ -95,14 +93,6 @@ export default function InvoiceDetail() {
   }
 
   const voided = invoice?.status === 'void';
-  const subtitleParts = invoice
-    ? [
-        billDate(invoice.sale_date),
-        invoice.customer_name || null,
-        invoice.customer_phone ? maskPhone(invoice.customer_phone) : null,
-      ].filter(Boolean)
-    : [];
-
   return (
     <Screen>
       <View style={styles.page}>
@@ -116,7 +106,7 @@ export default function InvoiceDetail() {
             <Icon name="back" size={22} colour={colours.text} />
           </Pressable>
           <View style={styles.flex}>
-            <Heading level={2}>{invoice ? s.detailTitle(invoice.number) : ''}</Heading>
+            <Heading level={2}>{s.detailTitle}</Heading>
           </View>
           {voided ? (
             <View style={styles.voidPill}>
@@ -136,9 +126,7 @@ export default function InvoiceDetail() {
         {invoice ? (
           <>
             {voided ? <Banner kind="warning">{s.voidedBanner}</Banner> : null}
-            <Small style={styles.muted}>{subtitleParts.join(' · ')}</Small>
-
-            <InvoiceItemsCard invoice={invoice} />
+            <InvoiceBody invoice={invoice} />
 
             {voided ? (
               <Body style={styles.muted}>{s.voidedNote}</Body>
