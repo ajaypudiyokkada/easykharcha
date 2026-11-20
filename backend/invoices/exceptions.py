@@ -17,3 +17,21 @@ class InvoiceValidationError(APIException):
         super().__init__(detail=first)
         self.field_errors = field_errors or {}
         self.row_errors = row_errors or []
+
+
+class InvoicePaymentConflict(APIException):
+    status_code = 409
+    default_detail = "This invoice is already marked paid a different way."
+    default_code = "INVOICE_PAYMENT_CONFLICT"
+
+
+class ProofNotAvailable(APIException):
+    status_code = 404
+    default_detail = "There is no payment proof for this invoice."
+    default_code = "NO_PROOF"
+
+
+class ProofRemoved(APIException):
+    status_code = 404
+    default_detail = "This proof photo was removed after the storage period."
+    default_code = "PROOF_REMOVED"

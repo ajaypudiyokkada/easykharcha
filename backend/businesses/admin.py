@@ -4,6 +4,8 @@ from django.shortcuts import render
 
 from audit.log import log_action
 from counts.models import StockCount
+from invoices.images import delete_file
+from invoices.models import Invoice, StoredImage
 from purchases.models import Purchase
 from sales.models import Sale
 from stock.models import SellItem, StockItem
@@ -33,6 +35,10 @@ def delete_business_and_its_data(business: Business) -> None:
     the rows that protect them are removed first; everything else (Access, OnboardingProgress,
     BusinessSettings, AlertCheck, MenuScan, AiUsage) cascades from Business itself. See docs/MAP.md's
     admin section for the full FK map this order is based on."""
+    # Invoices first: an InvoiceLine PROTECTs its Sale. The private image files (payment proofs,
+    # imported bill photos) are deleted only once the whole delete has committed.
+    image_paths = list(StoredImage.objects.filter(business=business))
+    Invoice.objects.filter(business=business).delete()
     Sale.objects.filter(business=business).delete()
     WastageEntry.objects.filter(business=business).delete()
     StockCount.objects.filter(business=business).delete()
@@ -40,6 +46,7 @@ def delete_business_and_its_data(business: Business) -> None:
     SellItem.objects.filter(business=business).delete()
     StockItem.objects.filter(business=business).delete()
     business.delete()
+    transaction.on_commit(lambda: [delete_file(image) for image in image_paths])
 
 
 @admin.register(Business)

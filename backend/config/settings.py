@@ -241,6 +241,16 @@ AI_MONTHLY_CAP_USD = Decimal(env.str("AI_MONTHLY_CAP_USD", default="20"))
 AI_PRICE_IN_PER_MTOK = Decimal(env.str("AI_PRICE_IN_PER_MTOK", default="1.00"))
 AI_PRICE_OUT_PER_MTOK = Decimal(env.str("AI_PRICE_OUT_PER_MTOK", default="5.00"))
 
+# Step S3e: private image storage (payment proofs now, imported bill photos later). A directory OUTSIDE
+# the public MEDIA_ROOT (Caddy serves MEDIA_ROOT to anyone), mounted into the backend and worker
+# containers only, and read back only through an authenticated view (invoices/views.py).
+PRIVATE_MEDIA_ROOT = env.str("PRIVATE_MEDIA_ROOT", default=str(BASE_DIR / "private_media"))
+# How long a stored image is kept, counted from its upload date and always using the CURRENT value
+# (changing it affects images already stored). The daily purge is `manage.py purge_invoice_images`.
+INVOICE_IMAGE_RETENTION_DAYS = env.int("INVOICE_IMAGE_RETENTION_DAYS", default=60)
+# An uploaded proof that never got attached to an invoice is deleted after this many hours.
+INVOICE_PROOF_UNATTACHED_HOURS = env.int("INVOICE_PROOF_UNATTACHED_HOURS", default=24)
+
 # Dev default matches the Expo web dev server (mobile/package.json's `start` script, :8081) and the
 # production web export served locally for service-worker testing (scripts/serve_web.mjs, :8082).
 # Override with a comma-separated CORS_ALLOWED_ORIGINS in .env for anything else.
