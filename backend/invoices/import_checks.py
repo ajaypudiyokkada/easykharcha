@@ -146,13 +146,11 @@ def compute_checks(draft: dict, today: date) -> list[dict]:
         if field in confidence and confidence[field] < LOW_CONFIDENCE:
             low.append({"field": field, "confidence": confidence[field]})
     for line in lines:
-        if (line.get("confidence") or 0) < LOW_CONFIDENCE:
+        # A line with no confidence value is unknown, not low.
+        confidence_value = line.get("confidence")
+        if confidence_value is not None and confidence_value < LOW_CONFIDENCE:
             low.append(
-                {
-                    "field": "line",
-                    "line_id": line["line_id"],
-                    "confidence": line.get("confidence") or 0,
-                }
+                {"field": "line", "line_id": line["line_id"], "confidence": confidence_value}
             )
     if low:
         checks.append(_check("LOW_CONFIDENCE", "warn", {"fields": low}))

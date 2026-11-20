@@ -177,6 +177,7 @@ def create_invoice(*, business: Business, user, data) -> tuple[Invoice, bool]:
                         quantity=line["quantity"],
                         rate=line["rate"],
                         amount=line["amount"],
+                        recorded_amount=line["amount"],
                         sale=sale,
                         position=position,
                     )
@@ -219,7 +220,11 @@ def void_invoice(*, invoice: Invoice, user, reason: str) -> Invoice:
         if locked.status == InvoiceStatus.VOID:
             return locked
         now = timezone.now()
-        sale_ids = list(locked.lines.values_list("sale_id", flat=True))
+        sale_ids = [
+            sale_id
+            for sale_id in locked.lines.values_list("sale_id", flat=True)
+            if sale_id is not None
+        ]
         Sale.objects.filter(id__in=sale_ids, is_deleted=False).update(
             is_deleted=True, deleted_by=user, deleted_at=now
         )

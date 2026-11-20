@@ -13,7 +13,15 @@ from businesses.permissions import require_permission
 
 from .exceptions import InvoiceValidationError, ProofNotAvailable, ProofRemoved
 from .images import absolute_path, store_image
-from .models import Invoice, InvoiceStatus, PaymentStatus, StoredImage, StoredImageKind
+from .import_views import PhotoNotAvailable, PhotoRemoved
+from .models import (
+    Invoice,
+    InvoiceSource,
+    InvoiceStatus,
+    PaymentStatus,
+    StoredImage,
+    StoredImageKind,
+)
 from .payment import mark_paid, mark_unpaid
 from .serializers import InvoiceSerializer, InvoiceSettingsSerializer
 from .service import create_invoice, void_invoice
@@ -30,10 +38,14 @@ class InvoiceListCreateView(APIView):
         require_permission(business, request.user, "sales.create")
         qs = (
             Invoice.objects.filter(business=business)
-            .select_related("business", "proof")
+            .select_related("business", "proof", "invoice_import__image")
             .prefetch_related("lines")
         )
         params = request.query_params
+        if params.get("source"):
+            if params["source"] not in InvoiceSource.values:
+                raise InvoiceValidationError({"source": "Use created or imported."})
+            qs = qs.filter(source=params["source"])
         if params.get("payment_status"):
             if params["payment_status"] not in PaymentStatus.values:
                 raise InvoiceValidationError({"payment_status": "Use paid or unpaid."})
@@ -205,3 +217,32 @@ class InvoiceMarkUnpaidView(APIView):
         )
         unpaid, _changed = mark_unpaid(invoice=invoice, user=request.user)
         return Response(InvoiceSerializer(unpaid).data)
+
+
+class InvoiceBillPhotoView(APIView):
+    """The stored photo of the bill an imported invoice came from. Owner/Manager of this business,
+    through Django only (never /media), uncached. A created invoice, or an import that was a PDF,
+    has none; after retention it is "removed"."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id, iid):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sales.create")
+        invoice = get_object_or_404(
+            Invoice.objects.select_related("invoice_import__image"), id=iid, business=business
+        )
+        record = getattr(invoice, "invoice_import", None)
+        image = record.image if record is not None else None
+        if image is None:
+            raise PhotoNotAvailable()
+        if image.removed_at is not None:
+            raise PhotoRemoved()
+        try:
+            handle = absolute_path(image).open("rb")
+        except (FileNotFoundError, ValueError, OSError):
+            raise PhotoRemoved() from None
+        response = FileResponse(handle, content_type="image/jpeg")
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response

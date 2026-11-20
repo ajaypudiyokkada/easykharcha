@@ -100,7 +100,7 @@ def _same_photo_import_id(imp: InvoiceImport) -> int | None:
         InvoiceImport.objects.filter(
             business_id=imp.business_id,
             file_sha256=imp.file_sha256,
-            status=ImportStatus.READY,
+            status__in=[ImportStatus.READY, ImportStatus.CONFIRMED],
             id__lt=imp.id,
         )
         .order_by("-id")

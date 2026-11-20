@@ -68,7 +68,18 @@ class InvoiceCreateSerializer(serializers.Serializer):
 class InvoiceLineSerializer(serializers.ModelSerializer):
     class Meta:
         model = InvoiceLine
-        fields = ("id", "sell_item", "name", "quantity", "rate", "amount", "sale")
+        fields = (
+            "id",
+            "kind",
+            "sell_item",
+            "name",
+            "name_as_printed",
+            "quantity",
+            "rate",
+            "amount",
+            "recorded_amount",
+            "sale",
+        )
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
@@ -77,6 +88,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
     proof_available = serializers.SerializerMethodField()
     proof_removed = serializers.SerializerMethodField()
     proof_already_used = serializers.SerializerMethodField()
+    lines_recorded = serializers.SerializerMethodField()
+    lines_total = serializers.SerializerMethodField()
+    bill_photo_available = serializers.SerializerMethodField()
+    bill_photo_removed = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -102,8 +117,39 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "proof_available",
             "proof_removed",
             "proof_already_used",
+            "bill_number_printed",
+            "bill_date_printed",
+            "bill_date",
+            "partly_recorded",
+            "lines_recorded",
+            "lines_total",
+            "printed_items_total",
+            "discount_total",
+            "tax_lines",
+            "round_off",
+            "bill_photo_available",
+            "bill_photo_removed",
             "lines",
         )
+
+    def get_lines_recorded(self, obj) -> int:
+        """Lines that became a sale (kind item), out of lines_total."""
+        return sum(1 for line in obj.lines.all() if line.kind == "item")
+
+    def get_lines_total(self, obj) -> int:
+        return len(obj.lines.all())
+
+    def _import_image(self, obj):
+        record = getattr(obj, "invoice_import", None)
+        return record.image if record is not None else None
+
+    def get_bill_photo_available(self, obj) -> bool:
+        image = self._import_image(obj)
+        return image is not None and image.removed_at is None
+
+    def get_bill_photo_removed(self, obj) -> bool:
+        image = self._import_image(obj)
+        return image is not None and image.removed_at is not None
 
     def get_proof_available(self, obj) -> bool:
         """The proof image is still stored."""
