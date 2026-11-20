@@ -81,13 +81,15 @@ class InvoiceVoidView(APIView):
 
 
 class InvoiceSettingsView(APIView):
-    """Owner-only (`settings.manage`): flat tax on/off + rate, and the optional bill header text."""
+    """Flat tax on/off + rate, and the optional bill header text. Anyone who can create an invoice
+    (Owner, Manager: `sales.create`) can READ these, since the bill form needs the tax rate; only
+    the Owner (`settings.manage`) can change them."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request, business_id):
         business = get_object_or_404(Business, id=business_id)
-        require_permission(business, request.user, "settings.manage")
+        require_permission(business, request.user, "sales.create")
         return Response(self._data(business.settings))
 
     def patch(self, request, business_id):

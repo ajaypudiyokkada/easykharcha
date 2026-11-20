@@ -7649,7 +7649,12 @@ def check_invoices_flow() -> None:
         fail("invoices: a Head chef should get 403 on create")
     settings_url = f"/businesses/{business_id}/invoice-settings/"
     if request("PATCH", settings_url, {"bill_phone": "1"}, token=manager_access)[0] != 403:
-        fail("invoices: a Manager should get 403 on invoice settings")
+        fail("invoices: a Manager should get 403 on changing invoice settings")
+    status, body, _ = request("GET", settings_url, token=manager_access)
+    if status != 200 or body["invoice_tax_enabled"] is not True:
+        fail(f"invoices: a Manager should be able to READ invoice settings, got {status} ({body})")
+    if request("GET", settings_url, token=chef_access)[0] != 403:
+        fail("invoices: a Head chef should get 403 reading invoice settings")
     void_url = f"{url}{second_id}/void/"
     if request("POST", void_url, {"reason": "x"}, token=manager_access)[0] != 403:
         fail("invoices: a Manager should get 403 on void")

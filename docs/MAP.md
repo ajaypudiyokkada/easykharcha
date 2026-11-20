@@ -58,7 +58,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `wastage/` — wastage entries; models.py (WastageEntry — Step U1b-1 widened `unit_cost_at_entry`
   to 4dp/12 digits, matching `usual_price`), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
-- `invoices/` — Step S3b: Create Invoice (customer bill, not a tax invoice); models.py (Invoice, InvoiceLine, InvoiceSequence), service.py (`create_invoice`: sequence row `select_for_update` + invoice + one new Sale per line in ONE transaction; `void_invoice`), views.py, urls.py. Endpoints: `GET/POST businesses/<id>/invoices/`, `GET .../invoices/<iid>/`, `POST .../invoices/<iid>/void/` (Owner, `sales.delete`), `GET/PATCH businesses/<id>/invoice-settings/` (Owner, `settings.manage`: tax on/off + rate, bill address/phone/GSTIN — fields on `BusinessSettings`).
+- `invoices/` — Step S3b: Create Invoice (customer bill, not a tax invoice); models.py (Invoice, InvoiceLine, InvoiceSequence), service.py (`create_invoice`: sequence row `select_for_update` + invoice + one new Sale per line in ONE transaction; `void_invoice`), views.py, urls.py. Endpoints: `GET/POST businesses/<id>/invoices/`, `GET .../invoices/<iid>/`, `POST .../invoices/<iid>/void/` (Owner, `sales.delete`), `GET/PATCH businesses/<id>/invoice-settings/` (GET: `sales.create`; PATCH Owner, `settings.manage`: tax on/off + rate, bill address/phone/GSTIN — fields on `BusinessSettings`).
 - `alerts/` — Step 15: alerts computed on read (opening_late/closing_late — Step 23b's split of the
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon, Step 41b1b3a's
   low_stock — daily-keyed, text carries no money), never scheduled;
@@ -399,6 +399,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
   that screen to show its own toast/reload — the Toast's `onHide` clears the query, not the save
   itself, since expo-router's web Stack doesn't remount on the way back and clearing it immediately
   would drop the just-set toast state before it paints)
+- `invoices/new.tsx` — Step S3c: Create invoice (`sales.create`): form (date, phone, name, items, Add item sheet, totals) -> review -> success / "already created" (HTTP 201 vs 200 via `api()`'s `onResponse`); draft + idempotency key in `src/invoices/draft.ts`; `invoices/settings.tsx` — Owner-only bill settings (Manager is redirected back). Maths in `src/invoices/money.ts` (whole paise; `scripts/check_invoice_totals_parity.mjs` proves it matches the backend), rules in `validate.ts`, `DateField.tsx`; strings `strings.invoice`; `api/invoices.ts` types
 - `team/index.tsx` — Team list (Owner: full + "Add team member"; Manager: view-only); `team/[id].tsx`
   — member detail (Owner: Change role, Reset PIN/password, Remove from team; Manager: read-only)
 - `settings/index.tsx` — Settings hub (Owner only); `settings/business.tsx`, `settings/brand.tsx` —

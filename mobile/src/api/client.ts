@@ -41,6 +41,8 @@ export class ApiError extends Error {
    * looks unusual. Never a number, by design — see counts/exceptions.py's NeedsConfirmation. */
   itemIds?: number[];
   itemsSummary?: ItemsSummary;
+  /** Present only on a 400 that names bad fields (e.g. invoices/) — field name -> message. */
+  fieldErrors?: Record<string, string>;
 
   constructor(
     kind: ApiErrorKind,
@@ -50,6 +52,7 @@ export class ApiError extends Error {
     rowErrors?: RowError[],
     itemIds?: number[],
     itemsSummary?: ItemsSummary,
+    fieldErrors?: Record<string, string>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -59,6 +62,7 @@ export class ApiError extends Error {
     this.rowErrors = rowErrors;
     this.itemIds = itemIds;
     this.itemsSummary = itemsSummary;
+    this.fieldErrors = fieldErrors;
   }
 }
 
@@ -69,6 +73,9 @@ export type RequestOptions = {
   body?: unknown;
   /** Sent as `Authorization: Bearer <token>` when present. */
   token?: string;
+  /** Called with the HTTP status of a successful response — for the rare endpoint where 201 vs 200
+   * means different things (invoices/: created vs. a replay of the same idempotency key). */
+  onResponse?: (status: number) => void;
 };
 
 /**
@@ -138,6 +145,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
       row_errors?: RowError[];
       item_ids?: number[];
       items_summary?: ItemsSummary;
+      field_errors?: Record<string, string>;
     } | null;
     const message = shaped?.error?.message ?? `The server returned an error (${response.status}).`;
     throw new ApiError(
@@ -148,8 +156,10 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
       shaped?.row_errors,
       shaped?.item_ids,
       shaped?.items_summary,
+      shaped?.field_errors,
     );
   }
 
+  options.onResponse?.(response.status);
   return body as T;
 }

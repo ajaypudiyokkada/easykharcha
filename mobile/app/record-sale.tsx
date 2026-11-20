@@ -57,6 +57,9 @@ export default function RecordSaleHub() {
   }
 
   const goBack = () => router.replace(backPath);
+  const invoicePath = `/invoices/new?returnTo=${returnsToSales ? 'sales' : 'home'}${
+    params.date ? `&date=${params.date}` : ''
+  }`;
 
   if (!can(permissions, 'sales.create')) {
     return (
@@ -69,14 +72,19 @@ export default function RecordSaleHub() {
 
   const renderOption = (option: { key: OptionKey; icon: IconName }) => {
     const copy = s.options[option.key];
-    const comingSoon = option.key !== 'manual';
+    const comingSoon = option.key !== 'manual' && option.key !== 'invoice';
+    const badge = comingSoon ? s.comingSoonBadge : option.key === 'manual' ? s.fastestBadge : null;
     return (
       <Pressable
         key={option.key}
         accessibilityRole="button"
         accessibilityLabel={copy.title}
         style={styles.option}
-        onPress={() => (comingSoon ? setComingSoonKey(option.key) : setManualVisible(true))}
+        onPress={() => {
+          if (comingSoon) setComingSoonKey(option.key);
+          else if (option.key === 'invoice') router.push(invoicePath);
+          else setManualVisible(true);
+        }}
       >
         <View style={styles.optionIcon}>
           <Icon name={option.icon} size={type.lg} colour={colours.primary} />
@@ -84,11 +92,13 @@ export default function RecordSaleHub() {
         <View style={styles.optionCopy}>
           <View style={styles.titleRow}>
             <Body style={styles.optionTitle}>{copy.title}</Body>
-            <View style={[styles.badge, comingSoon ? styles.badgeMuted : null]}>
-              <Small style={[styles.badgeText, comingSoon ? styles.badgeTextMuted : null]}>
-                {comingSoon ? s.comingSoonBadge : s.fastestBadge}
-              </Small>
-            </View>
+            {badge ? (
+              <View style={[styles.badge, comingSoon ? styles.badgeMuted : null]}>
+                <Small style={[styles.badgeText, comingSoon ? styles.badgeTextMuted : null]}>
+                  {badge}
+                </Small>
+              </View>
+            ) : null}
           </View>
           <Small style={styles.optionDesc}>{copy.desc}</Small>
         </View>
