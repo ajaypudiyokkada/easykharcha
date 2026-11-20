@@ -9,6 +9,7 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { formatDate } from '../../src/format';
 import { DateField } from '../../src/invoices/DateField';
+import { InvoiceActions } from '../../src/invoices/InvoiceActions';
 import {
   emptyDraft,
   invoiceDraftStorage,
@@ -98,7 +99,6 @@ export default function CreateInvoice() {
   const [failed, setFailed] = useState(false);
   const [addVisible, setAddVisible] = useState(false);
   const [cancelVisible, setCancelVisible] = useState(false);
-  const [recentVisible, setRecentVisible] = useState(false);
   const savingRef = useRef(false);
 
   // Restore a saved draft, or start a fresh one (and so a fresh idempotency key).
@@ -429,7 +429,7 @@ export default function CreateInvoice() {
           right={
             <Pressable
               accessibilityRole="button"
-              onPress={() => setRecentVisible(true)}
+              onPress={() => router.push('/invoices')}
               style={styles.linkBtn}
             >
               <Small style={styles.linkText}>{s.recentInvoices}</Small>
@@ -526,19 +526,6 @@ export default function CreateInvoice() {
           lines={lines}
           onAdd={addItem}
           onDone={() => setAddVisible(false)}
-        />
-      </Sheet>
-
-      <Sheet
-        visible={recentVisible}
-        onClose={() => setRecentVisible(false)}
-        title={s.recentSoon.title}
-      >
-        <Body style={styles.sheetMessage}>{s.recentSoon.message}</Body>
-        <Button
-          label={s.recentSoon.close}
-          variant="secondary"
-          onPress={() => setRecentVisible(false)}
         />
       </Sheet>
 
@@ -825,6 +812,7 @@ function ResultView({
               taxRateLabel={String(Number(invoice.tax_rate))}
             />
           </View>
+          <InvoiceActions invoice={invoice} />
           <Button label={s.already.done} variant="primary" onPress={onDone} />
         </>
       ) : (
@@ -842,6 +830,7 @@ function ResultView({
             />
             <SummaryRow label={s.success.total} value={money(invoice.total)} />
           </View>
+          <InvoiceActions invoice={invoice} />
           <Button label={s.success.done} variant="primary" onPress={onDone} />
         </>
       )}

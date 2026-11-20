@@ -33,6 +33,7 @@ type Row = {
 const BUSINESS_ROWS: Row[] = [
   { key: 'business', label: s.businessDetails, icon: 'home', href: '/settings/business' },
   { key: 'brand', label: s.brand, icon: 'settings', href: '/settings/brand' },
+  { key: 'bill', label: s.billSettings, icon: 'invoice', href: '/invoices/settings' },
 ];
 
 const STOCK_ROWS: Row[] = [
