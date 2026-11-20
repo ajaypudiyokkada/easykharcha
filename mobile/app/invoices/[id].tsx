@@ -32,7 +32,17 @@ const LIST_PATH = '/invoices';
 
 export default function InvoiceDetail() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, from, returnTo } = useLocalSearchParams<{
+    id: string;
+    from?: string;
+    returnTo?: string;
+  }>();
+  // Opened from an import's "View earlier invoice": going back returns to that review (its choices
+  // were saved on the device), not to the invoice list.
+  const backPath =
+    from === 'import'
+      ? `/import-invoice?returnTo=${returnTo === 'sales' ? 'sales' : 'home'}`
+      : LIST_PATH;
   const { status, user, businesses, authedFetch } = useAuth();
   const business = businesses[0];
   const permissions = business?.permissions ?? [];
@@ -171,7 +181,7 @@ export default function InvoiceDetail() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Go back"
-            onPress={() => router.replace(LIST_PATH)}
+            onPress={() => router.replace(backPath)}
             style={styles.backBtn}
           >
             <Icon name="back" size={22} colour={colours.text} />
@@ -240,7 +250,7 @@ export default function InvoiceDetail() {
             <Button
               label={s.backToInvoices}
               variant="secondary"
-              onPress={() => router.replace(LIST_PATH)}
+              onPress={() => router.replace(backPath)}
             />
           </>
         ) : null}

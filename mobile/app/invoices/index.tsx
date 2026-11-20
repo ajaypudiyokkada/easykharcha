@@ -7,6 +7,7 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { billDate } from '../../src/invoices/billText';
 import { formatPaise, parseScaled } from '../../src/invoices/money';
+import { modeLabel } from '../../src/invoices/PaymentPicker';
 import { maskPhone } from '../../src/invoices/validate';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
@@ -18,12 +19,19 @@ const FORM_PATH = '/invoices/new';
 
 type Filter = 'all' | 'posted' | 'void';
 type PayFilter = 'any' | 'unpaid' | 'paid';
+type SourceFilter = 'any' | 'created' | 'imported';
 type Page = { count: number; next: string | null; results: Invoice[] };
 
 const PAY_FILTERS: { key: PayFilter; label: string }[] = [
   { key: 'any', label: strings.invoice.payment.filterAny },
   { key: 'unpaid', label: strings.invoice.payment.filterUnpaid },
   { key: 'paid', label: strings.invoice.payment.filterPaid },
+];
+
+const SOURCE_FILTERS: { key: SourceFilter; label: string }[] = [
+  { key: 'any', label: strings.importInvoice.list.anySource },
+  { key: 'created', label: strings.importInvoice.list.createdHere },
+  { key: 'imported', label: strings.importInvoice.list.fromBill },
 ];
 
 const FILTERS: { key: Filter; label: string }[] = [
@@ -40,6 +48,7 @@ export default function RecentInvoices() {
 
   const [filter, setFilter] = useState<Filter>('all');
   const [payFilter, setPayFilter] = useState<PayFilter>('any');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('any');
   const [rows, setRows] = useState<Invoice[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -48,14 +57,15 @@ export default function RecentInvoices() {
 
   const businessId = business?.id;
   const load = useCallback(
-    (nextPage: number, which: Filter, pay: PayFilter) => {
+    (nextPage: number, which: Filter, pay: PayFilter, source: SourceFilter) => {
       if (!businessId) return;
       setLoading(true);
       setFailed(false);
       const query =
         `page=${nextPage}` +
         (which === 'all' ? '' : `&status=${which}`) +
-        (pay === 'any' ? '' : `&payment_status=${pay}`);
+        (pay === 'any' ? '' : `&payment_status=${pay}`) +
+        (source === 'any' ? '' : `&source=${source}`);
       authedFetch<Page>(`/businesses/${businessId}/invoices/?${query}`)
         .then((response) => {
           setRows((current) =>
@@ -72,8 +82,8 @@ export default function RecentInvoices() {
 
   useEffect(() => {
     setRows([]);
-    load(1, filter, payFilter);
-  }, [filter, payFilter, load]);
+    load(1, filter, payFilter, sourceFilter);
+  }, [filter, payFilter, sourceFilter, load]);
 
   if (status === 'bootstrapping') {
     return (
@@ -145,13 +155,30 @@ export default function RecentInvoices() {
           })}
         </View>
 
+        <View style={styles.chips}>
+          {SOURCE_FILTERS.map((f) => {
+            const active = f.key === sourceFilter;
+            return (
+              <Pressable
+                key={f.key}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active }}
+                onPress={() => setSourceFilter(f.key)}
+                style={[styles.chip, active ? styles.chipActive : null]}
+              >
+                <Small style={active ? styles.chipTextActive : styles.chipText}>{f.label}</Small>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {failed ? (
           <View style={styles.stack}>
             <Banner kind="error">{s.loadFailed}</Banner>
             <Button
               label={s.tryAgain}
               variant="secondary"
-              onPress={() => load(1, filter, payFilter)}
+              onPress={() => load(1, filter, payFilter, sourceFilter)}
             />
           </View>
         ) : null}
@@ -170,7 +197,7 @@ export default function RecentInvoices() {
           <Button
             label={s.loadMore}
             variant="secondary"
-            onPress={() => load(page + 1, filter, payFilter)}
+            onPress={() => load(page + 1, filter, payFilter, sourceFilter)}
           />
         ) : null}
 
@@ -198,11 +225,22 @@ export default function RecentInvoices() {
 function InvoiceRow({ invoice, onPress }: { invoice: Invoice; onPress: () => void }) {
   const voided = invoice.status === 'void';
   const paid = invoice.payment_status === 'paid';
-  const meta = [
-    billDate(invoice.sale_date),
-    invoice.customer_name || (invoice.customer_phone ? null : s.noCustomer),
-    invoice.customer_phone ? maskPhone(invoice.customer_phone) : null,
-  ]
+  const imported = invoice.source === 'imported';
+  const il = strings.importInvoice.list;
+  const meta = (
+    imported
+      ? [
+          billDate(invoice.sale_date),
+          paid
+            ? `${strings.invoice.payment.paid} · ${modeLabel(invoice.payment_mode)}`
+            : il.importedMeta,
+        ]
+      : [
+          billDate(invoice.sale_date),
+          invoice.customer_name || (invoice.customer_phone ? null : s.noCustomer),
+          invoice.customer_phone ? maskPhone(invoice.customer_phone) : null,
+        ]
+  )
     .filter(Boolean)
     .join(' · ');
   return (
@@ -213,7 +251,21 @@ function InvoiceRow({ invoice, onPress }: { invoice: Invoice; onPress: () => voi
       style={styles.row}
     >
       <View style={styles.rowTop}>
-        <Body style={[styles.title, styles.flex]}>{invoice.number}</Body>
+        <Body style={[styles.title, styles.flex]}>
+          {imported && invoice.bill_number_printed
+            ? il.billRow(invoice.bill_number_printed)
+            : invoice.number}
+        </Body>
+        {imported ? (
+          <View style={[styles.pill, styles.pillActive]}>
+            <Small style={styles.pillActiveText}>{il.fromBill}</Small>
+          </View>
+        ) : null}
+        {imported && invoice.partly_recorded ? (
+          <View style={[styles.pill, styles.pillVoid]}>
+            <Small style={styles.pillVoidText}>{il.partly}</Small>
+          </View>
+        ) : null}
         <View style={[styles.pill, voided ? styles.pillVoid : styles.pillActive]}>
           <Small style={voided ? styles.pillVoidText : styles.pillActiveText}>
             {voided ? s.statusVoided : s.statusActive}
@@ -227,7 +279,11 @@ function InvoiceRow({ invoice, onPress }: { invoice: Invoice; onPress: () => voi
       </View>
       <Small style={styles.muted}>{meta}</Small>
       <View style={styles.rowTop}>
-        <Small style={[styles.muted, styles.flex]}>{s.itemCount(invoice.lines.length)}</Small>
+        <Small style={[styles.muted, styles.flex]}>
+          {imported && invoice.partly_recorded
+            ? il.itemsOf(invoice.lines_recorded, invoice.lines_total)
+            : s.itemCount(imported ? invoice.lines_recorded : invoice.lines.length)}
+        </Small>
         <Body style={styles.title}>{formatPaise(parseScaled(invoice.total, 2) ?? 0)}</Body>
       </View>
     </Pressable>

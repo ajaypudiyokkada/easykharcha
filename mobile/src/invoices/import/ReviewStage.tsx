@@ -21,6 +21,7 @@ import { formatPaise, parseScaled } from '../money';
 import { PhotoModal, usePhotoUrl } from '../usePhotoUrl';
 import { isOldDate, isValidIsoDate } from '../validate';
 import { PickItemSheet } from './PickItemSheet';
+import { modeLabel, PaymentPicker } from '../PaymentPicker';
 
 const s = strings.importInvoice.review;
 
@@ -49,6 +50,8 @@ type Props = {
   onConfirmed: (invoice: Invoice) => void;
   onManual: () => void;
   onBack: () => void;
+  /** Opens an earlier invoice's detail (from a duplicate or same-photo banner). */
+  onViewEarlier: (invoiceId: number) => void;
 };
 
 export function ReviewStage({
@@ -60,6 +63,7 @@ export function ReviewStage({
   onConfirmed,
   onManual,
   onBack,
+  onViewEarlier,
 }: Props) {
   const { authedFetch } = useAuth();
   const draft = imp.draft!;
@@ -74,6 +78,7 @@ export function ReviewStage({
   const [dateError, setDateError] = useState<string | null>(null);
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [forceAddAnyway, setForceAddAnyway] = useState(false);
+  const [paymentErrors, setPaymentErrors] = useState<{ mode?: string; proof?: string }>({});
   const savingRef = useRef(false);
 
   const photoPath =
@@ -145,6 +150,10 @@ export function ReviewStage({
     skipCount > 0
       ? s.addPartial(itemCount, itemCount + skipCount)
       : s.addItems(itemCount, dateValid ? shortDate(saleDate) : '').replace('  ', ' ');
+  const payment = progress.payment;
+  // Paid needs a mode, and a proof photo for every mode except cash. Unpaid needs nothing.
+  const paymentIncomplete =
+    payment.paid && (payment.mode === '' || (payment.mode !== 'cash' && payment.proofId === null));
   const ready =
     undecidedCount === 0 &&
     dateValid &&
@@ -152,6 +161,7 @@ export function ReviewStage({
     itemCount > 0 &&
     (skipCount === 0 || progress.acceptPartial) &&
     (!needsAddAnyway || progress.addAnyway) &&
+    !paymentIncomplete &&
     !saving;
 
   async function confirm() {
@@ -161,6 +171,7 @@ export function ReviewStage({
     setFailed(false);
     setDateError(null);
     setLineErrors({});
+    setPaymentErrors({});
     let status = 0;
     try {
       const invoice = await authedFetch<Invoice>(
@@ -184,6 +195,16 @@ export function ReviewStage({
             })),
             accept_partial: skipCount > 0 && progress.acceptPartial,
             add_anyway: needsAddAnyway && progress.addAnyway,
+            ...(payment.paid && payment.mode
+              ? {
+                  payment: {
+                    mode: payment.mode,
+                    ...(payment.mode !== 'cash' && payment.proofId !== null
+                      ? { proof_id: payment.proofId }
+                      : {}),
+                  },
+                }
+              : {}),
           },
         },
       );
@@ -201,6 +222,16 @@ export function ReviewStage({
         let placed = false;
         if (fields.sale_date) {
           setDateError(s.dateFuture);
+          placed = true;
+        }
+        if (fields.payment_mode) {
+          setPaymentErrors({ mode: strings.invoice.payment.modeRequired });
+          placed = true;
+        }
+        if (fields.proof_id) {
+          // The proof is missing, used or expired: drop it and ask for the photo again.
+          setPaymentErrors({ proof: strings.invoice.payment.proofInvalid });
+          onProgress({ ...progress, payment: { ...payment, proofId: null } });
           placed = true;
         }
         if (fields.add_anyway) {
@@ -306,17 +337,21 @@ export function ReviewStage({
         </Banner>
       ))}
       {find('REPRINT_COPY').length > 0 ? <Banner kind="warning">{s.reprint}</Banner> : null}
-      {duplicateChecks.map((c, i) =>
-        c.code === 'SAME_PHOTO' ? (
-          <Banner key={`d${i}`} kind="warning">
-            {s.samePhoto}
+      {duplicateChecks.map((c, i) => (
+        <View key={`d${i}`} style={styles.gap}>
+          <Banner kind="warning">
+            {c.code === 'SAME_PHOTO'
+              ? s.samePhoto
+              : s.duplicate(String(c.data.number), shortDate(String(c.data.date)))}
           </Banner>
-        ) : (
-          <Banner key={`d${i}`} kind="warning">
-            {s.duplicate(String(c.data.number), shortDate(String(c.data.date)))}
-          </Banner>
-        ),
-      )}
+          {typeof c.data.invoice_id === 'number' ? (
+            <LinkButton
+              label={s.viewEarlier}
+              onPress={() => onViewEarlier(c.data.invoice_id as number)}
+            />
+          ) : null}
+        </View>
+      ))}
       {forceAddAnyway && duplicateChecks.length === 0 ? (
         <Banner kind="warning">{strings.importInvoice.review.samePhoto}</Banner>
       ) : null}
@@ -404,6 +439,32 @@ export function ReviewStage({
           value={money(draft.grand_total)}
           strong
           pill={lowFields.has('grand_total')}
+        />
+      </View>
+
+      {/* --- payment (optional) --- */}
+      <View style={styles.card}>
+        <Heading level={3}>{s.paymentOptional}</Heading>
+        <Small style={styles.muted}>{s.paymentHint}</Small>
+        {draft.payment_mode ? (
+          <Small style={styles.muted}>
+            {s.billSays(draft.payment_mode === 'other' ? 'Other' : modeLabel(draft.payment_mode))}
+          </Small>
+        ) : null}
+        <PaymentPicker
+          allowUnpaid
+          value={payment}
+          onChange={(next) => {
+            setPaymentErrors({});
+            onProgress({ ...progress, payment: next });
+          }}
+          modeError={paymentErrors.mode}
+          proofError={
+            paymentErrors.proof ??
+            (paymentIncomplete && payment.mode !== ''
+              ? strings.invoice.payment.proofRequired
+              : undefined)
+          }
         />
       </View>
 

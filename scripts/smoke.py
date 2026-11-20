@@ -8262,6 +8262,15 @@ def check_invoice_imports_flow() -> None:
         fail(f"invoice imports: unexpected detail fields {first}")
     print("OK - all five canned bills read to ready with the printed numbers copied, not worked out.")
 
+    # The dev switch: with AI_FAKE on, an upload that names no fixture gets AI_FAKE_DEFAULT_FIXTURE.
+    status, body, _ = upload(bill_jpeg(123))
+    wanted = dj_settings.AI_FAKE_DEFAULT_FIXTURE
+    expected_number = {"fomo_14753": "14753", "fomo_14751": "14751", "spice_route": "KOL/26-27/004521",
+                       "bhagini": "7767", "meat_my_truk": "2073"}.get(wanted)
+    if status != 202 or body["status"] != "ready" or (expected_number and body["draft"]["bill_number"] != expected_number):
+        fail(f"invoice imports: an upload with no fixture should use AI_FAKE_DEFAULT_FIXTURE ({wanted}), got {status} ({body})")
+    print("OK - with AI_FAKE on, an upload with no fixture uses AI_FAKE_DEFAULT_FIXTURE.")
+
     status, body, _ = upload(bill_jpeg(9), fixture="unreadable")
     if status != 202 or body["status"] != "failed" or body["error_code"] != "NOT_READABLE" or body["error_reason"] != "blurred":
         fail(f"invoice imports: the unreadable fixture should fail NOT_READABLE/blurred, got {status} ({body})")
@@ -8272,7 +8281,7 @@ def check_invoice_imports_flow() -> None:
     # --- nothing is posted, no customer fields, usage is logged ---
     if posted_counts() != before_posted:
         fail("invoice imports: reading a bill must create no invoice and no sale")
-    if AiUsage.objects.filter(business_id=business_id, kind="invoice_read").count() != usage_before + 6:
+    if AiUsage.objects.filter(business_id=business_id, kind="invoice_read").count() != usage_before + 7:
         fail("invoice imports: every read should be logged in AiUsage (kind invoice_read)")
 
     def all_keys(value):
