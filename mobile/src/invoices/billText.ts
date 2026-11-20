@@ -21,6 +21,8 @@ export type BillInvoice = {
   tax_rate: string;
   tax_amount: string;
   total: string;
+  payment_status: 'paid' | 'unpaid';
+  payment_mode: string;
   lines: { name: string; quantity: string; rate: string; amount: string }[];
 };
 
@@ -35,6 +37,20 @@ export function billDate(isoDate: string): string {
 const paise = (value: string): number => parseScaled(value, 2) ?? 0;
 const money = (value: string): string => formatPaise(paise(value));
 const quantity = (value: string): string => String(Number(value));
+
+const MODE_WORDS: Record<string, string> = {
+  cash: 'cash',
+  upi: 'UPI',
+  card: 'card',
+  bank_transfer: 'bank transfer',
+};
+
+/** "Payment: Paid by UPI" or "Payment: Unpaid". */
+function paymentLine(invoice: BillInvoice): string {
+  if (invoice.payment_status !== 'paid') return 'Payment: Unpaid';
+  const word = MODE_WORDS[invoice.payment_mode];
+  return word ? `Payment: Paid by ${word}` : 'Payment: Paid';
+}
 
 function chargedTax(invoice: BillInvoice): boolean {
   return paise(invoice.tax_amount) > 0;
@@ -67,6 +83,7 @@ export function buildBillLines(business: BillBusiness, invoice: BillInvoice): st
     lines.push(`${taxLabel(invoice)}: ${money(invoice.tax_amount)}`);
   }
   lines.push(`Total: ${money(invoice.total)}`);
+  lines.push(paymentLine(invoice));
   lines.push('Thank you.');
   return lines;
 }
@@ -132,6 +149,7 @@ export function buildReceiptLines(
   }
   lines.push(leftRight('TOTAL', money(invoice.total), width));
   lines.push(rule);
+  for (const row of wrap(paymentLine(invoice), width)) lines.push(row);
   lines.push(center('Thank you.', width));
   return lines;
 }

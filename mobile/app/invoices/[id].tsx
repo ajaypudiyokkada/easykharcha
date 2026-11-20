@@ -2,11 +2,14 @@ import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
+import { ApiError } from '../../src/api/client';
+
 import type { Invoice } from '../../src/api/invoices';
 import { useAuth } from '../../src/auth/AuthContext';
 import { can } from '../../src/auth/permissions';
 import { InvoiceActions } from '../../src/invoices/InvoiceActions';
 import { InvoiceBody } from '../../src/invoices/InvoiceBody';
+import { PaymentPicker, UNPAID, type PaymentValue } from '../../src/invoices/PaymentPicker';
 import { strings } from '../../src/strings';
 import { colours, fonts, radii, spacing } from '../../src/theme/tokens';
 import {
@@ -24,6 +27,7 @@ import {
 import { MIN_TOUCH_TARGET } from '../../src/ui/constants';
 
 const s = strings.invoice.manage;
+const pay = strings.invoice.payment;
 const LIST_PATH = '/invoices';
 
 export default function InvoiceDetail() {
@@ -40,6 +44,14 @@ export default function InvoiceDetail() {
   const [reason, setReason] = useState('');
   const [voiding, setVoiding] = useState(false);
   const [voidFailed, setVoidFailed] = useState(false);
+  const [payVisible, setPayVisible] = useState(false);
+  const [payment, setPayment] = useState<PaymentValue>({ ...UNPAID, paid: true });
+  const [payErrors, setPayErrors] = useState<{ mode?: string; proof?: string }>({});
+  const [payFailed, setPayFailed] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [unpaidVisible, setUnpaidVisible] = useState(false);
+  const [unpaying, setUnpaying] = useState(false);
+  const [unpaidFailed, setUnpaidFailed] = useState(false);
 
   const load = useCallback(() => {
     if (!business || !id) return;
@@ -92,6 +104,65 @@ export default function InvoiceDetail() {
     }
   }
 
+  async function confirmMarkPaid() {
+    if (!invoice || paying) return;
+    const found: { mode?: string; proof?: string } = {};
+    if (payment.mode === '') found.mode = pay.modeRequired;
+    else if (payment.mode !== 'cash' && payment.proofId === null) found.proof = pay.proofRequired;
+    setPayErrors(found);
+    setPayFailed(null);
+    if (found.mode || found.proof) return;
+    setPaying(true);
+    try {
+      const updated = await authedFetch<Invoice>(
+        `/businesses/${businessId}/invoices/${invoice.id}/mark-paid/`,
+        {
+          method: 'POST',
+          body: {
+            mode: payment.mode,
+            ...(payment.mode !== 'cash' && payment.proofId !== null
+              ? { proof_id: payment.proofId }
+              : {}),
+          },
+        },
+      );
+      // A 200 for an invoice that was already paid just returns its current state: show that.
+      setInvoice(updated);
+      setPayVisible(false);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400 && err.fieldErrors?.proof_id) {
+        setPayment((current) => ({ ...current, proofId: null }));
+        setPayErrors({ proof: pay.proofInvalid });
+      } else if (err instanceof ApiError && err.status === 400 && err.fieldErrors?.payment_mode) {
+        setPayErrors({ mode: pay.modeRequired });
+      } else if (err instanceof ApiError && err.status === 409) {
+        setPayFailed(pay.conflict);
+      } else {
+        setPayFailed(pay.markPaidFailed);
+      }
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  async function confirmMarkUnpaid() {
+    if (!invoice || unpaying) return;
+    setUnpaying(true);
+    setUnpaidFailed(false);
+    try {
+      const updated = await authedFetch<Invoice>(
+        `/businesses/${businessId}/invoices/${invoice.id}/mark-unpaid/`,
+        { method: 'POST', body: {} },
+      );
+      setInvoice(updated);
+      setUnpaidVisible(false);
+    } catch {
+      setUnpaidFailed(true);
+    } finally {
+      setUnpaying(false);
+    }
+  }
+
   const voided = invoice?.status === 'void';
   return (
     <Screen>
@@ -133,6 +204,27 @@ export default function InvoiceDetail() {
             ) : (
               <>
                 <InvoiceActions invoice={invoice} />
+                {invoice.payment_status === 'unpaid' ? (
+                  <Button
+                    label={pay.markPaid}
+                    variant="secondary"
+                    onPress={() => {
+                      setPayment({ ...UNPAID, paid: true });
+                      setPayErrors({});
+                      setPayFailed(null);
+                      setPayVisible(true);
+                    }}
+                  />
+                ) : isOwner ? (
+                  <Button
+                    label={pay.markUnpaid}
+                    variant="secondary"
+                    onPress={() => {
+                      setUnpaidFailed(false);
+                      setUnpaidVisible(true);
+                    }}
+                  />
+                ) : null}
                 {isOwner ? (
                   <Button
                     label={s.voidButton}
@@ -153,6 +245,57 @@ export default function InvoiceDetail() {
           </>
         ) : null}
       </View>
+
+      <Sheet visible={payVisible} onClose={() => setPayVisible(false)} title={pay.markPaidTitle}>
+        <View style={styles.stack}>
+          {payFailed ? <Banner kind="error">{payFailed}</Banner> : null}
+          <PaymentPicker
+            allowUnpaid={false}
+            value={payment}
+            onChange={(next) => {
+              setPayment(next);
+              setPayErrors({});
+            }}
+            modeError={payErrors.mode}
+            proofError={payErrors.proof}
+          />
+          <Button
+            label={pay.markPaidConfirm}
+            variant="primary"
+            onPress={confirmMarkPaid}
+            loading={paying}
+          />
+          <Button
+            label={strings.invoice.manage.voidSheet.keep}
+            variant="secondary"
+            onPress={() => setPayVisible(false)}
+            disabled={paying}
+          />
+        </View>
+      </Sheet>
+
+      <Sheet
+        visible={unpaidVisible}
+        onClose={() => setUnpaidVisible(false)}
+        title={pay.unpaidTitle}
+      >
+        <View style={styles.stack}>
+          <Body>{pay.unpaidBody}</Body>
+          {unpaidFailed ? <Banner kind="error">{pay.unpaidFailed}</Banner> : null}
+          <Button
+            label={pay.unpaidConfirm}
+            variant="primary"
+            onPress={confirmMarkUnpaid}
+            loading={unpaying}
+          />
+          <Button
+            label={pay.unpaidKeep}
+            variant="secondary"
+            onPress={() => setUnpaidVisible(false)}
+            disabled={unpaying}
+          />
+        </View>
+      </Sheet>
 
       <Sheet visible={voidVisible} onClose={() => setVoidVisible(false)} title={s.voidSheet.title}>
         <View style={styles.stack}>

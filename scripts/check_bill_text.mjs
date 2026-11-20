@@ -52,6 +52,8 @@ const invoice = {
   tax_rate: "5.00",
   tax_amount: "34.00",
   total: "714.00",
+  payment_status: "paid",
+  payment_mode: "upi",
   lines: [
     {
       name: "Chicken Fried Rice",
@@ -94,6 +96,7 @@ expect(
     "Subtotal: ₹680",
     "Tax 5%: ₹34",
     "Total: ₹714",
+    "Payment: Paid by UPI",
     "Thank you.",
   ].join("\n"),
 );
@@ -104,6 +107,8 @@ const noTax = {
   tax_rate: "0.00",
   tax_amount: "0.00",
   total: "680.00",
+  payment_status: "unpaid",
+  payment_mode: "",
 };
 const bare = { name: "Shop", address: "", phone: " ", gstin: "" };
 expect(
@@ -120,6 +125,7 @@ expect(
     "Water Bottle",
     "3 × ₹20 = ₹60",
     "Total: ₹680",
+    "Payment: Unpaid",
     "Thank you.",
   ].join("\n"),
 );
@@ -161,6 +167,20 @@ for (const [label, inv] of [
   }
 }
 
+for (const [mode, word] of [
+  ["cash", "cash"],
+  ["card", "card"],
+  ["bank_transfer", "bank transfer"],
+]) {
+  const text = buildBillText(bare, { ...invoice, payment_mode: mode });
+  if (!text.includes(`Payment: Paid by ${word}\nThank you.`)) {
+    failures.push(`payment line for ${mode} should read "Paid by ${word}" just before "Thank you."`);
+  }
+}
+if (!buildReceiptLines(full, invoice).some((r) => r === "Payment: Paid by UPI")) {
+  failures.push("the receipt should carry the payment line");
+}
+
 if (/tax invoice/i.test(buildBillText(full, invoice)))
   failures.push('the bill must never say "tax invoice"');
 
@@ -169,5 +189,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(
-  "check_bill_text: WhatsApp text and receipt layout match the prototype (6 checks).",
+  "check_bill_text: WhatsApp text and receipt layout match the prototype (payment line included).",
 );

@@ -76,6 +76,9 @@ export type RequestOptions = {
   /** Called with the HTTP status of a successful response — for the rare endpoint where 201 vs 200
    * means different things (invoices/: created vs. a replay of the same idempotency key). */
   onResponse?: (status: number) => void;
+  /** 'blob' returns the raw body (an image) instead of parsed JSON; errors are still the usual
+   * ApiError. Used to show a payment proof, which needs the login token and so can't be a plain URL. */
+  responseType?: 'json' | 'blob';
 };
 
 /**
@@ -130,6 +133,11 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
     throw new ApiError('network', "Can't reach the server. Is the backend running?");
   } finally {
     clearTimeout(timeout);
+  }
+
+  if (options.responseType === 'blob' && response.ok) {
+    options.onResponse?.(response.status);
+    return (await response.blob()) as T;
   }
 
   let body: unknown = null;

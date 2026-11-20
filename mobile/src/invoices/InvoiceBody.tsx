@@ -1,16 +1,19 @@
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { Invoice } from '../api/invoices';
 import { strings } from '../strings';
 import { colours, fonts, radii, spacing, type } from '../theme/tokens';
-import { Body, Small } from '../ui';
+import { Banner, Body, Small } from '../ui';
 import { billDate } from './billText';
 import { formatPaise, parseScaled } from './money';
+import { modeLabel } from './PaymentPicker';
+import { ProofViewer } from './ProofViewer';
 import { formatPhone } from './validate';
 
 const s = strings.invoice;
 const m = strings.invoice.manage;
+const pay = strings.invoice.payment;
 
 const paise = (value: string): number => parseScaled(value, 2) ?? 0;
 
@@ -21,8 +24,11 @@ const paise = (value: string): number => parseScaled(value, 2) ?? 0;
  * the three can't drift apart. */
 export function InvoiceBody({ invoice }: { invoice: Invoice }) {
   const taxCharged = paise(invoice.tax_amount) > 0;
+  const [proofOpen, setProofOpen] = useState(false);
+  const paid = invoice.payment_status === 'paid';
   return (
     <View style={styles.stack}>
+      {invoice.proof_already_used ? <Banner kind="warning">{pay.duplicate}</Banner> : null}
       <View style={styles.card}>
         <InfoRow label={m.body.number} value={invoice.number} />
         <InfoRow label={m.body.date} value={billDate(invoice.sale_date)} />
@@ -32,7 +38,28 @@ export function InvoiceBody({ invoice }: { invoice: Invoice }) {
         {invoice.customer_phone ? (
           <InfoRow label={m.body.phone} value={formatPhone(invoice.customer_phone)} />
         ) : null}
+        <View style={styles.info}>
+          <Small style={styles.muted}>{pay.title}</Small>
+          <View style={styles.payRow}>
+            <View style={[styles.pill, paid ? styles.pillPaid : styles.pillUnpaid]}>
+              <Small style={paid ? styles.pillPaidText : styles.pillUnpaidText}>
+                {paid ? pay.pillPaid(modeLabel(invoice.payment_mode)) : pay.pillUnpaid}
+              </Small>
+            </View>
+            {invoice.proof_available ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setProofOpen(true)}
+                style={styles.link}
+              >
+                <Small style={styles.linkText}>{pay.viewProof}</Small>
+              </Pressable>
+            ) : null}
+            {invoice.proof_removed ? <Small style={styles.muted}>{pay.proofRemoved}</Small> : null}
+          </View>
+        </View>
       </View>
+      <ProofViewer invoiceId={invoice.id} visible={proofOpen} onClose={() => setProofOpen(false)} />
 
       <View style={styles.card}>
         <Body style={styles.title}>{m.items}</Body>
@@ -106,5 +133,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  payRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  pill: {
+    minHeight: 28,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+  },
+  pillPaid: { backgroundColor: colours.mint },
+  pillPaidText: { color: colours.success, fontFamily: fonts.bodyExtraBold },
+  pillUnpaid: { backgroundColor: colours.background, borderWidth: 1, borderColor: colours.warning },
+  pillUnpaidText: { color: colours.warning, fontFamily: fonts.bodyExtraBold },
+  link: { minHeight: 44, justifyContent: 'center' },
+  linkText: { color: colours.primary, fontFamily: fonts.bodyExtraBold },
   totalValue: { fontFamily: fonts.headingBold, fontSize: type.lg },
 });

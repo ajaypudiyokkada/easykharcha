@@ -17,7 +17,14 @@ const s = strings.invoice.manage;
 const FORM_PATH = '/invoices/new';
 
 type Filter = 'all' | 'posted' | 'void';
+type PayFilter = 'any' | 'unpaid' | 'paid';
 type Page = { count: number; next: string | null; results: Invoice[] };
+
+const PAY_FILTERS: { key: PayFilter; label: string }[] = [
+  { key: 'any', label: strings.invoice.payment.filterAny },
+  { key: 'unpaid', label: strings.invoice.payment.filterUnpaid },
+  { key: 'paid', label: strings.invoice.payment.filterPaid },
+];
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: s.filterAll },
@@ -32,6 +39,7 @@ export default function RecentInvoices() {
   const permissions = business?.permissions ?? [];
 
   const [filter, setFilter] = useState<Filter>('all');
+  const [payFilter, setPayFilter] = useState<PayFilter>('any');
   const [rows, setRows] = useState<Invoice[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -40,11 +48,14 @@ export default function RecentInvoices() {
 
   const businessId = business?.id;
   const load = useCallback(
-    (nextPage: number, which: Filter) => {
+    (nextPage: number, which: Filter, pay: PayFilter) => {
       if (!businessId) return;
       setLoading(true);
       setFailed(false);
-      const query = `page=${nextPage}${which === 'all' ? '' : `&status=${which}`}`;
+      const query =
+        `page=${nextPage}` +
+        (which === 'all' ? '' : `&status=${which}`) +
+        (pay === 'any' ? '' : `&payment_status=${pay}`);
       authedFetch<Page>(`/businesses/${businessId}/invoices/?${query}`)
         .then((response) => {
           setRows((current) =>
@@ -61,8 +72,8 @@ export default function RecentInvoices() {
 
   useEffect(() => {
     setRows([]);
-    load(1, filter);
-  }, [filter, load]);
+    load(1, filter, payFilter);
+  }, [filter, payFilter, load]);
 
   if (status === 'bootstrapping') {
     return (
@@ -117,10 +128,31 @@ export default function RecentInvoices() {
           })}
         </View>
 
+        <View style={styles.chips}>
+          {PAY_FILTERS.map((f) => {
+            const active = f.key === payFilter;
+            return (
+              <Pressable
+                key={f.key}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active }}
+                onPress={() => setPayFilter(f.key)}
+                style={[styles.chip, active ? styles.chipActive : null]}
+              >
+                <Small style={active ? styles.chipTextActive : styles.chipText}>{f.label}</Small>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {failed ? (
           <View style={styles.stack}>
             <Banner kind="error">{s.loadFailed}</Banner>
-            <Button label={s.tryAgain} variant="secondary" onPress={() => load(1, filter)} />
+            <Button
+              label={s.tryAgain}
+              variant="secondary"
+              onPress={() => load(1, filter, payFilter)}
+            />
           </View>
         ) : null}
 
@@ -135,7 +167,11 @@ export default function RecentInvoices() {
         {loading ? <ActivityIndicator color={colours.primary} /> : null}
 
         {hasMore && !loading ? (
-          <Button label={s.loadMore} variant="secondary" onPress={() => load(page + 1, filter)} />
+          <Button
+            label={s.loadMore}
+            variant="secondary"
+            onPress={() => load(page + 1, filter, payFilter)}
+          />
         ) : null}
 
         {empty ? (
@@ -161,6 +197,7 @@ export default function RecentInvoices() {
 
 function InvoiceRow({ invoice, onPress }: { invoice: Invoice; onPress: () => void }) {
   const voided = invoice.status === 'void';
+  const paid = invoice.payment_status === 'paid';
   const meta = [
     billDate(invoice.sale_date),
     invoice.customer_name || (invoice.customer_phone ? null : s.noCustomer),
@@ -180,6 +217,11 @@ function InvoiceRow({ invoice, onPress }: { invoice: Invoice; onPress: () => voi
         <View style={[styles.pill, voided ? styles.pillVoid : styles.pillActive]}>
           <Small style={voided ? styles.pillVoidText : styles.pillActiveText}>
             {voided ? s.statusVoided : s.statusActive}
+          </Small>
+        </View>
+        <View style={[styles.pill, paid ? styles.pillActive : styles.pillVoid]}>
+          <Small style={paid ? styles.pillActiveText : styles.pillVoidText}>
+            {paid ? strings.invoice.payment.paid : strings.invoice.payment.unpaid}
           </Small>
         </View>
       </View>
