@@ -20,7 +20,7 @@ export const API_URL: string = process.env.EXPO_PUBLIC_API_URL ?? defaultApiUrl(
 
 export type ApiErrorKind = 'network' | 'timeout' | 'server' | 'offline';
 
-export type RowError = { row: number; field: string; message: string };
+export type RowError = { row: number; field: string; message: string; line_id?: string };
 
 /** Present only on businesses/'s items_decision_needed (409) — see
  * businesses/exceptions.py's ItemsDecisionNeeded. */

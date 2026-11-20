@@ -14,6 +14,7 @@ import { formatPhone } from './validate';
 const s = strings.invoice;
 const m = strings.invoice.manage;
 const pay = strings.invoice.payment;
+const ib = strings.importInvoice.review;
 
 const paise = (value: string): number => parseScaled(value, 2) ?? 0;
 
@@ -24,6 +25,10 @@ const paise = (value: string): number => parseScaled(value, 2) ?? 0;
  * the three can't drift apart. */
 export function InvoiceBody({ invoice }: { invoice: Invoice }) {
   const taxCharged = paise(invoice.tax_amount) > 0;
+  const imported = invoice.source === 'imported';
+  const shownLines = imported
+    ? invoice.lines.filter((line) => line.kind === 'item')
+    : invoice.lines;
   const [proofOpen, setProofOpen] = useState(false);
   const paid = invoice.payment_status === 'paid';
   return (
@@ -63,19 +68,51 @@ export function InvoiceBody({ invoice }: { invoice: Invoice }) {
 
       <View style={styles.card}>
         <Body style={styles.title}>{m.items}</Body>
-        {invoice.lines.map((line) => (
+        {shownLines.map((line) => (
           <View key={line.id} style={styles.line}>
             <View style={styles.flex}>
               <Body style={styles.title}>{line.name}</Body>
               <Small style={styles.muted}>
-                {Number(line.quantity)} × {formatPaise(paise(line.rate))}
+                {Number(line.quantity)} × {formatPaise(paise(line.rate ?? '0'))}
               </Small>
             </View>
-            <Body style={styles.title}>{formatPaise(paise(line.amount))}</Body>
+            <Body style={styles.title}>
+              {formatPaise(paise((imported ? line.recorded_amount : line.amount) ?? '0'))}
+            </Body>
           </View>
         ))}
         <View style={styles.totals}>
-          {taxCharged ? (
+          {imported ? (
+            <>
+              {invoice.printed_items_total !== null ? (
+                <View style={styles.row}>
+                  <Body style={styles.muted}>{ib.itemsTotal}</Body>
+                  <Body>{formatPaise(paise(invoice.printed_items_total))}</Body>
+                </View>
+              ) : null}
+              {paise(invoice.discount_total) > 0 ? (
+                <View style={styles.row}>
+                  <Body style={styles.muted}>{ib.discount}</Body>
+                  <Body>−{formatPaise(paise(invoice.discount_total))}</Body>
+                </View>
+              ) : null}
+              {invoice.tax_lines.map((tax, index) => (
+                <View key={`${tax.label}${index}`} style={styles.row}>
+                  <Body style={styles.muted}>{tax.label}</Body>
+                  <Body>{formatPaise(paise(tax.amount ?? '0'))}</Body>
+                </View>
+              ))}
+              {invoice.round_off !== null ? (
+                <View style={styles.row}>
+                  <Body style={styles.muted}>{ib.roundOff}</Body>
+                  <Body>
+                    {invoice.round_off.startsWith('-') ? '−' : '+'}
+                    {formatPaise(paise(invoice.round_off.replace('-', '')))}
+                  </Body>
+                </View>
+              ) : null}
+            </>
+          ) : taxCharged ? (
             <>
               <View style={styles.row}>
                 <Body style={styles.muted}>{s.subtotal}</Body>

@@ -203,7 +203,7 @@ export default function InvoiceDetail() {
               <Body style={styles.muted}>{s.voidedNote}</Body>
             ) : (
               <>
-                <InvoiceActions invoice={invoice} />
+                {invoice.source === 'imported' ? null : <InvoiceActions invoice={invoice} />}
                 {invoice.payment_status === 'unpaid' ? (
                   <Button
                     label={pay.markPaid}
