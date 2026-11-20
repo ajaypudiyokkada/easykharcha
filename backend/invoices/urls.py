@@ -1,5 +1,10 @@
 from django.urls import path
 
+from .import_views import (
+    InvoiceImportCreateView,
+    InvoiceImportDetailView,
+    InvoiceImportPhotoView,
+)
 from .views import (
     InvoiceDetailView,
     InvoiceListCreateView,
@@ -12,6 +17,21 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "businesses/<int:business_id>/invoice-imports/",
+        InvoiceImportCreateView.as_view(),
+        name="invoice-import-create",
+    ),
+    path(
+        "businesses/<int:business_id>/invoice-imports/<int:import_id>/",
+        InvoiceImportDetailView.as_view(),
+        name="invoice-import-detail",
+    ),
+    path(
+        "businesses/<int:business_id>/invoice-imports/<int:import_id>/photo/",
+        InvoiceImportPhotoView.as_view(),
+        name="invoice-import-photo",
+    ),
     path(
         "businesses/<int:business_id>/invoices/",
         InvoiceListCreateView.as_view(),

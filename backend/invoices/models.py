@@ -165,3 +165,53 @@ class InvoiceLine(models.Model):
 
     def __str__(self) -> str:
         return f"{self.quantity} x {self.name}"
+
+
+class ImportStatus(models.TextChoices):
+    QUEUED = "queued", "queued"
+    READING = "reading", "reading"
+    READY = "ready", "ready"
+    FAILED = "failed", "failed"
+    ABANDONED = "abandoned", "abandoned"
+
+
+class InvoiceImport(models.Model):
+    """One uploaded bill (from another billing system) being read by the AI worker (Step S4a). It
+    only ever holds a DRAFT: nothing here posts a sale or creates an invoice, the owner confirms in a
+    later step. The photo (images only) is a StoredImage in the private store; a PDF is read from a
+    temp file that is deleted right after the job and is never kept."""
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="invoice_imports")
+    status = models.CharField(
+        max_length=10, choices=ImportStatus.choices, default=ImportStatus.QUEUED
+    )
+    # NOT_READABLE, DAILY_LIMIT, AI_UNAVAILABLE, AI_PROVIDER_ERROR, AI_SCHEMA_INVALID, TIMEOUT, ...
+    error_code = models.CharField(max_length=40, blank=True, default="")
+    # For NOT_READABLE: blurred / cropped / not_a_bill / nothing_found.
+    error_reason = models.CharField(max_length=20, blank=True, default="")
+    image = models.ForeignKey(
+        StoredImage, on_delete=models.SET_NULL, null=True, blank=True, related_name="imports"
+    )
+    media_type = models.CharField(max_length=30, blank=True, default="")
+    # sha256 of the ORIGINAL uploaded bytes (image or PDF).
+    file_sha256 = models.CharField(max_length=64, db_index=True)
+    # Sub-folder of settings.AI_TEMP_ROOT holding a PDF until the job ends; blank for an image.
+    temp_dir = models.CharField(max_length=64, blank=True, default="")
+    # AI_FAKE only: which canned bill reading to return.
+    fixture = models.CharField(max_length=40, blank=True, default="")
+    draft = models.JSONField(null=True, blank=True)
+    model_used = models.CharField(max_length=60, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="invoice_imports"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    abandoned_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self) -> str:
+        return f"Invoice import {self.id} ({self.status}) for business {self.business_id}"

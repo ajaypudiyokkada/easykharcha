@@ -53,6 +53,7 @@ as they would against the real API. Markers drive the smoke suite's edge cases:
 
 from django.conf import settings
 
+from ..invoice_schema import InvoiceExtractionResult
 from ..schemas import (
     BestSellersResult,
     DishClassificationResult,
@@ -64,6 +65,7 @@ from ..schemas import (
 )
 from .base import AiCallResult, run_with_fallback
 from .errors import AiProviderCallError
+from .invoice_fixtures import DEFAULT_FIXTURE, FIXTURES
 
 _FAKE_MODEL = "fake-ai-model"
 _MENU_INPUT_TOKENS = 2500
@@ -308,6 +310,27 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
         fallback_model=settings.AI_MODEL_FALLBACK,
         get_raw=get_raw,
         parse=lambda raw: MenuExtractionResult.model_validate(raw).sanitized(),
+    )
+
+
+_INVOICE_INPUT_TOKENS = 1500
+_INVOICE_OUTPUT_TOKENS = 600
+
+
+def extract_invoice(files: list[dict], fixture: str = "") -> AiCallResult:
+    """A canned bill reading chosen by `fixture` (invoice_fixtures.FIXTURES); an unknown name falls
+    back to the default one. Goes through the same schema/fallback harness as a real answer."""
+    raw = FIXTURES.get(fixture or DEFAULT_FIXTURE, FIXTURES[DEFAULT_FIXTURE])
+
+    def get_raw(attempt: int, model: str) -> tuple[dict, str, int, int, bool]:
+        return raw, model, _INVOICE_INPUT_TOKENS, _INVOICE_OUTPUT_TOKENS, False
+
+    return run_with_fallback(
+        primary_model=_FAKE_MODEL,
+        fallback_model=_FAKE_MODEL,
+        get_raw=get_raw,
+        parse=lambda payload: InvoiceExtractionResult.model_validate(payload).sanitized(),
+        stage="invoice_read",
     )
 
 

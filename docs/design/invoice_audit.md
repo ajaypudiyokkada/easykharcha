@@ -226,3 +226,22 @@ Create Invoice (S3a–e) can ship before Import (S3f–j).
 4. **Separate daily AI cap for invoice reads**, default 30, set by an env setting.
 5. **Owner-only void:** soft-deletes the linked sales and keeps the invoice number. Photos are stored (retention `INVOICE_IMAGE_RETENTION_DAYS`, default 60). PDFs are read but **not stored** in v1.
 6. **Non-item lines on imported bills** (e.g. "Parcel Large", service charge) get a **"Not an item"** choice, separate from "skip".
+
+---
+
+## Import invoice: design gaps after Step S4a
+
+Step S4a builds only upload + read. These states in `docs/design/easykharcha_import_invoice_complete_prototype.html` need data or an endpoint it does not provide yet:
+
+- **Matching** (Matched / Check this match / Not matched, Pick the item sheet, zero matches, "Remember this match next time"): needs the alias table and a match suggestion per line.
+- **Duplicate bill warning** (earlier invoice number and date, "View earlier invoice", "Add anyway" tick): needs imported invoices to store bill number, bill date and printed total, plus a lookup endpoint.
+- **Same photo warning** ("View earlier invoice"): the draft only carries `same_photo_before` and `same_photo_import_id`; linking to the earlier *invoice* needs the confirm step to tie an import to its invoice.
+- **Totals differ / line amount differs warnings:** the draft carries every printed number; the server-side reconciliation (with tolerance) is not built.
+- **Not an item / Skip / Undo, "N lines will not be recorded" tick:** needs the confirm endpoint to accept a per-line decision.
+- **Payment block on review** (Unpaid/Paid, mode, proof; prefilled from the printed payment mode): the confirm endpoint must accept `payment`.
+- **Saving, Success, Partly recorded:** needs the confirm endpoint, an imported-invoice record with a partly-recorded flag and "N of M items".
+- **Recent invoices / detail for imported bills** (From a bill badge, "Partly recorded", "3 of 5 items", Recorded items with matched names, the bill's own totals lines, bill photo, "Photo removed"): `Invoice` has no source "imported", bill number, printed totals, tax/discount lines or link to its import and photo yet.
+- **Sale date missing or unreadable:** the draft's `bill_date` can be null; the design has no screen for asking the owner for a date.
+- **Bill number missing:** also possible (null); no designed state.
+- **Review "kept for a limited time" copy:** the draft does not expose how long; the app can only say "limited time".
+- Client-only states (camera not allowed, wrong type / too big messages, photo preview, upload progress, taking longer than usual, old and future date warnings) need no new backend beyond the error codes and `created_at`/`heartbeat` already returned.

@@ -39,6 +39,13 @@ def check_daily_scan_limit(business_id: int) -> bool:
     return _hit_n(f"ai_scans:{business_id}:{today}", 1, settings.AI_DAILY_SCANS_PER_BUSINESS)
 
 
+def check_daily_invoice_limit(business_id: int) -> bool:
+    """Import invoice reads: its own per-business daily bucket (INVOICE_IMPORT_DAILY_CAP), separate
+    from menu scans and EK setup."""
+    today = timezone.localdate().isoformat()
+    return _hit_n(f"ai_invoice_reads:{business_id}:{today}", 1, settings.INVOICE_IMPORT_DAILY_CAP)
+
+
 def check_daily_pages_limit(business_id: int, page_count: int) -> bool:
     today = timezone.localdate().isoformat()
     return _hit_n(f"ai_pages:{business_id}:{today}", page_count, DAILY_PAGES_PER_BUSINESS)
