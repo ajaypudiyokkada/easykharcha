@@ -1015,3 +1015,4 @@ both say so in the UI.
 ## Parked
 
 - Retail-style bills whose line amounts include tax (e.g. 1 x 450 printed as 472.50) are recorded at the printed line amount, so sales may be slightly high by the tax. The reading flags these lines (LINE_AMOUNT_MISMATCH) and the items total (TOTAL_MISMATCH) but the amounts are not adjusted. Not fixed yet.
+- **Bill batch runner.** `scripts/ai_try_invoice_batch.py` reads every bill in `_private/bills/` with the real extraction once per model (default claude-haiku-5-5 and claude-sonnet-5-5; `--models` changes them) and writes one readable report, `_private/bill_read_<timestamp>.txt`, with each bill's reading, cost in rupees and seconds. Run from the repo folder: `.venv\Scripts\python.exe scriptsi_try_invoice_batch.py`. Not run by Claude (needs the real key).
