@@ -13,6 +13,7 @@ from django.utils import timezone
 from ai.files import sweep_old_temp_files
 from ai.jobs import process_ek_setup_run, process_menu_scan
 from ai.models import EkSetupRun, EkSetupRunStatus, MenuScan, MenuScanStatus
+from invoices.purge import purge_expired_images
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,10 @@ class Command(BaseCommand):
             f"{requeued_runs} stuck EK setup run(s))."
         )
         last_heartbeat = timezone.now()
+        last_purge_date = None
 
         while True:
+            last_purge_date = self._purge_once_a_day(last_purge_date)
             self._fail_stuck_jobs()
             scan = (
                 MenuScan.objects.filter(status=MenuScanStatus.QUEUED).order_by("created_at").first()
@@ -63,6 +66,21 @@ class Command(BaseCommand):
                 last_heartbeat = timezone.now()
             sweep_old_temp_files()
             time.sleep(POLL_SECONDS)
+
+    def _purge_once_a_day(self, last_purge_date):
+        """Deletes expired invoice images (payment proofs, imported bill photos) once per calendar
+        day: on the first tick after the worker starts, then again each new day. A failure here must
+        never stop the job loop, and is retried on the next tick."""
+        today = timezone.localdate()
+        if last_purge_date == today:
+            return last_purge_date
+        try:
+            summary = purge_expired_images()
+            self.stdout.write(f"Invoice image purge: {summary}")
+        except Exception:  # noqa: BLE001 - never kill the job loop
+            logger.exception("Invoice image purge failed")
+            return last_purge_date
+        return today
 
     def _process_scan(self, scan: MenuScan) -> None:
         self.stdout.write(f"Processing menu scan {scan.id} (business {scan.business_id})")

@@ -15,6 +15,55 @@ class InvoiceStatus(models.TextChoices):
     VOID = "void", "Void"
 
 
+class PaymentStatus(models.TextChoices):
+    UNPAID = "unpaid", "Unpaid"
+    PAID = "paid", "Paid"
+
+
+class PaymentMode(models.TextChoices):
+    CASH = "cash", "Cash"
+    UPI = "upi", "UPI"
+    CARD = "card", "Card"
+    BANK_TRANSFER = "bank_transfer", "Bank transfer"
+
+
+class StoredImageKind(models.TextChoices):
+    PAYMENT_PROOF = "payment_proof", "Payment proof"
+    IMPORTED_BILL = "imported_bill", "Imported bill"
+
+
+class StoredImage(models.Model):
+    """A photo kept in PRIVATE_MEDIA_ROOT (never the public MEDIA_ROOT): a payment proof now, an
+    imported bill photo later. The file is the compressed, EXIF-stripped copy; `sha256` is of the
+    ORIGINAL upload so the same photo is recognised even though it's re-encoded. `uploaded_at` is the
+    retention clock; the purge sets `removed_at` and deletes the file but keeps this row. `attached`
+    turns true once an invoice uses it (and stays true), so a never-used upload can be cleaned up
+    after a day without touching anything an invoice ever referenced."""
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="stored_images")
+    kind = models.CharField(max_length=20, choices=StoredImageKind.choices)
+    # Relative to PRIVATE_MEDIA_ROOT, a random name we chose, never the client's file name.
+    path = models.CharField(max_length=120)
+    sha256 = models.CharField(max_length=64, db_index=True)
+    size = models.PositiveIntegerField()
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    attached = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("-uploaded_at", "-id")
+
+    def __str__(self) -> str:
+        return f"{self.kind} {self.id} (business {self.business_id})"
+
+
 class InvoiceSequence(models.Model):
     """One row per business holding the last number handed out. Locked with select_for_update inside
     the same transaction that saves the invoice (invoices/service.py), so a failed save rolls the
@@ -63,6 +112,24 @@ class Invoice(models.Model):
     )
     voided_at = models.DateTimeField(null=True, blank=True)
     void_reason = models.CharField(max_length=200, blank=True, default="")
+    # Payment is a label on the invoice only: it never changes sales or stock maths. Full payment only.
+    payment_status = models.CharField(
+        max_length=10, choices=PaymentStatus.choices, default=PaymentStatus.UNPAID
+    )
+    payment_mode = models.CharField(
+        max_length=20, choices=PaymentMode.choices, blank=True, default=""
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    paid_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invoices_paid",
+    )
+    proof = models.ForeignKey(
+        StoredImage, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoices"
+    )
 
     class Meta:
         ordering = ("-sequence_no",)

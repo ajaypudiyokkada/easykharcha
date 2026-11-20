@@ -15,6 +15,7 @@ from sales.service import MAX_LINES, business_today, record_sales, row_errors_fr
 
 from .exceptions import InvoiceValidationError
 from .models import Invoice, InvoiceLine, InvoiceSequence, InvoiceStatus
+from .payment import log_paid, paid_fields, parse_payment
 from .serializers import InvoiceCreateSerializer, InvoiceLineInputSerializer
 
 CENT = Decimal("0.01")
@@ -111,6 +112,11 @@ def create_invoice(*, business: Business, user, data) -> tuple[Invoice, bool]:
         if name in data:
             field_errors[name] = "Discounts are not available on bills yet."
 
+    # An optional payment object means "create this invoice as Paid"; anything wrong with it means
+    # nothing at all is created.
+    payment, payment_errors = parse_payment(business, data.get("payment"))
+    field_errors.update(payment_errors)
+
     sale_date = header.get("sale_date")
     if sale_date and sale_date > business_today(business):
         field_errors["sale_date"] = "Choose today or an earlier date."
@@ -136,6 +142,9 @@ def create_invoice(*, business: Business, user, data) -> tuple[Invoice, bool]:
     try:
         with transaction.atomic():
             sequence_no = _next_sequence_no(business)
+            # Claims the proof inside this transaction: if it was used meanwhile, everything
+            # (including the number) rolls back.
+            paid = paid_fields(business, user, payment) if payment else {}
             invoice = Invoice.objects.create(
                 business=business,
                 number=format_number(business.id, sequence_no),
@@ -149,6 +158,7 @@ def create_invoice(*, business: Business, user, data) -> tuple[Invoice, bool]:
                 total=total,
                 idempotency_key=key,
                 created_by=user,
+                **paid,
             )
             # Sale.amount is the line amount BEFORE tax: tax is never counted as sales.
             sales = record_sales(
@@ -197,6 +207,8 @@ def create_invoice(*, business: Business, user, data) -> tuple[Invoice, bool]:
         total=str(total),
         sale_ids=[sale.id for sale in sales],
     )
+    if payment:
+        log_paid(user=user, invoice=invoice)
     return invoice, True
 
 

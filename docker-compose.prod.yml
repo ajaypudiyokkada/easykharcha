@@ -35,6 +35,7 @@ services:
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/media
+      - private_media_files:/app/private_media
       - ai_tmp_files:/app/ai_tmp
     healthcheck:
       test:
@@ -74,6 +75,9 @@ services:
         condition: service_healthy
     volumes:
       - ai_tmp_files:/app/ai_tmp
+      # Same private image volume as backend: the daily purge (run from this worker's loop) deletes
+      # expired payment proofs / bill photos from it. Never mounted into caddy.
+      - private_media_files:/app/private_media
     logging: *default-logging
 
   web-app:
@@ -129,6 +133,7 @@ volumes:
   db_data:
   static_files:
   media_files:
+  private_media_files:
   ai_tmp_files:
   caddy_data:
   caddy_config:

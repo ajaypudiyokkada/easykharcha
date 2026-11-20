@@ -74,6 +74,9 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
 class InvoiceSerializer(serializers.ModelSerializer):
     lines = InvoiceLineSerializer(many=True, read_only=True)
     date_is_old = serializers.SerializerMethodField()
+    proof_available = serializers.SerializerMethodField()
+    proof_removed = serializers.SerializerMethodField()
+    proof_already_used = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -93,7 +96,32 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "created_at",
             "voided_at",
             "void_reason",
+            "payment_status",
+            "payment_mode",
+            "paid_at",
+            "proof_available",
+            "proof_removed",
+            "proof_already_used",
             "lines",
+        )
+
+    def get_proof_available(self, obj) -> bool:
+        """The proof image is still stored."""
+        return obj.proof is not None and obj.proof.removed_at is None
+
+    def get_proof_removed(self, obj) -> bool:
+        """There was a proof, but the retention period ended and it was purged."""
+        return obj.proof is not None and obj.proof.removed_at is not None
+
+    def get_proof_already_used(self, obj) -> bool:
+        """Warning only: the same photo (by hash of the original upload) is attached to another
+        invoice of this business. Never blocks anything."""
+        if obj.proof is None:
+            return False
+        return (
+            Invoice.objects.filter(business_id=obj.business_id, proof__sha256=obj.proof.sha256)
+            .exclude(id=obj.id)
+            .exists()
         )
 
     def get_date_is_old(self, obj) -> bool:

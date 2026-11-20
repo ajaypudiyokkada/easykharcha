@@ -7762,6 +7762,378 @@ def check_invoices_flow() -> None:
     print("OK - one audit entry per invoice created and per invoice voided.")
 
 
+def check_invoice_payments_flow() -> None:
+    """Step S3e: payment proofs (private image storage) and invoice payment status - upload
+    compression/EXIF/type checks, who can view a proof, create-as-paid rules, mark-paid/unpaid, the
+    proof_already_used warning, the daily purge, and that payment never changes sales maths."""
+    import hashlib
+    import io
+    from datetime import timedelta
+    from pathlib import Path
+
+    from PIL import Image
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+    from django.conf import settings as dj_settings
+    from django.core.management import call_command
+    from django.test.utils import override_settings
+    from django.utils import timezone as dj_timezone
+
+    from audit.models import AuditLog
+    from businesses.admin import delete_business_and_its_data
+    from businesses.models import Business as DjBusiness
+    from invoices.models import Invoice as DjInvoice
+    from invoices.models import StoredImage
+    from sales.models import Sale as DjSale
+
+    _, owner_access, _ = signup_and_login("Payments Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Pay Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    business_id = body["id"]
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Other Pay Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    other_id = body["id"]
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Pay Manager", "manager")
+    _, chef_access, _ = _add_team_member(business_id, owner_access, "Pay Chef", "head_chef")
+
+    request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}]},
+        token=owner_access,
+    )
+    milk_id = request("GET", f"/businesses/{business_id}/stock-items/", token=owner_access)[1][0]["id"]
+    tea_id, _ = _create_dish(business_id, owner_access, "Tea", "20.00", [(milk_id, "0.200")])
+    today = _now_iso()[:10]
+    url = f"/businesses/{business_id}/invoices/"
+    sales_url = f"/businesses/{business_id}/sales/"
+
+    def sold_today():
+        return Decimal(request("GET", sales_url, token=owner_access)[1]["summary"]["items_sold_today"])
+
+    def jpeg_bytes(size=(3000, 2000), exif=True) -> bytes:
+        image = Image.new("RGB", size, (200, 120, 40))
+        out = io.BytesIO()
+        if exif:
+            exif_data = Image.Exif()
+            exif_data[0x010F] = "SmokeCam"
+            gps = exif_data.get_ifd(0x8825)
+            gps[1] = "N"
+            gps[2] = (12.0, 58.0, 0.0)
+            image.save(out, format="JPEG", exif=exif_data)
+        else:
+            image.save(out, format="JPEG")
+        return out.getvalue()
+
+    def upload(data, token=owner_access, biz=business_id, filename="evil name.jpg", ctype="image/jpeg"):
+        raw, content_type = multipart_body("image", filename, data, ctype)
+        return request(
+            "POST",
+            f"/businesses/{biz}/payment-proofs/",
+            token=token,
+            raw_body=raw,
+            content_type=content_type,
+        )
+
+    def raw_get(path, token):
+        req = urllib.request.Request(
+            f"{BASE_URL}{path}",
+            headers={"Origin": ORIGIN, "Authorization": f"Bearer {token}"},
+        )
+        try:
+            response = urllib.request.urlopen(req, timeout=10)
+            return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers, exc.read()
+
+    def make(payment=None, key=None, token=owner_access, biz=business_id, qty="1"):
+        payload = {"sale_date": today, "lines": [{"sell_item": tea_id, "quantity": qty}]}
+        if payment is not None:
+            payload["payment"] = payment
+        if key:
+            payload["idempotency_key"] = key
+        return request("POST", f"/businesses/{biz}/invoices/", payload, token=token)
+
+    # --- upload: compress, strip EXIF, type/size checks, random private file name ---
+    original = jpeg_bytes()
+    status, body, _ = upload(original)
+    if status != 201 or "proof_id" not in body:
+        fail(f"payments: upload expected 201, got {status} ({body})")
+    stored = StoredImage.objects.get(id=body["proof_id"])
+    path = Path(dj_settings.PRIVATE_MEDIA_ROOT) / stored.path
+    if not path.is_file():
+        fail("payments: the stored proof file is missing")
+    if Path(dj_settings.MEDIA_ROOT).resolve() in path.resolve().parents:
+        fail("payments: proofs must be stored OUTSIDE the public MEDIA_ROOT")
+    saved = Image.open(path)
+    if saved.format != "JPEG" or max(saved.size) > 1600 or path.stat().st_size >= len(original):
+        fail(f"payments: expected a compressed JPEG <=1600px, got {saved.format} {saved.size}")
+    exif = saved.getexif()
+    if len(exif) != 0 or exif.get_ifd(0x8825):
+        fail("payments: EXIF/GPS should be stripped from the stored copy")
+    if "evil" in stored.path or stored.path.count("/") != 1 or len(Path(stored.path).stem) < 24:
+        fail(f"payments: stored name should be random, got {stored.path}")
+    if stored.sha256 != hashlib.sha256(original).hexdigest():
+        fail("payments: sha256 should be of the ORIGINAL bytes")
+    if stored.attached or stored.removed_at:
+        fail("payments: a fresh upload is unattached and not removed")
+    print("OK - proof upload compresses to <=1600px JPEG, strips EXIF/GPS, random private name.")
+
+    msg = "Please use a JPEG or PNG photo."
+    for label, data, ctype in (
+        ("PDF", make_pdf(), "application/pdf"),
+        ("text", b"definitely not an image", "image/jpeg"),
+        ("HEIC", b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic", "image/heic"),
+    ):
+        status, body, _ = upload(data, ctype=ctype)
+        if status != 400 or body["error"]["code"] != "INVALID_IMAGE" or body["error"]["message"] != msg:
+            fail(f"payments: {label} should be refused with the friendly message, got {status} ({body})")
+    status, body, _ = upload(b"\xff\xd8\xff" + b"0" * (11 * 1024 * 1024))
+    if status != 400 or body["error"]["code"] != "IMAGE_TOO_LARGE":
+        fail(f"payments: an oversize upload should be refused, got {status} ({body})")
+    raw, content_type = multipart_body("other", "x.jpg", original, "image/jpeg")
+    status, _, _ = request(
+        "POST", f"/businesses/{business_id}/payment-proofs/", token=owner_access,
+        raw_body=raw, content_type=content_type,
+    )
+    if status != 400:
+        fail("payments: a request with no image should be 400")
+    if upload(original, token=chef_access)[0] != 403:
+        fail("payments: a Head chef must not upload proofs")
+    print("OK - PDF, HEIC, non-images, oversize and a missing file are refused; Head chef is 403.")
+
+    # --- create as paid ---
+    status, cash, _ = make({"mode": "cash"})
+    if status != 201 or cash["payment_status"] != "paid" or cash["payment_mode"] != "cash":
+        fail(f"payments: cash with no proof should create a paid invoice, got {status} ({cash})")
+    if cash["proof_available"] or cash["proof_removed"] or cash["paid_at"] is None:
+        fail(f"payments: unexpected cash payment fields {cash}")
+    status, plain, _ = make()
+    if status != 201 or plain["payment_status"] != "unpaid" or plain["payment_mode"] != "":
+        fail(f"payments: default is Unpaid, got {status} ({plain})")
+
+    before_invoices = DjInvoice.objects.filter(business_id=business_id).count()
+    before_sold = sold_today()
+    proof_a = upload(original)[1]["proof_id"]
+    status, upi, _ = make({"mode": "upi", "proof_id": proof_a})
+    if status != 201 or upi["payment_mode"] != "upi" or not upi["proof_available"]:
+        fail(f"payments: UPI with proof should create a paid invoice, got {status} ({upi})")
+    if not StoredImage.objects.get(id=proof_a).attached:
+        fail("payments: the proof should be marked attached")
+
+    bad_cases = (
+        ("UPI without a proof", {"mode": "upi"}, "proof_id"),
+        ("cash with a proof", {"mode": "cash", "proof_id": upload(original)[1]["proof_id"]}, "proof_id"),
+        ("a proof that is already attached", {"mode": "upi", "proof_id": proof_a}, "proof_id"),
+        ("a proof from another business", {"mode": "card", "proof_id": upload(original, biz=other_id)[1]["proof_id"]}, "proof_id"),
+        ("a missing proof id", {"mode": "card", "proof_id": 99999999}, "proof_id"),
+        ("no mode", {"proof_id": proof_a}, "payment_mode"),
+        ("a made-up mode", {"mode": "cheque"}, "payment_mode"),
+    )
+    count_mid = DjInvoice.objects.filter(business_id=business_id).count()
+    sold_mid = sold_today()
+    for label, payment, field in bad_cases:
+        status, body, _ = make(payment)
+        if status != 400 or field not in body.get("field_errors", {}):
+            fail(f"payments: {label} should be 400 with a {field} error, got {status} ({body})")
+    if DjInvoice.objects.filter(business_id=business_id).count() != count_mid or sold_today() != sold_mid:
+        fail("payments: an invalid payment must create no invoice and no sale")
+    print("OK - create as paid: cash/UPI ok; missing, wrong-business, reused and bad proofs are 400 and create nothing.")
+
+    proof_b = upload(original)[1]["proof_id"]
+    status, first, _ = make({"mode": "bank_transfer", "proof_id": proof_b}, key="pay-k1")
+    status2, again, _ = make({"mode": "bank_transfer", "proof_id": proof_b}, key="pay-k1")
+    if status != 201 or status2 != 200 or again["id"] != first["id"]:
+        fail(f"payments: an idempotent replay should return the first invoice, got {status}/{status2}")
+    if StoredImage.objects.filter(id=proof_b, invoices__isnull=False).count() != 1:
+        fail("payments: a replay must not attach the proof twice")
+    print("OK - an idempotent replay of a paid create returns the original (200).")
+
+    # --- who can see the proof, and never from /media ---
+    proof_url = f"{url}{upi['id']}/payment-proof/"
+    for who, token in (("Owner", owner_access), ("Manager", manager_access)):
+        code, headers, data = raw_get(proof_url, token)
+        if code != 200 or headers.get("Content-Type") != "image/jpeg" or data[:2] != b"\xff\xd8":
+            fail(f"payments: {who} should get the proof image, got {code}")
+        cache = headers.get("Cache-Control", "")
+        if "private" not in cache or "no-store" not in cache:
+            fail(f"payments: proof must be private, no-store, got {cache!r}")
+    if raw_get(proof_url, chef_access)[0] != 403:
+        fail("payments: a Head chef must get 403 on a proof")
+    if raw_get(f"/businesses/{other_id}/invoices/{upi['id']}/payment-proof/", owner_access)[0] != 404:
+        fail("payments: another business's invoice id should be 404")
+    if raw_get(f"{url}{plain['id']}/payment-proof/", owner_access)[0] != 404:
+        fail("payments: an invoice with no proof should be 404")
+    media_probe = urllib.request.Request(
+        f"{BASE_URL.replace('/api/v1', '')}/media/{StoredImage.objects.get(id=proof_a).path}"
+    )
+    try:
+        media_status = urllib.request.urlopen(media_probe, timeout=10).status
+    except urllib.error.HTTPError as exc:
+        media_status = exc.code
+    if media_status != 404:
+        fail(f"payments: the proof must not be reachable under /media, got {media_status}")
+    print("OK - Owner/Manager can view a proof (private, no-store); Head chef 403; other business 404; not under /media.")
+
+    # --- mark paid / unpaid ---
+    status, unpaid_inv, _ = make()
+    unpaid_url = f"{url}{unpaid_inv['id']}/"
+    proof_c = upload(original)[1]["proof_id"]
+    status, paid, _ = request("POST", f"{unpaid_url}mark-paid/", {"mode": "upi", "proof_id": proof_c}, token=manager_access)
+    if status != 200 or paid["payment_status"] != "paid" or not paid["proof_available"]:
+        fail(f"payments: mark-paid should work for a Manager, got {status} ({paid})")
+    status, repeat, _ = request("POST", f"{unpaid_url}mark-paid/", {"mode": "upi"}, token=owner_access)
+    if status != 200 or repeat["paid_at"] != paid["paid_at"]:
+        fail(f"payments: same-mode repeat should be 200 and change nothing, got {status} ({repeat})")
+    status, body, _ = request("POST", f"{unpaid_url}mark-paid/", {"mode": "cash"}, token=owner_access)
+    if status != 409 or body["error"]["code"] != "INVOICE_PAYMENT_CONFLICT":
+        fail(f"payments: a different mode on a paid invoice should be 409, got {status} ({body})")
+    status, voidable, _ = make()
+    request("POST", f"{url}{voidable['id']}/void/", {}, token=owner_access)
+    status, body, _ = request("POST", f"{url}{voidable['id']}/mark-paid/", {"mode": "cash"}, token=owner_access)
+    if status != 400:
+        fail(f"payments: a void invoice can't be marked paid, got {status} ({body})")
+    if request("POST", f"{unpaid_url}mark-unpaid/", {}, token=manager_access)[0] != 403:
+        fail("payments: a Manager must not mark an invoice unpaid")
+    status, back, _ = request("POST", f"{unpaid_url}mark-unpaid/", {}, token=owner_access)
+    if status != 200 or back["payment_status"] != "unpaid" or back["payment_mode"] != "" or back["proof_available"]:
+        fail(f"payments: mark-unpaid should reset the invoice, got {status} ({back})")
+    old_proof = StoredImage.objects.get(id=proof_c)
+    if old_proof.removed_at or not (Path(dj_settings.PRIVATE_MEDIA_ROOT) / old_proof.path).is_file():
+        fail("payments: the old proof image must stay until retention ends")
+    if request("POST", f"{unpaid_url}mark-unpaid/", {}, token=owner_access)[0] != 200:
+        fail("payments: marking an unpaid invoice unpaid again is a harmless 200")
+    request("POST", f"{url}{cash['id']}/void/", {}, token=owner_access)
+    status, voided_paid, _ = request("GET", f"{url}{cash['id']}/", token=owner_access)
+    if voided_paid["status"] != "void" or voided_paid["payment_status"] != "paid":
+        fail("payments: a voided invoice keeps its payment record")
+    for action, field in (("invoice.paid", "mode"), ("invoice.unpaid", "old_mode")):
+        if not any(
+            row.metadata.get("invoice_id") == unpaid_inv["id"] and row.metadata.get(field) == "upi"
+            for row in AuditLog.objects.filter(business_id=business_id, action=action)
+        ):
+            fail(f"payments: expected an {action} audit entry carrying the mode")
+    print("OK - mark-paid (200 / same-mode 200 / different-mode 409 / void 400), Owner-only mark-unpaid, audit entries.")
+
+    # --- list filter and the proof_already_used warning ---
+    status, body, _ = request("GET", f"{url}?payment_status=paid", token=owner_access)
+    if status != 200 or any(row["payment_status"] != "paid" for row in body["results"]) or not body["results"]:
+        fail(f"payments: the payment_status filter should list only paid invoices, got {status}")
+    proof_dup = upload(original)[1]
+    if proof_dup["proof_already_used"] is not True:
+        fail("payments: uploading a photo already attached elsewhere should flag proof_already_used")
+    status, dup_inv, _ = make({"mode": "upi", "proof_id": proof_dup["proof_id"]})
+    if status != 201 or dup_inv["proof_already_used"] is not True:
+        fail(f"payments: the reused photo should be flagged (warn only), got {status} ({dup_inv})")
+    status, fresh_inv, _ = make({"mode": "upi", "proof_id": upload(jpeg_bytes((800, 600), exif=False))[1]["proof_id"]})
+    if fresh_inv["proof_already_used"] is not False:
+        fail("payments: a new photo should not be flagged")
+    print("OK - payment_status filter; the same photo on another invoice is flagged (never blocked).")
+
+    # --- payment never changes sales maths ---
+    base = sold_today()
+    make(qty="2")
+    make({"mode": "cash"}, qty="3")
+    if sold_today() - base != Decimal("5"):
+        fail("payments: paid and unpaid invoices must both count as sales")
+    amounts = set(
+        DjSale.objects.filter(business_id=business_id, source="invoice", is_deleted=False)
+        .values_list("amount", flat=True)
+    )
+    if not amounts <= {Decimal("20.00"), Decimal("40.00"), Decimal("60.00")}:
+        fail(f"payments: sale amounts should be unaffected by payment, got {amounts}")
+    print("OK - paid and unpaid invoices count as sales alike.")
+
+    # --- purge ---
+    def add_old(days=0, hours=0, attached=True):
+        image = StoredImage.objects.get(id=upload(jpeg_bytes((400, 300), exif=False))[1]["proof_id"])
+        StoredImage.objects.filter(id=image.id).update(
+            uploaded_at=dj_timezone.now() - timedelta(days=days, hours=hours), attached=attached
+        )
+        return StoredImage.objects.get(id=image.id), Path(dj_settings.PRIVATE_MEDIA_ROOT) / image.path
+
+    old, old_path = add_old(days=61)
+    young, young_path = add_old(days=30)
+    stale_unattached, stale_path = add_old(hours=25, attached=False)
+    fresh_unattached, fresh_path = add_old(hours=2, attached=False)
+    gone, gone_path = add_old(days=90)
+    gone_path.unlink()
+
+    call_command("purge_invoice_images", "--dry-run", stdout=io.StringIO())
+    if not (old_path.is_file() and stale_path.is_file()) or StoredImage.objects.get(id=old.id).removed_at:
+        fail("payments: --dry-run must change nothing")
+    call_command("purge_invoice_images", stdout=io.StringIO())
+    old.refresh_from_db()
+    if old_path.exists() or old.removed_at is None:
+        fail("payments: an image older than the retention days should be deleted, its row kept")
+    if not young_path.is_file() or StoredImage.objects.get(id=young.id).removed_at:
+        fail("payments: an image inside the retention period must stay")
+    if stale_path.exists() or StoredImage.objects.filter(id=stale_unattached.id).exists():
+        fail("payments: an unattached proof older than 24 hours should be deleted")
+    if not fresh_path.is_file() or not StoredImage.objects.filter(id=fresh_unattached.id).exists():
+        fail("payments: a recent unattached proof must stay")
+    if StoredImage.objects.get(id=gone.id).removed_at is None:
+        fail("payments: a missing file must not crash the purge, and the row is still marked removed")
+    with override_settings(INVOICE_IMAGE_RETENTION_DAYS=10):
+        call_command("purge_invoice_images", stdout=io.StringIO())
+    if young_path.exists() or StoredImage.objects.get(id=young.id).removed_at is None:
+        fail("payments: purge must use the CURRENT retention setting, measured from upload date")
+
+    status, expired_inv, _ = make({"mode": "upi", "proof_id": upload(jpeg_bytes((400, 300), exif=False))[1]["proof_id"]})
+    stored_expired = DjInvoice.objects.get(id=expired_inv["id"]).proof
+    StoredImage.objects.filter(id=stored_expired.id).update(uploaded_at=dj_timezone.now() - timedelta(days=61))
+    call_command("purge_invoice_images", stdout=io.StringIO())
+    status, body, _ = request("GET", f"{url}{expired_inv['id']}/payment-proof/", token=owner_access)
+    if status != 404 or body["error"]["code"] != "PROOF_REMOVED":
+        fail(f"payments: a purged proof should be 404 PROOF_REMOVED, got {status} ({body})")
+    status, detail, _ = request("GET", f"{url}{expired_inv['id']}/", token=owner_access)
+    if detail["proof_removed"] is not True or detail["proof_available"] is not False or detail["payment_status"] != "paid":
+        fail(f"payments: the invoice should show proof_removed but stay paid, got {detail}")
+    print("OK - purge: old files deleted (rows kept), setting respected, unattached cleanup, missing file safe, dry-run inert.")
+
+    # --- deleting a business through the admin helper removes its images, even with invoices ---
+    # A fresh owner: the first one is already at the 3-business limit.
+    _, doomed_owner, _ = signup_and_login("Doomed Owner")
+    status, body, _ = request(
+        "POST", "/businesses/", {"name": "Doomed Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=doomed_owner,
+    )
+    owner_access = doomed_owner
+    doomed_id = body["id"]
+    request("POST", f"/businesses/{doomed_id}/sell-items/", {"name": "Tea", "selling_price": "10.00",
+            "ingredients": [{"stock_item": request("POST", f"/businesses/{doomed_id}/stock-items/bulk/",
+            {"items": [{"name": "Milk", "unit": "L"}]}, token=owner_access)[1][0]["id"], "quantity": "0.1"}]},
+            token=owner_access)
+    doomed_item = request("GET", f"/businesses/{doomed_id}/sell-items/", token=owner_access)[1][0]["id"]
+    doomed_proof = upload(jpeg_bytes((300, 200), exif=False), biz=doomed_id, token=doomed_owner)[1]["proof_id"]
+    status, body, _ = request(
+        "POST", f"/businesses/{doomed_id}/invoices/",
+        {"sale_date": today, "lines": [{"sell_item": doomed_item, "quantity": "1"}],
+         "payment": {"mode": "upi", "proof_id": doomed_proof}},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"payments: setup for the delete-business check failed ({status}, {body})")
+    doomed_path = Path(dj_settings.PRIVATE_MEDIA_ROOT) / StoredImage.objects.get(id=doomed_proof).path
+    delete_business_and_its_data(DjBusiness.objects.get(id=doomed_id))
+    if DjBusiness.objects.filter(id=doomed_id).exists() or doomed_path.exists():
+        fail("payments: deleting a business must delete its stored image files too")
+    print("OK - deleting a business (with invoices) deletes its stored image files.")
+
+
 def check_admin_delete_flow() -> None:
     """Step F1: Django admin delete rules for User/Business — direct ORM + django.test.Client against
     the same dev database the rest of this suite's API checks use (admin pages are server-rendered,
@@ -7961,6 +8333,7 @@ ALL_CHECKS = [
     check_ek_setup_apply_flow,
     check_admin_delete_flow,
     check_invoices_flow,
+    check_invoice_payments_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -7985,7 +8358,7 @@ AREA_CHECKS: dict[str, list] = {
         check_sector_change_flow,
     ],
     "sales": [check_sales_and_gap_flow],
-    "invoices": [check_invoices_flow],
+    "invoices": [check_invoices_flow, check_invoice_payments_flow],
     "alerts": [check_alerts_flow, check_expiry_alerts_flow, check_low_stock_flow],
     "wastage": [check_count_and_wastage_flow],
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
