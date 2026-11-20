@@ -54,3 +54,9 @@ export function ratePaise(line: InvoiceLineDraft): number | null {
   const rate = parseScaled(line.rate, 2);
   return rate !== null && rate > 0 ? rate : null;
 }
+
+/** "+919845012345" -> "+91 98450 ••••5": first 5 digits, then four dots, then the last digit. */
+export function maskPhone(normalised: string): string {
+  const m = /^\+91(\d{5})\d{4}(\d)$/.exec(normalised);
+  return m ? `+91 ${m[1]} ••••${m[2]}` : '';
+}
