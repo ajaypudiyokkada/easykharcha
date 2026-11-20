@@ -215,3 +215,14 @@ Create Invoice (S3a–e) can ship before Import (S3f–j).
 - Bill images are not in backups; DB rows are.
 - `Sale` has no idempotency; double-submit creates duplicates until S3b.
 - Daily AI caps are cache-based and reset if the cache is cleared; the monthly cap (DB) is the real ceiling.
+
+---
+
+## Decisions (AP, 2026-11-20)
+
+1. **RestID = `Business.id`.** Invoice number `EK_<id>_INV-000001`.
+2. **Import may be confirmed with some lines skipped**, with a visible "N not recorded" tick-box. The invoice is marked "partly recorded".
+3. **Tax:** one flat rate per business, **added on top of** prices, off by default. No discounts in Create Invoice v1. On Import, read discount/tax/round-off as printed and check they reconcile (with a tolerance; never recompute tax from a %). `Sale` rows store the amount **before tax**.
+4. **Separate daily AI cap for invoice reads**, default 30, set by an env setting.
+5. **Owner-only void:** soft-deletes the linked sales and keeps the invoice number. Photos are stored (retention `INVOICE_IMAGE_RETENTION_DAYS`, default 60). PDFs are read but **not stored** in v1.
+6. **Non-item lines on imported bills** (e.g. "Parcel Large", service charge) get a **"Not an item"** choice, separate from "skip".

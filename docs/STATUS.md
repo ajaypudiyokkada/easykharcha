@@ -986,8 +986,8 @@ both say so in the UI.
   business that closes the app only after finishing the count (quick path) no longer resumes at
   `/count` again; "Go to Home" lands on a real, complete Home for both the quick and DIY paths.
 - **Step S2 — "Record a sale" hub, front end only.** New `mobile/app/record-sale.tsx` (Owner/Manager,
-  `sales.create`): Record manually (opens the unchanged manual flow) · Scan invoice/Upload daily sales
-  report/Create invoice, each "Coming soon" (badge + a sheet pointing back at Record manually, no
+  `sales.create`): Record manually (opens the unchanged manual flow) · Import invoice/Create invoice/Upload daily sales
+  report, each "Coming soon" (badge + a sheet pointing back at Record manually, no
   navigation). Home's quick action and Sales' own button now route here (`?returnTo=home|sales`)
   instead of opening `RecordSalesSheet` directly; back and a successful save both return to whichever
   screen opened it (a `?saved=sales` flag triggers that screen's own existing toast/reload, since
@@ -995,3 +995,7 @@ both say so in the UI.
   immediately with no review/confirm step, so the design's "nothing is added yet" copy would be untrue.
   The "single surviving option skips the hub" rule has no role to trigger it today (every role with
   `sales.create` is Owner/Manager, neither `isLimitedRole`), so it's left undone rather than guessed at.
+- **Step S3a — hub v2 + invoice decisions.** `record-sale.tsx` retitled "Record sales"; two sections
+  ("ADD ONE SALE": Record manually, Import invoice (was "Scan invoice"), Create invoice · OR · "ADD A
+  FULL DAY": Upload daily sales report). Only Record manually is live; the rest stay "Coming soon".
+  Strings in `strings.ts` `saleHub`. AP's six invoice decisions are appended to `docs/design/invoice_audit.md`.

@@ -446,8 +446,11 @@ export const strings = {
     },
   },
   saleHub: {
-    title: 'Record a sale',
-    subtitle: 'Choose how you want to add this sale.',
+    title: 'Record sales',
+    subtitle: "Add one sale, or add a full day's sales.",
+    oneSaleLabel: 'ADD ONE SALE',
+    fullDayLabel: 'ADD A FULL DAY',
+    orDivider: 'OR',
     fastestBadge: 'Fastest',
     comingSoonBadge: 'Coming soon',
     options: {
@@ -455,17 +458,17 @@ export const strings = {
         title: 'Record manually',
         desc: 'Pick items and enter what you sold.',
       },
-      scan: {
-        title: 'Scan invoice',
-        desc: 'Take a photo or upload a customer bill.',
-      },
-      report: {
-        title: 'Upload daily sales report',
-        desc: 'Add your day’s sales report from your billing system.',
+      import: {
+        title: 'Import invoice',
+        desc: 'Take a photo or upload one bill.',
       },
       invoice: {
         title: 'Create invoice',
-        desc: 'Make a bill for a customer in EasyKharcha.',
+        desc: 'Make one customer bill in EasyKharcha.',
+      },
+      report: {
+        title: 'Upload daily sales report',
+        desc: 'Add all item sales for one day from your billing system.',
       },
     },
     comingSoonSheet: {
