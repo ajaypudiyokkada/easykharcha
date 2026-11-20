@@ -184,6 +184,24 @@ FIXTURES.update(
             "lines": [{"name_as_printed": "Fire Pork", "confidence": 0.9}],
             "confidence": {"bill_number": 0.9, "bill_date": 0.9},
         },
+        # No bill number, but the same date and total as FOMO 14753.
+        "test_possible_dup": {
+            "readability": {"ok": True},
+            "bill_date_printed": "19/11/26",
+            "lines": [_line("Fire Pork", 1, 380, 380)],
+            "grand_total": 1110,
+            "confidence": {"bill_date": 0.9, "grand_total": 0.9},
+        },
+        # No confidence score anywhere: unknown, not low.
+        "test_no_confidence": {
+            "readability": {"ok": True},
+            "bill_number": "T8",
+            "bill_date_printed": "19/11/26",
+            "lines": [
+                {"name_as_printed": "Fire Pork", "qty": 1, "unit_rate": 380, "amount": 380},
+            ],
+            "grand_total": 380,
+        },
         "test_future": {
             "readability": {"ok": True},
             "bill_number": "T6",

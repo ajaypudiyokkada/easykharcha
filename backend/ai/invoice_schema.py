@@ -132,7 +132,8 @@ class BillLine(_Base):
     qty: str | None = None
     unit_rate: str | None = None
     amount: str | None = None
-    confidence: float = 0.0
+    # None = the model gave no score for this line (unknown, not low).
+    confidence: float | None = None
 
     @field_validator("name_as_printed", mode="before")
     @classmethod
@@ -147,7 +148,7 @@ class BillLine(_Base):
     @field_validator("confidence", mode="before")
     @classmethod
     def _confidence(cls, value):
-        return _clamp(value)
+        return None if value is None else _clamp(value)
 
 
 class Charge(_Base):

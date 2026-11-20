@@ -1,11 +1,13 @@
 from django.urls import path
 
 from .import_views import (
+    InvoiceImportConfirmView,
     InvoiceImportCreateView,
     InvoiceImportDetailView,
     InvoiceImportPhotoView,
 )
 from .views import (
+    InvoiceBillPhotoView,
     InvoiceDetailView,
     InvoiceListCreateView,
     InvoiceMarkPaidView,
@@ -26,6 +28,16 @@ urlpatterns = [
         "businesses/<int:business_id>/invoice-imports/<int:import_id>/",
         InvoiceImportDetailView.as_view(),
         name="invoice-import-detail",
+    ),
+    path(
+        "businesses/<int:business_id>/invoice-imports/<int:import_id>/confirm/",
+        InvoiceImportConfirmView.as_view(),
+        name="invoice-import-confirm",
+    ),
+    path(
+        "businesses/<int:business_id>/invoices/<int:iid>/bill-photo/",
+        InvoiceBillPhotoView.as_view(),
+        name="invoice-bill-photo",
     ),
     path(
         "businesses/<int:business_id>/invoice-imports/<int:import_id>/photo/",

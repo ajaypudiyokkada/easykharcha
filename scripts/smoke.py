@@ -8700,6 +8700,436 @@ def check_invoice_import_matching_flow() -> None:
     print("OK - matching and checks post nothing (no invoice, no sale).")
 
 
+def check_invoice_import_confirm_flow() -> None:
+    """Step S4c: confirming an imported bill posts an invoice and sales from the SERVER's draft in one
+    transaction. AI_FAKE only."""
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+    from pathlib import Path
+
+    from PIL import Image
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+    from django.conf import settings as dj_settings
+    from django.core.management import call_command
+    from django.utils import timezone as dj_timezone
+
+    from audit.models import AuditLog
+    from invoices.models import Invoice as DjInvoice
+    from invoices.models import InvoiceImport, SellItemAlias, StoredImage
+    from sales.models import Sale as DjSale
+
+    if not dj_settings.AI_FAKE:
+        fail("import confirm: this check only runs with AI_FAKE=true (it must never call the real AI)")
+
+    _, owner_access, _ = signup_and_login("Confirm Owner")
+    status, body, _ = request(
+        "POST", "/businesses/", {"name": "Confirm Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    business_id = body["id"]
+    status, body, _ = request(
+        "POST", "/businesses/", {"name": "Other Confirm Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    other_id = body["id"]
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Conf Manager", "manager")
+    _, chef_access, _ = _add_team_member(business_id, owner_access, "Conf Chef", "head_chef")
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}]}, token=owner_access,
+    )
+    milk_id = body[0]["id"]
+    items = {}
+    for name, price in (
+        ("Fire Pork", "380"), ("Mutton Keema Panni Puri", "320"), ("Water Bottle", "20"),
+        ("Mixed Fried Rice", "300"), ("Paneer Butter Masala", "320"), ("Butter Naan", "60"),
+        ("Fresh Lime Soda", "90"), ("Mutton biriyani", "400"), ("Tandoori Roti", "30"),
+        ("Chilly chicken", "250"), ("Chicken pepper", "250"), ("Crispy Chicken Burger", "180"),
+        ("Chicken Alfredo Pasta", "300"), ("Oreo Milkshake", "150"), ("Tea", "50"),
+        ("Hot Chocolate", "80"), ("Masala Tea", "60"), ("French Fries", "120"),
+        ("Sweet Lassi", "120"), ("Chicken Steak", "380"), ("Chicken Noodles", "220"),
+    ):
+        items[name], _ = _create_dish(business_id, owner_access, name, price, [(milk_id, "0.1")])
+    today = _now_iso()[:10]
+    base = f"/businesses/{business_id}/invoice-imports/"
+    seq = {"n": 0}
+
+    def bill_jpeg(seed):
+        image = Image.new("RGB", (900, 1200), (235 - seed % 60, 230, 225 - seed % 40))
+        out = io.BytesIO()
+        image.save(out, format="JPEG")
+        return out.getvalue()
+
+    def read(fixture, data=None, biz=business_id, token=owner_access):
+        seq["n"] += 1
+        boundary = "EasyKharchaConfirmBoundary"
+        parts = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="fixture"\r\n\r\n{fixture}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="b.jpg"\r\n'
+            f"Content-Type: image/jpeg\r\n\r\n"
+        ).encode() + (data or bill_jpeg(seq["n"] * 11)) + f"\r\n--{boundary}--\r\n".encode()
+        status, body, _ = request(
+            "POST", f"/businesses/{biz}/invoice-imports/", token=token,
+            raw_body=parts, content_type=f"multipart/form-data; boundary={boundary}",
+        )
+        return body
+
+    def ready(fixture, **kw):
+        body = read(fixture, **kw)
+        if body["status"] != "ready":
+            fail(f"import confirm: {fixture} should be ready, got {body}")
+        return body
+
+    def auto(draft, skip=()):
+        out = []
+        for line in draft["lines"]:
+            m = line["match"]
+            if line["line_id"] in skip:
+                out.append({"line_id": line["line_id"], "decision": "skip"})
+            elif m["state"] == "matched":
+                out.append({"line_id": line["line_id"], "decision": "item", "sell_item_id": m["sell_item_id"]})
+            elif m["state"] == "check_match":
+                out.append({"line_id": line["line_id"], "decision": "item", "sell_item_id": m["suggestion"]["sell_item_id"]})
+            elif m["state"] == "not_an_item_suggested":
+                out.append({"line_id": line["line_id"], "decision": "not_item"})
+            else:
+                out.append({"line_id": line["line_id"], "decision": "skip"})
+        return out
+
+    def confirm(imp, lines, key=None, token=owner_access, biz=business_id, **extra):
+        seq["n"] += 1
+        payload = {"idempotency_key": key or f"conf-{seq['n']}-{imp['id']}", "sale_date": today, "lines": lines, **extra}
+        return request("POST", f"/businesses/{biz}/invoice-imports/{imp['id']}/confirm/", payload, token=token)
+
+    def counts():
+        return (
+            DjInvoice.objects.filter(business_id=business_id).count(),
+            DjSale.objects.filter(business_id=business_id).count(),
+        )
+
+    def sales_today():
+        return Decimal(request("GET", f"/businesses/{business_id}/sales/", token=owner_access)[1]["summary"]["sales_today"])
+
+    def raw_get(path, token):
+        req = urllib.request.Request(
+            f"{BASE_URL}{path}", headers={"Origin": ORIGIN, "Authorization": f"Bearer {token}"}
+        )
+        try:
+            response = urllib.request.urlopen(req, timeout=10)
+            return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers, exc.read()
+
+    # --- LOW_CONFIDENCE: no value is unknown, not low ---
+    noconf = ready("test_no_confidence")["draft"]
+    if any(c["code"] == "LOW_CONFIDENCE" for c in noconf["checks"]):
+        fail(f"import confirm: no confidence value must not raise LOW_CONFIDENCE, got {noconf['checks']}")
+    print("OK - a line or field with no confidence value is unknown, not low.")
+
+    # --- happy path: FOMO 14753 ---
+    sold_before = sales_today()
+    imp = ready("fomo_14753")
+    before = counts()
+    status, inv, _ = confirm(imp, auto(imp["draft"]))
+    if status != 201:
+        fail(f"import confirm: FOMO 14753 should confirm (201), got {status} ({inv})")
+    if inv["number"] != f"EK_{business_id}_INV-000001" or inv["source"] != "imported":
+        fail(f"import confirm: first imported invoice should be EK_<id>_INV-000001, got {inv['number']}/{inv['source']}")
+    if (inv["subtotal"], inv["tax_amount"], inv["total"], inv["bill_number_printed"]) != ("1060.00", "50.00", "1110.00", "14753"):
+        fail(f"import confirm: imported totals are the printed ones, got {inv}")
+    if (inv["lines_recorded"], inv["lines_total"], inv["partly_recorded"], inv["payment_status"]) != (4, 4, False, "unpaid"):
+        fail(f"import confirm: 4 of 4 recorded, not partly, unpaid by default, got {inv}")
+    if counts() != (before[0] + 1, before[1] + 4):
+        fail("import confirm: one invoice and four sales")
+    sales = list(DjSale.objects.filter(business_id=business_id, invoice_line__invoice_id=inv["id"]))
+    if sorted(s.amount for s in sales) != sorted([Decimal("380.00"), Decimal("320.00"), Decimal("60.00"), Decimal("300.00")]):
+        fail("import confirm: sale amounts are the printed line amounts (tax is not a sale)")
+    if any(s.business_date.isoformat() != today or s.source != "invoice" or s.is_deleted for s in sales):
+        fail("import confirm: sales carry the confirmed sale date")
+    if sales_today() - sold_before != Decimal("1060"):
+        fail("import confirm: the sales (which expected-usage/gap maths read) must count 1060, not the tax")
+    if [l["kind"] for l in inv["lines"]] != ["item"] * 4 or inv["lines"][0]["name_as_printed"] != "Fire Pork":
+        fail(f"import confirm: line kinds/names, got {inv['lines']}")
+    detail = InvoiceImport.objects.get(id=imp["id"])
+    if detail.status != "confirmed" or detail.invoice_id != inv["id"] or not detail.image.attached:
+        fail("import confirm: the import is confirmed, linked, and its photo stays attached")
+    status, body, _ = request("GET", f"{base}{imp['id']}/", token=owner_access)
+    if body["status"] != "confirmed" or body["invoice_id"] != inv["id"]:
+        fail(f"import confirm: the import should report its invoice, got {body}")
+    fomo_invoice = inv
+    print("OK - FOMO 14753 confirms: invoice #1, four sales at printed amounts, 1060 in sales, tax not a sale.")
+
+    # --- discount: Spice Route ---
+    imp = ready("spice_route")
+    status, inv, _ = confirm(imp, auto(imp["draft"]))
+    sales = DjSale.objects.filter(business_id=business_id, invoice_line__invoice_id=inv["id"])
+    if status != 201 or sum(s.amount for s in sales) != Decimal("558.00"):
+        fail(f"import confirm: Spice Route sales must add up to exactly 558.00, got {status} {[s.amount for s in sales]}")
+    if sorted(s.amount for s in sales) != [Decimal("108.00"), Decimal("162.00"), Decimal("288.00")]:
+        fail("import confirm: discount shares 32/12/18 come off 320/120/180")
+    if (inv["total"], inv["discount_total"], inv["round_off"], inv["tax_amount"], inv["subtotal"]) != ("586.00", "62.00", "0.10", "27.90", "620.00"):
+        fail(f"import confirm: printed discount/round off/tax kept on the invoice, got {inv}")
+    if inv["number"] != f"EK_{business_id}_INV-000002" or len(inv["tax_lines"]) != 2:
+        fail("import confirm: the number follows the same sequence; tax lines are kept")
+    print("OK - Spice Route: sales add up to 558.00 exactly (items 620 - discount 62).")
+
+    # --- Bhagini and Meat My Truk ---
+    imp = ready("bhagini")
+    status, inv, _ = confirm(imp, auto(imp["draft"]))
+    if status != 201 or inv["total"] != "3150.00" or inv["lines_recorded"] != 4:
+        fail(f"import confirm: Bhagini, got {status} {inv}")
+    imp = ready("meat_my_truk")
+    status, inv, _ = confirm(imp, auto(imp["draft"]))
+    kinds = {l["name_as_printed"]: l["kind"] for l in inv["lines"]}
+    if status != 201 or kinds != {"Crspy Chi Burgr": "item", "Parcel Large": "not_item"}:
+        fail(f"import confirm: Meat My Truk (burger item, parcel not an item), got {status} {kinds}")
+    if inv["partly_recorded"] or (inv["lines_recorded"], inv["lines_total"]) != (1, 2) or inv["total"] != "930.00":
+        fail(f"import confirm: a not_item line does not make it partly recorded, got {inv}")
+    parcel_line = [l for l in inv["lines"] if l["kind"] == "not_item"][0]
+    if parcel_line["sale"] is not None or parcel_line["sell_item"] is not None:
+        fail("import confirm: a not_item line has no sale and no item")
+    print("OK - Bhagini posts; Meat My Truk: Parcel as not_item, so not partly recorded (1 of 2 lines recorded).")
+
+    # --- validation ---
+    imp = ready("fomo_14751")
+    lines = auto(imp["draft"])
+    before = counts()
+    skipped = lines[:]
+    skipped[0] = {"line_id": lines[0]["line_id"], "decision": "skip"}
+    status, body, _ = confirm(imp, skipped)
+    if status != 400 or "accept_partial" not in body.get("field_errors", {}):
+        fail(f"import confirm: a skipped line needs accept_partial, got {status} {body}")
+    status, body, _ = confirm(imp, lines[:-1])
+    if status != 400 or not body.get("row_errors"):
+        fail(f"import confirm: an undecided line is rejected, got {status} {body}")
+    status, body, _ = confirm(imp, [{"line_id": l["line_id"], "decision": "not_item"} for l in imp["draft"]["lines"]])
+    if status != 400 or "lines" not in body.get("field_errors", {}):
+        fail(f"import confirm: at least one item line is needed, got {status} {body}")
+    bad = [dict(l) for l in lines]
+    bad[1] = {"line_id": lines[1]["line_id"], "decision": "item"}
+    status, body, _ = confirm(imp, bad)
+    if status != 400 or body["row_errors"][0]["field"] != "sell_item_id":
+        fail(f"import confirm: an item line needs a sell_item_id, got {status} {body}")
+    bad[1] = {"line_id": lines[1]["line_id"], "decision": "item", "sell_item_id": 999999999}
+    if confirm(imp, bad)[0] != 400:
+        fail("import confirm: a foreign item id is rejected")
+    status, body, _ = confirm(imp, lines, sale_date="2999-01-01")
+    if status != 400 or "sale_date" not in body.get("field_errors", {}):
+        fail(f"import confirm: a future sale date is rejected, got {status} {body}")
+    payload = {"idempotency_key": "no-date", "lines": lines}
+    status, body, _ = request("POST", f"{base}{imp['id']}/confirm/", payload, token=owner_access)
+    if status != 400 or "sale_date" not in body.get("field_errors", {}):
+        fail(f"import confirm: sale_date is required, got {status} {body}")
+    nums = ready("test_missing_numbers")
+    status, body, _ = confirm(nums, [{"line_id": "l1", "decision": "item", "sell_item_id": items["Fire Pork"]}])
+    if status != 400 or "couldn't be read" not in body["row_errors"][0]["message"]:
+        fail(f"import confirm: a line with no qty/amount can only be skipped or not_item, got {status} {body}")
+    if counts() != before:
+        fail("import confirm: every rejected confirm creates nothing")
+    # the number was not burnt by any of those failures
+    status, inv, _ = confirm(imp, skipped, accept_partial=True, qty="999", amount="1", total="5.00")
+    if status != 201 or inv["number"] != f"EK_{business_id}_INV-000005":
+        fail(f"import confirm: failures burn no number (expected 000005), got {status} {inv.get('number')}")
+    if not inv["partly_recorded"] or (inv["lines_recorded"], inv["lines_total"]) != (9, 10):
+        fail(f"import confirm: partly recorded 9 of 10, got {inv['partly_recorded']} {inv['lines_recorded']}/{inv['lines_total']}")
+    if inv["total"] != "1574.00" or inv["lines"][1]["amount"] != "150.00":
+        fail("import confirm: client-sent qty/amount/total must be ignored; the draft's numbers are used")
+    print("OK - validation: skip needs accept_partial, undecided/unmatched/unreadable lines rejected, nothing created, no number burnt, client numbers ignored.")
+
+    # --- duplicates ---
+    again = ready("fomo_14753")
+    checks = {c["code"]: c for c in again["draft"]["checks"]}
+    if "DUPLICATE_BILL" not in checks or checks["DUPLICATE_BILL"]["data"]["number"] != fomo_invoice["number"] or not checks["DUPLICATE_BILL"]["data"]["date"]:
+        fail(f"import confirm: the draft should warn DUPLICATE_BILL with the earlier invoice, got {again['draft']['checks']}")
+    before = counts()
+    status, body, _ = confirm(again, auto(again["draft"]))
+    if status != 400 or "add_anyway" not in body.get("field_errors", {}) or counts() != before:
+        fail(f"import confirm: a duplicate bill needs add_anyway, got {status} {body}")
+    possible = ready("test_possible_dup")
+    pcodes = {c["code"] for c in possible["draft"]["checks"]}
+    if "POSSIBLE_DUPLICATE" not in pcodes or "DUPLICATE_BILL" in pcodes:
+        fail(f"import confirm: no bill number + same date and total is POSSIBLE_DUPLICATE, got {pcodes}")
+    status, body, _ = confirm(possible, auto(possible["draft"]))
+    if status != 400 or "add_anyway" not in body.get("field_errors", {}):
+        fail("import confirm: a possible duplicate needs add_anyway")
+    # a duplicate of a VOIDED invoice does not count
+    for row in DjInvoice.objects.filter(business_id=business_id, bill_number_printed="14753"):
+        request("POST", f"/businesses/{business_id}/invoices/{row.id}/void/", {}, token=owner_access)
+    free = ready("fomo_14753")
+    if any(c["code"] in ("DUPLICATE_BILL", "POSSIBLE_DUPLICATE") for c in free["draft"]["checks"]):
+        fail("import confirm: a voided earlier invoice must not count as a duplicate")
+    # SAME_PHOTO resolves the earlier invoice once that import was confirmed
+    photo = bill_jpeg(4242)
+    first = ready("fomo_14751", data=photo)
+    status, first_inv, _ = confirm(first, auto(first["draft"]), add_anyway=True)
+    if status != 201:
+        fail(f"import confirm: setup for same-photo failed {status} {first_inv}")
+    second = ready("test_ai_pick", data=photo)
+    same = [c for c in second["draft"]["checks"] if c["code"] == "SAME_PHOTO"]
+    if not same or same[0]["data"]["invoice_id"] != first_inv["id"] or second["draft"]["same_photo_invoice_id"] != first_inv["id"]:
+        fail(f"import confirm: the same photo should resolve the earlier invoice, got {second['draft']['checks']}")
+    lines2 = auto(second["draft"])
+    status, body, _ = confirm(second, lines2, accept_partial=True)
+    if status != 400 or "add_anyway" not in body.get("field_errors", {}):
+        fail(f"import confirm: SAME_PHOTO needs add_anyway, got {status} {body}")
+    status, inv, _ = confirm(second, lines2, accept_partial=True, add_anyway=True)
+    if status != 201:
+        fail(f"import confirm: add_anyway should post, got {status} {inv}")
+    print("OK - DUPLICATE_BILL / POSSIBLE_DUPLICATE / SAME_PHOTO need add_anyway; a voided invoice does not count.")
+
+    # --- idempotency, a different key, simultaneous confirms ---
+    imp = ready("bhagini")
+    lines = auto(imp["draft"])
+    status, inv, _ = confirm(imp, lines, key="idem-1", add_anyway=True)
+    status2, replay, _ = confirm(imp, lines, key="idem-1", add_anyway=True)
+    if status != 201 or status2 != 200 or replay["id"] != inv["id"]:
+        fail(f"import confirm: a replay of the same key returns the original (200), got {status}/{status2}")
+    status3, body, _ = confirm(imp, lines, key="idem-2", add_anyway=True)
+    if status3 != 409 or body["error"]["code"] != "IMPORT_ALREADY_CONFIRMED":
+        fail(f"import confirm: a different key on a confirmed import is 409, got {status3} {body}")
+    imp = ready("fomo_14751")
+    lines = auto(imp["draft"])
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: confirm(imp, lines, key="race-1", add_anyway=True), range(4)))
+    codes = sorted(r[0] for r in results)
+    if codes != [200, 200, 200, 201] or len({r[1]["id"] for r in results}) != 1:
+        fail(f"import confirm: simultaneous confirms make exactly one invoice, got {codes}")
+    if DjInvoice.objects.filter(business_id=business_id, idempotency_key="race-1").count() != 1:
+        fail("import confirm: exactly one invoice for the raced import")
+    print("OK - replay 200, a second key 409, and 4 simultaneous confirms make one invoice.")
+
+    # --- payment ---
+    def new_ready():
+        return ready("meat_my_truk")
+
+    def proof():
+        raw, ct = multipart_body("image", "p.jpg", bill_jpeg(900 + seq["n"]), "image/jpeg")
+        seq["n"] += 1
+        return request("POST", f"/businesses/{business_id}/payment-proofs/", token=owner_access, raw_body=raw, content_type=ct)[1]["proof_id"]
+
+    imp = new_ready()
+    lines = auto(imp["draft"])
+    before = counts()
+    for label, payment in (
+        ("UPI without a proof", {"mode": "upi"}),
+        ("cash with a proof", {"mode": "cash", "proof_id": proof()}),
+        ("a made-up proof", {"mode": "card", "proof_id": 99999999}),
+        ("no mode", {"proof_id": proof()}),
+    ):
+        status, body, _ = confirm(imp, lines, payment=payment, add_anyway=True)
+        if status != 400:
+            fail(f"import confirm: {label} should be 400, got {status} {body}")
+    if counts() != before:
+        fail("import confirm: an invalid payment creates nothing")
+    status, paid, _ = confirm(imp, lines, payment={"mode": "upi", "proof_id": proof()}, add_anyway=True)
+    if status != 201 or paid["payment_status"] != "paid" or paid["payment_mode"] != "upi" or not paid["proof_available"]:
+        fail(f"import confirm: UPI with a proof pays the invoice, got {status} {paid}")
+    imp = new_ready()
+    status, cash, _ = confirm(imp, auto(imp["draft"]), payment={"mode": "cash"}, add_anyway=True)
+    if status != 201 or cash["payment_status"] != "paid" or cash["proof_available"]:
+        fail(f"import confirm: cash needs no proof, got {status} {cash}")
+    print("OK - payment: unpaid by default, cash, UPI with proof; bad payments create nothing.")
+
+    # --- remember ---
+    imp = new_ready()
+    remember_lines = [dict(l) for l in auto(imp["draft"])]
+    remember_lines[0]["remember"] = True
+    remember_lines[1]["remember"] = True
+    status, inv, _ = confirm(imp, remember_lines, add_anyway=True)
+    if status != 201:
+        fail(f"import confirm: remember setup failed {status} {inv}")
+    kinds = {a.normalized_alias: a.kind for a in SellItemAlias.objects.filter(business_id=business_id)}
+    if kinds.get("crspy chi burgr") != "item" or kinds.get("parcel large") != "not_item":
+        fail(f"import confirm: remember creates aliases for item and not_item, got {kinds}")
+    nxt = ready("meat_my_truk")["draft"]["lines"]
+    if (nxt[0]["match"]["state"], nxt[0]["match"]["source"]) != ("matched", "remembered") or nxt[1]["match"]["source"] != "remembered":
+        fail(f"import confirm: the next import matches from the aliases, got {[l['match'] for l in nxt]}")
+    print("OK - 'Remember this match' creates aliases and the next import matches from them.")
+
+    # --- void, list, bill photo ---
+    status, voided, _ = request("POST", f"/businesses/{business_id}/invoices/{inv['id']}/void/", {"reason": "test"}, token=owner_access)
+    gone = DjSale.objects.filter(business_id=business_id, invoice_line__invoice_id=inv["id"], is_deleted=False).count()
+    if status != 200 or voided["status"] != "void" or gone != 0:
+        fail(f"import confirm: voiding an imported invoice reverses its sales, got {status} {gone}")
+    status, body, _ = request("GET", f"/businesses/{business_id}/invoices/?source=imported", token=owner_access)
+    if status != 200 or not body["results"] or any(r["source"] != "imported" for r in body["results"]):
+        fail("import confirm: the source filter lists only imported invoices")
+    partly = [r for r in body["results"] if r["partly_recorded"]]
+    if not partly or partly[0]["lines_total"] <= partly[0]["lines_recorded"]:
+        fail("import confirm: the list carries lines_recorded / lines_total / partly_recorded")
+    status, created, _ = request(
+        "POST", f"/businesses/{business_id}/invoices/",
+        {"sale_date": today, "lines": [{"sell_item": items["Fire Pork"], "quantity": "1"}]}, token=owner_access,
+    )
+    if status != 201 or created["source"] != "created" or (created["lines_recorded"], created["lines_total"]) != (1, 1):
+        fail(f"import confirm: Create invoice still works and shows 1 of 1, got {status} {created}")
+    if created["lines"][0]["kind"] != "item" or created["lines"][0]["recorded_amount"] != "380.00":
+        fail("import confirm: a created invoice's lines are kind item with a recorded amount")
+    photo_url = f"/businesses/{business_id}/invoices/{fomo_invoice['id']}/bill-photo/"
+    for who, token in (("Owner", owner_access), ("Manager", manager_access)):
+        code, headers, data = raw_get(photo_url, token)
+        if code != 200 or headers.get("Content-Type") != "image/jpeg" or "no-store" not in headers.get("Cache-Control", ""):
+            fail(f"import confirm: {who} should get the bill photo (private, no-store), got {code}")
+    if raw_get(photo_url, chef_access)[0] != 403:
+        fail("import confirm: a Head chef must not see the bill photo")
+    if raw_get(f"/businesses/{other_id}/invoices/{fomo_invoice['id']}/bill-photo/", owner_access)[0] != 404:
+        fail("import confirm: another business's invoice must be 404")
+    code, _, data = raw_get(f"/businesses/{business_id}/invoices/{created['id']}/bill-photo/", owner_access)
+    if code != 404 or b"NO_PHOTO" not in data:
+        fail("import confirm: a created invoice has no bill photo (404 NO_PHOTO)")
+    pdf = read("bhagini")
+    # a PDF import: upload a real PDF through the same endpoint
+    boundary = "EasyKharchaPdfBoundary"
+    parts = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="fixture"\r\n\r\nmeat_my_truk\r\n'
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="b.pdf"\r\n'
+        f"Content-Type: application/pdf\r\n\r\n"
+    ).encode() + make_pdf() + f"\r\n--{boundary}--\r\n".encode()
+    status, pdf_import, _ = request("POST", base, token=owner_access, raw_body=parts, content_type=f"multipart/form-data; boundary={boundary}")
+    status, pdf_inv, _ = confirm(pdf_import, auto(pdf_import["draft"]), add_anyway=True)
+    code, _, data = raw_get(f"/businesses/{business_id}/invoices/{pdf_inv['id']}/bill-photo/", owner_access)
+    if status != 201 or code != 404 or b"NO_PHOTO" not in data:
+        fail(f"import confirm: a PDF import has no bill photo, got {status}/{code}")
+    # a confirmed import's photo survives the unattached purge, then follows normal retention
+    stored = DjInvoice.objects.get(id=fomo_invoice["id"]).invoice_import.image
+    StoredImage.objects.filter(id=stored.id).update(uploaded_at=dj_timezone.now() - timedelta(hours=30))
+    call_command("purge_invoice_images", stdout=io.StringIO())
+    if raw_get(photo_url, owner_access)[0] != 200:
+        fail("import confirm: a confirmed import's photo is attached and survives the unattached purge")
+    StoredImage.objects.filter(id=stored.id).update(uploaded_at=dj_timezone.now() - timedelta(days=61))
+    call_command("purge_invoice_images", stdout=io.StringIO())
+    code, _, data = raw_get(photo_url, owner_access)
+    refreshed = request("GET", f"/businesses/{business_id}/invoices/{fomo_invoice['id']}/", token=owner_access)[1]
+    if code != 404 or b"PHOTO_REMOVED" not in data or not refreshed["bill_photo_removed"] or refreshed["bill_photo_available"]:
+        fail(f"import confirm: after retention the bill photo is removed, got {code}")
+    print("OK - void reverses sales; source filter and counts; bill-photo stream rules (roles, isolation, PDF, removed).")
+
+    # --- not ready / not allowed ---
+    bad = read("unreadable")
+    status, body, _ = confirm(bad, [{"line_id": "l1", "decision": "skip"}])
+    if status != 409 or body["error"]["code"] != "IMPORT_NOT_READY":
+        fail(f"import confirm: a failed import can't be confirmed (409), got {status} {body}")
+    gone_import = ready("fomo_14751")
+    request("DELETE", f"{base}{gone_import['id']}/", token=owner_access)
+    if confirm(gone_import, [{"line_id": "l1", "decision": "skip"}])[0] != 409:
+        fail("import confirm: an abandoned import can't be confirmed (409)")
+    live = ready("meat_my_truk")
+    if confirm(live, auto(live["draft"]), token=chef_access)[0] != 403:
+        fail("import confirm: a Head chef must not confirm")
+    if request("POST", f"/businesses/{other_id}/invoice-imports/{live['id']}/confirm/", {"idempotency_key": "x", "sale_date": today, "lines": []}, token=owner_access)[0] != 404:
+        fail("import confirm: another business's import is 404")
+    if not AuditLog.objects.filter(business_id=business_id, action="invoice.import_confirm", metadata__invoice_id=fomo_invoice["id"]).exists():
+        fail("import confirm: invoice.import_confirm is audit-logged")
+    print("OK - failed/abandoned imports are 409; Head chef 403; another business 404; audit entry written.")
+
+
 def check_admin_delete_flow() -> None:
     """Step F1: Django admin delete rules for User/Business — direct ORM + django.test.Client against
     the same dev database the rest of this suite's API checks use (admin pages are server-rendered,
@@ -8902,6 +9332,7 @@ ALL_CHECKS = [
     check_invoice_payments_flow,
     check_invoice_imports_flow,
     check_invoice_import_matching_flow,
+    check_invoice_import_confirm_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -8927,7 +9358,11 @@ AREA_CHECKS: dict[str, list] = {
     ],
     "sales": [check_sales_and_gap_flow],
     "invoices": [check_invoices_flow, check_invoice_payments_flow],
-    "invoice_import": [check_invoice_imports_flow, check_invoice_import_matching_flow],
+    "invoice_import": [
+        check_invoice_imports_flow,
+        check_invoice_import_matching_flow,
+        check_invoice_import_confirm_flow,
+    ],
     "alerts": [check_alerts_flow, check_expiry_alerts_flow, check_low_stock_flow],
     "wastage": [check_count_and_wastage_flow],
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],

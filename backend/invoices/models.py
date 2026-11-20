@@ -8,6 +8,13 @@ from stock.models import SellItem
 
 class InvoiceSource(models.TextChoices):
     CREATED = "created", "Created"
+    IMPORTED = "imported", "Imported"
+
+
+class InvoiceLineKind(models.TextChoices):
+    ITEM = "item", "Item"
+    NOT_ITEM = "not_item", "Not an item"
+    SKIPPED = "skipped", "Skipped"
 
 
 class InvoiceStatus(models.TextChoices):
@@ -130,6 +137,20 @@ class Invoice(models.Model):
     proof = models.ForeignKey(
         StoredImage, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoices"
     )
+    # --- imported bills only (source "imported"); a created invoice leaves these empty ---
+    # The date the bill itself carried (the owner may confirm a different sale_date).
+    bill_date = models.DateField(null=True, blank=True)
+    bill_number_printed = models.CharField(max_length=40, blank=True, default="")
+    bill_date_printed = models.CharField(max_length=40, blank=True, default="")
+    # The numbers as printed on the bill. subtotal/tax_amount/total above are copies of these.
+    printed_items_total = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    tax_lines = models.JSONField(default=list, blank=True)
+    round_off = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    # True when the owner left some bill lines out ("skip").
+    partly_recorded = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("-sequence_no",)
@@ -150,14 +171,30 @@ class Invoice(models.Model):
 
 class InvoiceLine(models.Model):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
-    sell_item = models.ForeignKey(SellItem, on_delete=models.PROTECT, related_name="invoice_lines")
+    # What this line is: an item sold (has a Sale), a charge/packing line that is not an item, or a
+    # line the owner chose to leave out. Only "item" lines have a sell_item and a Sale.
+    kind = models.CharField(
+        max_length=10, choices=InvoiceLineKind.choices, default=InvoiceLineKind.ITEM
+    )
+    sell_item = models.ForeignKey(
+        SellItem, on_delete=models.PROTECT, null=True, blank=True, related_name="invoice_lines"
+    )
     # The item's name when the bill was made — a later rename never rewrites a printed bill.
     name = models.CharField(max_length=120)
-    quantity = models.DecimalField(max_digits=10, decimal_places=3)
-    rate = models.DecimalField(max_digits=10, decimal_places=2)
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    # Imported lines: the name exactly as printed on the bill.
+    name_as_printed = models.CharField(max_length=120, blank=True, default="")
+    # Null only on an imported line whose number was not read.
+    quantity = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # As printed / entered (before any share of a bill discount).
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    # What was recorded as the sale: `amount` minus this line's share of the bill discount. Null for a
+    # line that was not recorded.
+    recorded_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     # This line's own Sale row (many Sale rows per item per date are allowed, so nothing is merged).
-    sale = models.OneToOneField(Sale, on_delete=models.PROTECT, related_name="invoice_line")
+    sale = models.OneToOneField(
+        Sale, on_delete=models.PROTECT, null=True, blank=True, related_name="invoice_line"
+    )
     position = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
@@ -173,6 +210,7 @@ class ImportStatus(models.TextChoices):
     READY = "ready", "ready"
     FAILED = "failed", "failed"
     ABANDONED = "abandoned", "abandoned"
+    CONFIRMED = "confirmed", "confirmed"
 
 
 class InvoiceImport(models.Model):
@@ -209,6 +247,12 @@ class InvoiceImport(models.Model):
     heartbeat = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     abandoned_at = models.DateTimeField(null=True, blank=True)
+    # Set when the owner confirms: the invoice this bill became. The stored photo stays reachable
+    # through it (invoices/<id>/bill-photo/).
+    invoice = models.OneToOneField(
+        Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoice_import"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at", "-id")

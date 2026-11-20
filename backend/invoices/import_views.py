@@ -20,9 +20,12 @@ from audit.log import log_action
 from businesses.models import Business
 from businesses.permissions import require_permission
 
+from .duplicates import draft_bill_date, find_duplicates
 from .images import ImageTooLarge, InvalidImage, absolute_path, delete_file, store_image
+from .import_confirm import confirm_import
 from .import_jobs import process_invoice_import
 from .models import ImportStatus, InvoiceImport, StoredImageKind
+from .serializers import InvoiceSerializer
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PDF_PAGES = 3
@@ -75,7 +78,23 @@ def _payload(imp: InvoiceImport) -> dict:
         "photo_removed": image is not None and image.removed_at is not None,
     }
     if imp.status == ImportStatus.READY:
-        data["draft"] = imp.draft
+        draft = dict(imp.draft)
+        # Duplicates are worked out now, against the invoices that exist now (one may have been
+        # made since the bill was read), and listed with the other checks.
+        duplicates = find_duplicates(
+            imp.business,
+            draft,
+            draft_bill_date(draft),
+            bill_number=draft.get("bill_number"),
+            exclude_import_id=imp.id,
+        )
+        draft["checks"] = list(draft.get("checks", [])) + duplicates
+        same = next((d for d in duplicates if d["code"] == "SAME_PHOTO"), None)
+        draft["same_photo_invoice_id"] = same["data"]["invoice_id"] if same else None
+        data["draft"] = draft
+    if imp.status == ImportStatus.CONFIRMED and imp.invoice is not None:
+        data["invoice_id"] = imp.invoice.id
+        data["invoice_number"] = imp.invoice.number
     return data
 
 
@@ -173,6 +192,22 @@ class InvoiceImportCreateView(APIView):
             process_invoice_import(imp.id)
             imp.refresh_from_db()
         return Response(_payload(imp), status=202)
+
+
+class InvoiceImportConfirmView(APIView):
+    """POST: the owner's decisions on a ready draft become an invoice and sales, in one transaction.
+    201 with the invoice; 200 when the same idempotency key already confirmed this import."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id, import_id):
+        business = get_object_or_404(Business, id=business_id)
+        require_permission(business, request.user, "sales.create")
+        invoice, created = confirm_import(
+            business=business, user=request.user, import_id=import_id, data=request.data
+        )
+        invoice = type(invoice).objects.select_related("business", "proof").get(id=invoice.id)
+        return Response(InvoiceSerializer(invoice).data, status=201 if created else 200)
 
 
 class InvoiceImportDetailView(APIView):
