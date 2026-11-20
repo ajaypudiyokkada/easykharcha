@@ -1,6 +1,5 @@
 from datetime import timedelta
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Sum
@@ -16,26 +15,19 @@ from audit.log import log_action
 from businesses.models import Business
 from businesses.permissions import require_permission
 
-from .exceptions import FutureSaleDate, SaleValidationError, TooManySaleLines
+from .exceptions import TooManySaleLines
 from .models import Sale
-from .serializers import SaleCreateSerializer, SaleLineRowSerializer, SaleSerializer
+from .serializers import SaleCreateSerializer, SaleSerializer
+from .service import (
+    MAX_LINES,
+    business_today,
+    check_sale_date,
+    record_sales,
+    validate_lines,
+)
 
-MAX_LINES = 30
 PAGE_SIZE = 50
 ZERO = Decimal("0")
-
-
-def _business_today(business: Business):
-    tz = ZoneInfo(business.timezone)
-    return timezone.localtime(timezone.now(), tz).date()
-
-
-def _row_errors_from(row_number: int, errors: dict) -> list[dict]:
-    flattened = []
-    for field, messages in errors.items():
-        message = messages[0] if isinstance(messages, list) else messages
-        flattened.append({"row": row_number, "field": field, "message": str(message)})
-    return flattened
 
 
 def _lines_from_request(request) -> list:
@@ -47,42 +39,8 @@ def _lines_from_request(request) -> list:
     return lines
 
 
-def _validate_lines(business: Business, raw_lines: list) -> list[dict]:
-    """Returns cleaned line dicts (with a real `SellItem` swapped in for the id, and `amount` filled
-    in from quantity x selling price when left out) or raises SaleValidationError with every line's
-    errors at once."""
-    sell_items_by_id = {item.id: item for item in business.sell_items.filter(active=True)}
-    row_errors: list[dict] = []
-    cleaned = []
-
-    for index, row in enumerate(raw_lines, start=1):
-        serializer = SaleLineRowSerializer(data=row)
-        if not serializer.is_valid():
-            row_errors.extend(_row_errors_from(index, serializer.errors))
-            continue
-        data = serializer.validated_data
-        sell_item = sell_items_by_id.get(data["sell_item"])
-        if sell_item is None:
-            row_errors.append(
-                {
-                    "row": index,
-                    "field": "sell_item",
-                    "message": "Choose an item from this business.",
-                }
-            )
-            continue
-        amount = data.get("amount")
-        if amount is None:
-            amount = (data["quantity"] * sell_item.selling_price).quantize(Decimal("0.01"))
-        cleaned.append({"sell_item": sell_item, "quantity": data["quantity"], "amount": amount})
-
-    if row_errors:
-        raise SaleValidationError(row_errors)
-    return cleaned
-
-
 def _summary_for(business: Business) -> dict:
-    today = _business_today(business)
+    today = business_today(business)
     week_start = today - timedelta(days=6)
     active = Sale.objects.filter(business=business, is_deleted=False)
     today_qs = active.filter(business_date=today)
@@ -132,23 +90,17 @@ class SaleListCreateView(APIView):
         header = SaleCreateSerializer(data=request.data)
         header.is_valid(raise_exception=True)
         business_date = header.validated_data["business_date"]
-        if business_date > _business_today(business):
-            raise FutureSaleDate()
+        check_sale_date(business, business_date)
 
         raw_lines = _lines_from_request(request)
-        cleaned_lines = _validate_lines(business, raw_lines)
+        cleaned_lines = validate_lines(business, raw_lines)
 
         with transaction.atomic():
-            created = Sale.objects.bulk_create(
-                [
-                    Sale(
-                        business=business,
-                        business_date=business_date,
-                        recorded_by=request.user,
-                        **line,
-                    )
-                    for line in cleaned_lines
-                ]
+            created = record_sales(
+                business=business,
+                user=request.user,
+                business_date=business_date,
+                lines=cleaned_lines,
             )
 
         log_action(

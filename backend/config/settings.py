@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "counts",
     "wastage",
     "sales",
+    "invoices",
     "alerts",
     "reports",
     "ai",
@@ -88,6 +89,14 @@ ADMIN_URL_PATH = env.str("ADMIN_URL_PATH", default="manage-ek/").strip("/") + "/
 DATABASES = {
     "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
 }
+# SQLite has no row locks (select_for_update is a no-op there). IMMEDIATE makes every atomic block take
+# SQLite's single write lock up front and wait for it, so concurrent writers queue instead of failing
+# with "database is locked" mid-transaction (the invoice number sequence relies on this in dev;
+# Postgres uses a real row lock).
+if DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
+    DATABASES["default"].setdefault("OPTIONS", {}).update(
+        {"transaction_mode": "IMMEDIATE", "timeout": 20}
+    )
 
 AUTH_USER_MODEL = "accounts.User"
 

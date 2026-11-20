@@ -7,12 +7,13 @@ from stock.models import SellItem
 
 class SaleSource(models.TextChoices):
     MANUAL = "manual", "Manual"
+    INVOICE = "invoice", "Invoice"
 
 
 class Sale(models.Model):
     """One sell item's units sold on one business-local calendar date. Soft-deleted, never
-    hard-deleted, same as a Purchase or a WastageEntry. `source` is always "manual" for now — the
-    Petpooja upload this step deliberately doesn't build will add another value later."""
+    hard-deleted, same as a Purchase or a WastageEntry. `source` is "manual", or "invoice" for a row
+    made by saving an Invoice (invoices/service.py)."""
 
     business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="sales")
     sell_item = models.ForeignKey(SellItem, on_delete=models.PROTECT, related_name="sales")
