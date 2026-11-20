@@ -22,13 +22,15 @@ import { MIN_TOUCH_TARGET } from '../src/ui/constants';
 
 const s = strings.saleHub;
 
-type OptionKey = 'manual' | 'scan' | 'report' | 'invoice';
+type OptionKey = 'manual' | 'import' | 'invoice' | 'report';
 
-const OPTIONS: { key: OptionKey; icon: IconName }[] = [
+const ONE_SALE_OPTIONS: { key: OptionKey; icon: IconName }[] = [
   { key: 'manual', icon: 'sales' },
-  { key: 'scan', icon: 'camera' },
-  { key: 'report', icon: 'document' },
+  { key: 'import', icon: 'camera' },
   { key: 'invoice', icon: 'invoice' },
+];
+const FULL_DAY_OPTIONS: { key: OptionKey; icon: IconName }[] = [
+  { key: 'report', icon: 'document' },
 ];
 
 export default function RecordSaleHub() {
@@ -65,43 +67,53 @@ export default function RecordSaleHub() {
     );
   }
 
+  const renderOption = (option: { key: OptionKey; icon: IconName }) => {
+    const copy = s.options[option.key];
+    const comingSoon = option.key !== 'manual';
+    return (
+      <Pressable
+        key={option.key}
+        accessibilityRole="button"
+        accessibilityLabel={copy.title}
+        style={styles.option}
+        onPress={() => (comingSoon ? setComingSoonKey(option.key) : setManualVisible(true))}
+      >
+        <View style={styles.optionIcon}>
+          <Icon name={option.icon} size={type.lg} colour={colours.primary} />
+        </View>
+        <View style={styles.optionCopy}>
+          <View style={styles.titleRow}>
+            <Body style={styles.optionTitle}>{copy.title}</Body>
+            <View style={[styles.badge, comingSoon ? styles.badgeMuted : null]}>
+              <Small style={[styles.badgeText, comingSoon ? styles.badgeTextMuted : null]}>
+                {comingSoon ? s.comingSoonBadge : s.fastestBadge}
+              </Small>
+            </View>
+          </View>
+          <Small style={styles.optionDesc}>{copy.desc}</Small>
+        </View>
+        <Icon name="chevronRight" size={20} colour={colours.muted} />
+      </Pressable>
+    );
+  };
+
   return (
     <Screen>
       <View style={styles.page}>
         <HubHeader onBack={goBack} />
         <Small style={styles.subtitle}>{s.subtitle}</Small>
 
-        <View style={styles.options}>
-          {OPTIONS.map((option) => {
-            const copy = s.options[option.key];
-            const comingSoon = option.key !== 'manual';
-            return (
-              <Pressable
-                key={option.key}
-                accessibilityRole="button"
-                accessibilityLabel={copy.title}
-                style={styles.option}
-                onPress={() => (comingSoon ? setComingSoonKey(option.key) : setManualVisible(true))}
-              >
-                <View style={styles.optionIcon}>
-                  <Icon name={option.icon} size={type.lg} colour={colours.primary} />
-                </View>
-                <View style={styles.optionCopy}>
-                  <View style={styles.titleRow}>
-                    <Body style={styles.optionTitle}>{copy.title}</Body>
-                    <View style={[styles.badge, comingSoon ? styles.badgeMuted : null]}>
-                      <Small style={[styles.badgeText, comingSoon ? styles.badgeTextMuted : null]}>
-                        {comingSoon ? s.comingSoonBadge : s.fastestBadge}
-                      </Small>
-                    </View>
-                  </View>
-                  <Small style={styles.optionDesc}>{copy.desc}</Small>
-                </View>
-                <Icon name="chevronRight" size={20} colour={colours.muted} />
-              </Pressable>
-            );
-          })}
+        <Small style={styles.sectionLabel}>{s.oneSaleLabel}</Small>
+        <View style={styles.options}>{ONE_SALE_OPTIONS.map(renderOption)}</View>
+
+        <View style={styles.orRow}>
+          <View style={styles.orLine} />
+          <Small style={styles.orText}>{s.orDivider}</Small>
+          <View style={styles.orLine} />
         </View>
+
+        <Small style={styles.sectionLabel}>{s.fullDayLabel}</Small>
+        <View style={styles.options}>{FULL_DAY_OPTIONS.map(renderOption)}</View>
       </View>
 
       <RecordSalesSheet
@@ -182,6 +194,26 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: colours.muted,
+  },
+  sectionLabel: {
+    color: colours.muted,
+    fontFamily: fonts.bodyExtraBold,
+    letterSpacing: 0.8,
+    marginTop: spacing.xs,
+  },
+  orRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  orLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colours.mint,
+  },
+  orText: {
+    color: colours.muted,
+    fontFamily: fonts.bodyExtraBold,
   },
   options: {
     gap: spacing.sm,

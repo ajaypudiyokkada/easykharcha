@@ -391,7 +391,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `sales.tsx` — Sales (Owner/Manager): summary strip, "Record sales", a date switcher, today's sales,
   Owner-only delete via confirmation dialog; Step S2: "Record sales" routes to `/record-sale` instead
   of opening `RecordSalesSheet` directly, forwarding the viewed `date`
-- `record-sale.tsx` — Step S2: the "Record a sale" hub (`sales.create`), reached from Home's quick
+- `record-sale.tsx` — Step S2/S3a: the "Record sales" hub (Record manually · Import invoice · Create invoice · OR · daily report; last three "Coming soon") (`sales.create`), reached from Home's quick
   action and Sales' own button (`?returnTo=home|sales`); Record manually opens the unchanged
   `RecordSalesSheet`, the other three options are "Coming soon" (a sheet pointing back at Record
   manually); a save or the back arrow returns to `returnTo` (`?saved=sales` on save, read once by
