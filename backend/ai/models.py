@@ -109,6 +109,8 @@ class AiUsageKind(models.TextChoices):
     SETUP_FAMILY_RECIPE = "setup_family_recipe", "setup_family_recipe"
     # Step EK-3c: the one ingredient merge + low-stock category call in resolve_ingredients.
     SETUP_INGREDIENT_MERGE = "setup_ingredient_merge", "setup_ingredient_merge"
+    # Step S4a: reading one imported customer bill (invoices/import_jobs.py).
+    INVOICE_READ = "invoice_read", "invoice_read"
 
 
 class AiUsage(models.Model):

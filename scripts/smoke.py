@@ -8134,6 +8134,327 @@ def check_invoice_payments_flow() -> None:
     print("OK - deleting a business (with invoices) deletes its stored image files.")
 
 
+def check_invoice_imports_flow() -> None:
+    """Step S4a: Import invoice, upload + read. AI_FAKE only: upload validation, every canned bill
+    fixture, PDFs read but never stored, no customer fields in the draft, nothing posted, the separate
+    daily bucket, same-photo warning, the photo stream, abandoning, the unconfirmed purge, roles."""
+    import io
+    import json as json_module
+    from datetime import timedelta
+    from pathlib import Path
+
+    from PIL import Image
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+    from django.conf import settings as dj_settings
+    from django.core.management import call_command
+    from django.utils import timezone as dj_timezone
+
+    from ai.models import AiUsage
+    from invoices.models import Invoice as DjInvoice
+    from invoices.models import InvoiceImport, StoredImage
+    from sales.models import Sale as DjSale
+
+    if not dj_settings.AI_FAKE:
+        fail("invoice imports: this check only runs with AI_FAKE=true (it must never call the real AI)")
+
+    _, owner_access, _ = signup_and_login("Import Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Import Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    business_id = body["id"]
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Other Import Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    other_id = body["id"]
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Imp Manager", "manager")
+    _, chef_access, _ = _add_team_member(business_id, owner_access, "Imp Chef", "head_chef")
+    base = f"/businesses/{business_id}/invoice-imports/"
+
+    def bill_jpeg(seed: int = 0) -> bytes:
+        image = Image.new("RGB", (1200, 1800), (240, 240, 235 - seed % 50))
+        for i in range(0, 1200, 40 + seed % 7):
+            image.putpixel((i % 1200, (i * 3) % 1800), (10, 10, 10))
+        out = io.BytesIO()
+        image.save(out, format="JPEG")
+        return out.getvalue()
+
+    def upload(data, fixture=None, token=owner_access, biz=business_id, filename="bill.jpg",
+               ctype="image/jpeg", field="file"):
+        boundary = "EasyKharchaImportBoundary"
+        parts = b""
+        if fixture:
+            parts += (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="fixture"\r\n\r\n{fixture}\r\n'
+            ).encode()
+        parts += (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+            f"Content-Type: {ctype}\r\n\r\n"
+        ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        return request(
+            "POST",
+            f"/businesses/{biz}/invoice-imports/",
+            token=token,
+            raw_body=parts,
+            content_type=f"multipart/form-data; boundary={boundary}",
+        )
+
+    def raw_get(path, token):
+        req = urllib.request.Request(
+            f"{BASE_URL}{path}", headers={"Origin": ORIGIN, "Authorization": f"Bearer {token}"}
+        )
+        try:
+            response = urllib.request.urlopen(req, timeout=10)
+            return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers, exc.read()
+
+    def posted_counts():
+        return (
+            DjInvoice.objects.filter(business_id=business_id).count(),
+            DjSale.objects.filter(business_id=business_id).count(),
+        )
+
+    before_posted = posted_counts()
+    usage_before = AiUsage.objects.filter(business_id=business_id, kind="invoice_read").count()
+
+    # --- every fixture reaches ready with the expected reading ---
+    expected = {
+        "fomo_14753": ("14753", "2026-11-19", 4, "1110", 2, True, None),
+        "fomo_14751": ("14751", "2026-11-19", 10, "1574", 2, False, None),
+        "spice_route": ("KOL/26-27/004521", "2026-10-11", 3, "586", 2, False, "upi"),
+        "bhagini": ("7767", "2024-05-16", 4, "3150", 2, False, "cash"),
+        "meat_my_truk": ("2073", "2025-08-29", 2, "930", 0, False, None),
+    }
+    drafts = {}
+    for name, (number, bill_date, line_count, total, taxes, reprint, mode) in expected.items():
+        status, body, _ = upload(bill_jpeg(len(drafts)), fixture=name)
+        if status != 202 or body["status"] != "ready":
+            fail(f"invoice imports: fixture {name} should be ready, got {status} ({body})")
+        draft = body["draft"]
+        if (draft["bill_number"], draft["bill_date"], len(draft["lines"]), draft["grand_total"]) != (
+            number, bill_date, line_count, total,
+        ):
+            fail(f"invoice imports: fixture {name} read wrongly: {draft}")
+        if len(draft["taxes"]) != taxes or draft["is_reprint"] is not reprint or draft["payment_mode"] != mode:
+            fail(f"invoice imports: fixture {name} taxes/reprint/payment wrong: {draft}")
+        drafts[name] = body
+    spice = drafts["spice_route"]["draft"]
+    if spice["discounts"][0]["amount"] != "-62" or spice["round_off"] != "0.1" or spice["items_total"] != "620":
+        fail(f"invoice imports: discount/round off should be copied as printed, got {spice}")
+    if drafts["bhagini"]["draft"]["lines"][0]["qty"] != "4":
+        fail("invoice imports: a '4No' quantity should be read as 4")
+    if drafts["meat_my_truk"]["draft"]["items_total"] is not None:
+        fail("invoice imports: a total that was not printed must stay empty, not be worked out")
+    first = drafts["fomo_14753"]
+    if first["file_type"] != "image" or not first["photo_available"] or not first["created_at"] or not first["heartbeat"]:
+        fail(f"invoice imports: unexpected detail fields {first}")
+    print("OK - all five canned bills read to ready with the printed numbers copied, not worked out.")
+
+    status, body, _ = upload(bill_jpeg(9), fixture="unreadable")
+    if status != 202 or body["status"] != "failed" or body["error_code"] != "NOT_READABLE" or body["error_reason"] != "blurred":
+        fail(f"invoice imports: the unreadable fixture should fail NOT_READABLE/blurred, got {status} ({body})")
+    if "draft" in body:
+        fail("invoice imports: a failed read carries no draft")
+    print("OK - an unreadable photo fails with NOT_READABLE and its reason.")
+
+    # --- nothing is posted, no customer fields, usage is logged ---
+    if posted_counts() != before_posted:
+        fail("invoice imports: reading a bill must create no invoice and no sale")
+    if AiUsage.objects.filter(business_id=business_id, kind="invoice_read").count() != usage_before + 6:
+        fail("invoice imports: every read should be logged in AiUsage (kind invoice_read)")
+
+    def all_keys(value):
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                yield str(key).lower()
+                yield from all_keys(inner)
+        elif isinstance(value, list):
+            for inner in value:
+                yield from all_keys(inner)
+
+    banned = ("customer", "phone", "mobile", "address", "gstin", "fssai", "email", "name_of")
+    for name, body in drafts.items():
+        keys = set(all_keys(body["draft"]))
+        if any(any(b in key for b in banned) for key in keys):
+            fail(f"invoice imports: customer/restaurant fields must not be in the draft ({name}: {keys})")
+    stored_text = json_module.dumps(
+        list(InvoiceImport.objects.filter(business_id=business_id).values_list("draft", flat=True))
+    ).lower()
+    if any(b in stored_text for b in ("customer_name", "customer_phone", "gstin")):
+        fail("invoice imports: customer fields must not be in any stored draft")
+    print("OK - nothing is posted, no customer fields anywhere, every read logged as invoice_read.")
+
+    # --- PDFs: read, never stored ---
+    stored_before = StoredImage.objects.filter(business_id=business_id).count()
+    status, body, _ = upload(make_pdf(), fixture="bhagini", filename="bill.pdf", ctype="application/pdf")
+    if status != 202 or body["status"] != "ready" or body["file_type"] != "pdf" or body["photo_available"]:
+        fail(f"invoice imports: a PDF should be read, with no photo, got {status} ({body})")
+    pdf_import = InvoiceImport.objects.get(id=body["id"])
+    if pdf_import.image_id is not None or StoredImage.objects.filter(business_id=business_id).count() != stored_before:
+        fail("invoice imports: a PDF must not be stored")
+    if pdf_import.temp_dir and (Path(dj_settings.AI_TEMP_ROOT) / pdf_import.temp_dir).exists():
+        fail("invoice imports: the PDF's temp file must be deleted after the read")
+    code, _, data = raw_get(f"/businesses/{business_id}/invoice-imports/{body['id']}/photo/", owner_access)
+    if code != 404 or b"NO_PHOTO" not in data:
+        fail(f"invoice imports: a PDF import has no photo (404 NO_PHOTO), got {code}")
+    image_import = InvoiceImport.objects.get(id=first["id"])
+    if image_import.image_id is None or not (Path(dj_settings.PRIVATE_MEDIA_ROOT) / image_import.image.path).is_file():
+        fail("invoice imports: an image must be stored privately")
+    if image_import.image.kind != "imported_bill" or image_import.image.attached:
+        fail("invoice imports: the photo is an unattached imported_bill image")
+    print("OK - a PDF is read but not stored (no photo, temp file gone); an image is stored privately.")
+
+    # --- rejects ---
+    for label, data, ctype, name, want in (
+        ("a text file", b"not a bill at all", "image/jpeg", "bill.jpg", "INVALID_FILE"),
+        ("HEIC", b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic", "image/heic", "bill.heic", "INVALID_FILE"),
+        ("a 4-page PDF", make_pdf(num_pages=4), "application/pdf", "bill.pdf", "TOO_MANY_PAGES"),
+        ("a broken PDF", b"%PDF-1.4 not really a pdf", "application/pdf", "bill.pdf", "INVALID_FILE"),
+        ("an oversize file", b"\xff\xd8\xff" + b"0" * (11 * 1024 * 1024), "image/jpeg", "big.jpg", "FILE_TOO_LARGE"),
+    ):
+        status, body, _ = upload(data, ctype=ctype, filename=name)
+        if status != 400 or body["error"]["code"] != want:
+            fail(f"invoice imports: {label} should be 400 {want}, got {status} ({body})")
+    if upload(b"x", field="other")[0] != 400:
+        fail("invoice imports: a request with no file should be 400")
+    if posted_counts() != before_posted:
+        fail("invoice imports: rejected uploads must create nothing")
+    print("OK - wrong type, HEIC, a 4-page PDF, a broken PDF, oversize and no file are all refused.")
+
+    # --- same photo warning ---
+    same_bytes = bill_jpeg(33)
+    status, one, _ = upload(same_bytes, fixture="fomo_14751")
+    status, two, _ = upload(same_bytes, fixture="fomo_14751")
+    if one["draft"]["same_photo_before"] is not False or two["draft"]["same_photo_before"] is not True:
+        fail("invoice imports: the second upload of the same photo should be flagged, the first not")
+    if two["draft"]["same_photo_import_id"] != one["id"]:
+        fail("invoice imports: the flag should name the earlier import")
+    proof_raw, proof_ct = multipart_body("image", "p.jpg", same_bytes, "image/jpeg")
+    request("POST", f"/businesses/{business_id}/payment-proofs/", token=owner_access, raw_body=proof_raw, content_type=proof_ct)
+    status, three, _ = upload(same_bytes, fixture="fomo_14751")
+    if three["draft"]["same_photo_before"] is not True:
+        fail("invoice imports: the same photo used as a payment proof also counts")
+    other_status, other_body, _ = upload(same_bytes, fixture="fomo_14751", biz=other_id)
+    if other_body["draft"]["same_photo_before"] is not False:
+        fail("invoice imports: another business's earlier photo must not count")
+    print("OK - same_photo_before is flagged (warn only), per business.")
+
+    # --- roles and isolation ---
+    import_id = first["id"]
+    detail = f"{base}{import_id}/"
+    if upload(bill_jpeg(5), token=chef_access)[0] != 403:
+        fail("invoice imports: a Head chef must not upload")
+    if request("GET", detail, token=chef_access)[0] != 403:
+        fail("invoice imports: a Head chef must not read an import")
+    if raw_get(f"{detail}photo/", chef_access)[0] != 403:
+        fail("invoice imports: a Head chef must not see the photo")
+    if request("DELETE", detail, token=chef_access)[0] != 403:
+        fail("invoice imports: a Head chef must not abandon an import")
+    status, body, _ = request("GET", detail, token=manager_access)
+    if status != 200 or body["status"] != "ready":
+        fail(f"invoice imports: a Manager can read an import, got {status}")
+    if request("GET", f"/businesses/{other_id}/invoice-imports/{import_id}/", token=owner_access)[0] != 404:
+        fail("invoice imports: another business's import id must be 404")
+    if raw_get(f"/businesses/{other_id}/invoice-imports/{import_id}/photo/", owner_access)[0] != 404:
+        fail("invoice imports: another business's photo must be 404")
+    if request("DELETE", f"/businesses/{other_id}/invoice-imports/{import_id}/", token=owner_access)[0] != 404:
+        fail("invoice imports: abandoning another business's import must be 404")
+    print("OK - Owner/Manager only; Head chef 403; another business 404.")
+
+    # --- the photo stream ---
+    for who, token in (("Owner", owner_access), ("Manager", manager_access)):
+        code, headers, data = raw_get(f"{detail}photo/", token)
+        if code != 200 or headers.get("Content-Type") != "image/jpeg" or data[:2] != b"\xff\xd8":
+            fail(f"invoice imports: {who} should get the photo, got {code}")
+        if "private" not in headers.get("Cache-Control", "") or "no-store" not in headers.get("Cache-Control", ""):
+            fail("invoice imports: the photo must be private, no-store")
+    media_path = f"{BASE_URL.replace('/api/v1', '')}/media/{image_import.image.path}"
+    try:
+        media_status = urllib.request.urlopen(urllib.request.Request(media_path), timeout=10).status
+    except urllib.error.HTTPError as exc:
+        media_status = exc.code
+    if media_status != 404:
+        fail(f"invoice imports: the photo must not be reachable under /media, got {media_status}")
+
+    photo_file = Path(dj_settings.PRIVATE_MEDIA_ROOT) / image_import.image.path
+    if request("DELETE", detail, token=owner_access)[0] != 204:
+        fail("invoice imports: abandoning should be 204")
+    status, body, _ = request("GET", detail, token=owner_access)
+    if body["status"] != "abandoned" or body["photo_available"] or "draft" in body:
+        fail(f"invoice imports: an abandoned import has no photo and no draft, got {body}")
+    code, _, data = raw_get(f"{detail}photo/", owner_access)
+    if code != 404 or b"PHOTO_REMOVED" not in data or photo_file.exists():
+        fail("invoice imports: after abandoning, the photo is deleted (404 PHOTO_REMOVED)")
+    if request("DELETE", detail, token=owner_access)[0] != 204:
+        fail("invoice imports: abandoning twice is a harmless 204")
+    print("OK - photo is private/no-store and not under /media; abandoning deletes it (PHOTO_REMOVED).")
+
+    # --- unconfirmed imports are abandoned by the purge ---
+    status, stale, _ = upload(bill_jpeg(77), fixture="spice_route")
+    status, recent, _ = upload(bill_jpeg(78), fixture="spice_route")
+    stale_obj = InvoiceImport.objects.get(id=stale["id"])
+    stale_path = Path(dj_settings.PRIVATE_MEDIA_ROOT) / stale_obj.image.path
+    old = dj_timezone.now() - timedelta(hours=25)
+    InvoiceImport.objects.filter(id=stale["id"]).update(created_at=old)
+    StoredImage.objects.filter(id=stale_obj.image_id).update(uploaded_at=old)
+    call_command("purge_invoice_images", "--dry-run", stdout=io.StringIO())
+    if InvoiceImport.objects.get(id=stale["id"]).status != "ready":
+        fail("invoice imports: --dry-run must change nothing")
+    call_command("purge_invoice_images", stdout=io.StringIO())
+    stale_obj.refresh_from_db()
+    if stale_obj.status != "abandoned" or stale_obj.draft is not None or stale_path.exists():
+        fail("invoice imports: an unconfirmed import older than the window is abandoned and its photo deleted")
+    if InvoiceImport.objects.get(id=recent["id"]).status != "ready":
+        fail("invoice imports: a recent import must stay")
+    print("OK - the purge abandons stale unconfirmed imports and deletes their photos.")
+
+    # --- the daily cap is its own bucket ---
+    _, cap_owner, _ = signup_and_login("Cap Owner")
+    status, body, _ = request(
+        "POST", "/businesses/", {"name": "Cap Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=cap_owner,
+    )
+    cap_id = body["id"]
+    cap = dj_settings.INVOICE_IMPORT_DAILY_CAP
+    scans_before = AiUsage.objects.filter(business_id=cap_id).count()
+    image = bill_jpeg(1)
+    for i in range(cap):
+        status, body, _ = upload(image, fixture="meat_my_truk", token=cap_owner, biz=cap_id)
+        if status != 202 or body["status"] != "ready":
+            fail(f"invoice imports: read {i + 1} of {cap} should be allowed, got {status} ({body})")
+    status, body, _ = upload(image, fixture="meat_my_truk", token=cap_owner, biz=cap_id)
+    if status != 202 or body["status"] != "failed" or body["error_code"] != "DAILY_LIMIT":
+        fail(f"invoice imports: read {cap + 1} should fail DAILY_LIMIT, got {status} ({body})")
+    if body["photo_available"] or "draft" in body:
+        fail("invoice imports: an over-the-limit upload stores and reads nothing")
+    if AiUsage.objects.filter(business_id=cap_id).count() != scans_before + cap:
+        fail("invoice imports: an over-the-limit upload must not call the AI")
+    # The menu-scan bucket is separate: it still has all its scans after 30 bill reads.
+    png_body, png_ct = multipart_multi_body([("images", "menu.png", make_png(), "image/png")])
+    status, body, _ = request(
+        "POST", f"/businesses/{cap_id}/ai/menu-scans/", token=cap_owner, raw_body=png_body, content_type=png_ct
+    )
+    if status != 202:
+        fail(f"invoice imports: bill reads must not use up the menu-scan bucket, got {status} ({body})")
+    print(f"OK - {cap} reads/day, then DAILY_LIMIT; the menu-scan bucket is untouched.")
+
+    if posted_counts() != before_posted:
+        fail("invoice imports: nothing may be posted by this whole step")
+    print("OK - no invoice and no sale was created by any import.")
+
+
 def check_admin_delete_flow() -> None:
     """Step F1: Django admin delete rules for User/Business — direct ORM + django.test.Client against
     the same dev database the rest of this suite's API checks use (admin pages are server-rendered,
@@ -8334,6 +8655,7 @@ ALL_CHECKS = [
     check_admin_delete_flow,
     check_invoices_flow,
     check_invoice_payments_flow,
+    check_invoice_imports_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -8359,6 +8681,7 @@ AREA_CHECKS: dict[str, list] = {
     ],
     "sales": [check_sales_and_gap_flow],
     "invoices": [check_invoices_flow, check_invoice_payments_flow],
+    "invoice_import": [check_invoice_imports_flow],
     "alerts": [check_alerts_flow, check_expiry_alerts_flow, check_low_stock_flow],
     "wastage": [check_count_and_wastage_flow],
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],

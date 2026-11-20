@@ -20,7 +20,8 @@ class Command(BaseCommand):
         prefix = "Would delete" if summary["dry_run"] else "Deleted"
         self.stdout.write(
             f"{prefix}: {summary['expired']} expired image(s), "
-            f"{summary['unattached']} unattached proof(s)."
+            f"{summary['unattached']} unattached image(s), "
+            f"{summary['imports_abandoned']} unconfirmed bill import(s) abandoned."
             + (
                 ""
                 if summary["dry_run"]

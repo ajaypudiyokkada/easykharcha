@@ -5,7 +5,8 @@ own retry (network/5xx/429) plus a 60s request timeout."""
 import anthropic
 from django.conf import settings
 
-from .. import prompts
+from .. import invoice_prompts, prompts
+from ..invoice_schema import InvoiceExtractionResult
 from ..schemas import (
     BestSellersResult,
     DishClassificationResult,
@@ -21,6 +22,7 @@ from .errors import AiProviderCallError
 _REQUEST_TIMEOUT_SECONDS = 60.0
 _MAX_TOKENS_MENU = 8000
 _MAX_TOKENS_RECIPE = 4000
+_MAX_TOKENS_INVOICE = 4000
 # A batch of ~60-80 dishes each needing a type/family/confidence echoed back needs real room.
 _MAX_TOKENS_KITCHEN = 8000
 _MAX_TOKENS_BEST_SELLER = 2000
@@ -114,6 +116,27 @@ def extract_menu(files: list[dict], business_type: str) -> AiCallResult:
         ),
         parse=lambda raw: MenuExtractionResult.model_validate(raw).sanitized(),
         stage="menu_extraction",
+    )
+
+
+def extract_invoice(files: list[dict], fixture: str = "") -> AiCallResult:
+    """Reads ONE customer bill (an image or a PDF). `fixture` is only meaningful to the fake
+    provider and is ignored here."""
+    messages = invoice_prompts.invoice_messages(files)
+    tool = invoice_prompts.invoice_tool()
+
+    return run_with_fallback(
+        primary_model=settings.AI_MODEL_INVOICE,
+        fallback_model=settings.AI_MODEL_FALLBACK,
+        get_raw=lambda _attempt, model: _get_raw(
+            model=model,
+            system=invoice_prompts.INVOICE_SYSTEM_PROMPT,
+            messages=messages,
+            tool=tool,
+            max_tokens=_MAX_TOKENS_INVOICE,
+        ),
+        parse=lambda raw: InvoiceExtractionResult.model_validate(raw).sanitized(),
+        stage="invoice_read",
     )
 
 

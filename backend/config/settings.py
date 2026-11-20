@@ -227,6 +227,8 @@ AI_MODEL_MENU = env.str("AI_MODEL_MENU", default="claude-haiku-5-5")
 AI_MODEL_RECIPE = env.str("AI_MODEL_RECIPE", default="claude-haiku-5-5")
 # Step EK-1: kitchen-base discovery (backend/ai/base_discovery.py) — same tier as menu/recipe calls.
 AI_MODEL_KITCHEN = env.str("AI_MODEL_KITCHEN", default="claude-haiku-5-5")
+# Step S4a: reading one imported customer bill (backend/invoices/import_jobs.py).
+AI_MODEL_INVOICE = env.str("AI_MODEL_INVOICE", default="claude-haiku-5-5")
 # Tried once, only when the first call's result fails schema validation — see ai/provider/base.py.
 AI_MODEL_FALLBACK = env.str("AI_MODEL_FALLBACK", default="claude-sonnet-5-5")
 AI_FAKE = env.bool("AI_FAKE", default=DEBUG)
@@ -250,6 +252,9 @@ PRIVATE_MEDIA_ROOT = env.str("PRIVATE_MEDIA_ROOT", default=str(BASE_DIR / "priva
 INVOICE_IMAGE_RETENTION_DAYS = env.int("INVOICE_IMAGE_RETENTION_DAYS", default=60)
 # An uploaded proof that never got attached to an invoice is deleted after this many hours.
 INVOICE_PROOF_UNATTACHED_HOURS = env.int("INVOICE_PROOF_UNATTACHED_HOURS", default=24)
+# Step S4a: bill reads per business per day for Import invoice. Its own bucket: it never uses (or is
+# blocked by) the menu-scan bucket AI_DAILY_SCANS_PER_BUSINESS. The monthly AI cost cap still applies.
+INVOICE_IMPORT_DAILY_CAP = env.int("INVOICE_IMPORT_DAILY_CAP", default=30)
 
 # Dev default matches the Expo web dev server (mobile/package.json's `start` script, :8081) and the
 # production web export served locally for service-worker testing (scripts/serve_web.mjs, :8082).
