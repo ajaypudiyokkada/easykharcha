@@ -13,6 +13,12 @@ there is ever committed) and a short summary is printed.
 Usage:
     python scripts/ai_try_invoice.py path/to/bill.jpg
     python scripts/ai_try_invoice.py path/to/bill.pdf
+    python scripts/ai_try_invoice.py bill.jpg --model claude-sonnet-5-5
+    python scripts/ai_try_invoice.py bill.jpg --business 12     # also match to that business's items
+
+--business reads that business's items you sell from the dev database (read-only: no row is written)
+and prints the match result for each line and the checks. Unresolved lines make ONE real matching call
+(its cost is added to the total).
 """
 
 import argparse
@@ -60,11 +66,62 @@ def _cost(input_tokens: int, output_tokens: int) -> Decimal:
     )
 
 
+def _match_and_check(business_id: int, data: dict) -> dict | None:
+    """Read-only: matches the read lines against this business's items and runs the checks. Nothing
+    is written to the database (no AiUsage row, no import)."""
+    from types import SimpleNamespace
+
+    from businesses.models import Business
+    from invoices.import_checks import compute_checks
+    from invoices.import_matching import match_lines
+    from sales.service import business_today
+
+    business = Business.objects.filter(id=business_id).first()
+    if business is None:
+        print(f"No business {business_id} in the dev database; skipping matching.", file=sys.stderr)
+        return None
+    if not data.get("readability", {}).get("ok", True):
+        return None
+    calls: list = []
+
+    def provider(lines, items):
+        result = anthropic_provider.match_bill_lines(lines, items)
+        calls.append(result)
+        return result
+
+    lines = data["lines"]
+    match_lines(SimpleNamespace(id=0, business=business), lines, provider=provider, record=False)
+    draft = {**data, "lines": lines}
+    checks = compute_checks(draft, business_today(business))
+    cost = sum((_cost(r.input_tokens, r.output_tokens) for r in calls), Decimal("0"))
+    rows = [
+        f"  {ln['line_id']}: {ln['name_as_printed']!r} -> {ln['match']['state']} "
+        f"({ln['match']['source']})"
+        + (
+            f" {ln['match']['sell_item_name']}"
+            if ln["match"]["sell_item_name"]
+            else (f" suggest {ln['match']['suggestion']['name']}" if ln["match"]["suggestion"] else "")
+        )
+        for ln in lines
+    ]
+    printout = (
+        f"Matching against business {business_id} ({len(calls)} AI call, +${cost:.4f}):\n"
+        + "\n".join(rows)
+        + "\nChecks: "
+        + (", ".join(f"{c['code']}({c['severity']})" for c in checks) or "none")
+    )
+    return {"cost": cost, "printout": printout, "summary": {"lines": lines, "checks": checks}}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("bill_file", type=Path, help="Path to one bill image or PDF")
+    parser.add_argument("--model", help="Model for the bill read (default AI_MODEL_INVOICE)")
+    parser.add_argument(
+        "--business", type=int, help="Business id whose items you sell to match against (read-only)"
+    )
     args = parser.parse_args()
 
     if not settings.ANTHROPIC_API_KEY:
@@ -86,9 +143,14 @@ def main() -> None:
         files = [{"media_type": "image/jpeg", "data": jpeg}]
         sent = f"JPEG {len(jpeg) // 1024} KB (processed like an upload)"
 
+    if args.model:
+        settings.AI_MODEL_INVOICE = args.model
     print(f"Reading {args.bill_file.name}: {sent}, model {settings.AI_MODEL_INVOICE}...")
     result = anthropic_provider.extract_invoice(files)
     cost = _cost(result.input_tokens, result.output_tokens)
+    extra = _match_and_check(args.business, result.data) if args.business else None
+    if extra:
+        cost += extra["cost"]
 
     out_dir = ROOT / "_private"
     out_dir.mkdir(exist_ok=True)
@@ -105,6 +167,7 @@ def main() -> None:
                 "output_tokens": result.output_tokens,
                 "est_cost_usd": f"{cost:.4f}",
                 "result": result.data,
+                "matching": extra["summary"] if extra else None,
             },
             indent=2,
             ensure_ascii=False,
@@ -124,6 +187,8 @@ def main() -> None:
             f"(printed {data.get('bill_date_printed')!r}), {len(data.get('lines', []))} line(s), "
             f"grand total {data.get('grand_total')}, reprint: {data.get('is_reprint')}"
         )
+    if extra:
+        print(extra["printout"])
     print(f"Full result written to {out_path.relative_to(ROOT)}")
 
 

@@ -25,6 +25,10 @@ def extract_invoice(files: list[dict], fixture: str = "") -> AiCallResult:
     return _provider().extract_invoice(files, fixture)
 
 
+def match_bill_lines(lines: list[dict], items: list[dict]) -> AiCallResult:
+    return _provider().match_bill_lines(lines, items)
+
+
 def extract_menu_groups(files: list[dict], business_type: str) -> AiCallResult:
     return _provider().extract_menu_groups(files, business_type)
 

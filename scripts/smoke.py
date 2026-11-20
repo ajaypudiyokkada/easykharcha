@@ -8455,6 +8455,251 @@ def check_invoice_imports_flow() -> None:
     print("OK - no invoice and no sale was created by any import.")
 
 
+def check_invoice_import_matching_flow() -> None:
+    """Step S4b: matching each bill line to the owner's items you sell, and the deterministic checks.
+    AI_FAKE only. Nothing is posted; an AI pick is never 'matched'; a failed AI match call leaves the
+    import ready."""
+    import io
+
+    from PIL import Image
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+    from django.conf import settings as dj_settings
+
+    from ai.invoice_schema import BillMatchResult
+    from ai.models import AiUsage
+    from invoices.models import AliasKind
+    from invoices.models import Invoice as DjInvoice
+    from invoices.models import SellItemAlias
+    from invoices.normalize import normalize_name
+    from sales.models import Sale as DjSale
+    from stock.models import SellItem as DjSellItem
+
+    if not dj_settings.AI_FAKE:
+        fail("invoice matching: this check only runs with AI_FAKE=true (it must never call the real AI)")
+
+    _, owner_access, _ = signup_and_login("Match Owner")
+    status, body, _ = request(
+        "POST", "/businesses/", {"name": "Match Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    business_id = body["id"]
+    status, body, _ = request(
+        "POST", f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}]}, token=owner_access,
+    )
+    milk_id = body[0]["id"]
+    item_ids = {}
+    for name, price in (
+        ("Fire Pork", "380"), ("Mutton Keema Panni Puri", "320"), ("Water Bottle", "20"),
+        ("Mixed Fried Rice", "300"), ("Chicken Alfredo Pasta", "300"), ("Oreo Milkshake", "150"),
+        ("Tea", "50"), ("Hot Chocolate", "80"), ("Masala Tea", "60"), ("French Fries", "120"),
+        ("Sweet Lassi", "120"), ("Chicken Steak", "380"), ("Chicken Noodles", "220"),
+        ("Crispy Chicken Burger", "180"), ("Chicken Fried Rice", "220"),
+    ):
+        item_ids[name], _ = _create_dish(business_id, owner_access, name, price, [(milk_id, "0.1")])
+
+    def bill_jpeg(seed: int) -> bytes:
+        image = Image.new("RGB", (900, 1200), (235 - seed % 60, 235, 230))
+        out = io.BytesIO()
+        image.save(out, format="JPEG")
+        return out.getvalue()
+
+    counter = {"n": 0}
+
+    def read(fixture, biz=business_id):
+        counter["n"] += 1
+        boundary = "EasyKharchaMatchBoundary"
+        parts = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="fixture"\r\n\r\n{fixture}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="b.jpg"\r\n'
+            f"Content-Type: image/jpeg\r\n\r\n"
+        ).encode() + bill_jpeg(counter["n"] * 7) + f"\r\n--{boundary}--\r\n".encode()
+        status, body, _ = request(
+            "POST", f"/businesses/{biz}/invoice-imports/", token=owner_access,
+            raw_body=parts, content_type=f"multipart/form-data; boundary={boundary}",
+        )
+        if status != 202 or body["status"] != "ready":
+            fail(f"invoice matching: fixture {fixture} should be ready, got {status} ({body})")
+        return body["draft"]
+
+    def match_calls():
+        return AiUsage.objects.filter(business_id=business_id, kind="invoice_match").count()
+
+    def codes(draft):
+        return {check["code"] for check in draft["checks"]}
+
+    def check_of(draft, code):
+        return [c for c in draft["checks"] if c["code"] == code]
+
+    posted_before = (
+        DjInvoice.objects.filter(business_id=business_id).count(),
+        DjSale.objects.filter(business_id=business_id).count(),
+    )
+    all_drafts = {}
+
+    # --- exact matches, no AI call at all ---
+    calls = match_calls()
+    for fixture, count in (("fomo_14753", 4), ("fomo_14751", 10)):
+        draft = read(fixture)
+        all_drafts[fixture] = draft
+        states = [(l["match"]["state"], l["match"]["source"]) for l in draft["lines"]]
+        if states != [("matched", "exact")] * count:
+            fail(f"invoice matching: {fixture} should match every line exactly, got {states}")
+        if [l["line_id"] for l in draft["lines"]] != [f"l{i}" for i in range(1, count + 1)]:
+            fail("invoice matching: lines need stable ids l1, l2, ...")
+        first = draft["lines"][0]["match"]
+        if first["sell_item_id"] != item_ids[draft["lines"][0]["name_as_printed"]]:
+            fail("invoice matching: a matched line should carry its item id")
+    if match_calls() != calls:
+        fail("invoice matching: no AI call when nothing is unresolved")
+    print("OK - FOMO 14753 and 14751 match every line by exact name, with no AI call.")
+
+    # --- check_match from fuzzy, not an item from a charge word ---
+    meat = read("meat_my_truk")
+    all_drafts["meat_my_truk"] = meat
+    burger, parcel = meat["lines"]
+    if burger["match"]["state"] != "check_match" or burger["match"]["suggestion"]["name"] != "Crispy Chicken Burger":
+        fail(f"invoice matching: 'Crspy Chi Burgr' should be a check_match for Crispy Chicken Burger, got {burger['match']}")
+    if burger["match"]["source"] != "fuzzy" or burger["match"]["sell_item_id"] is not None:
+        fail("invoice matching: a check_match must not carry a resolved item")
+    if parcel["match"]["state"] != "not_an_item_suggested" or parcel["match"]["source"] != "charge_word":
+        fail(f"invoice matching: 'Parcel Large' should be not_an_item_suggested, got {parcel['match']}")
+    if match_calls() != calls:
+        fail("invoice matching: resolved lines must not trigger an AI call")
+    print("OK - 'Crspy Chi Burgr' is a check_match (Crispy Chicken Burger); 'Parcel Large' is not_an_item_suggested.")
+
+    # --- ambiguous names are never auto-matched ---
+    biryanis = [
+        _create_dish(business_id, owner_access, name, "250", [(milk_id, "0.1")])[0]
+        for name in ("Chicken Biryani", "Chicken Biriyani")
+    ]
+    amb = read("test_ambiguous")
+    DjSellItem.objects.filter(id__in=biryanis).update(active=False)
+    all_drafts["test_ambiguous"] = amb
+    m = amb["lines"][0]["match"]
+    names = {a["name"] for a in m["alternatives"]}
+    if m["state"] != "check_match" or m["suggestion"] is None or not ({"Chicken Biryani", "Chicken Biriyani"} & names):
+        fail(f"invoice matching: a near-tie should be check_match with alternatives, got {m}")
+    if len(m["alternatives"]) > 3:
+        fail("invoice matching: at most 3 alternatives")
+    print("OK - an ambiguous name is check_match with alternatives.")
+
+    # --- the AI: one call, always check_match, only the owner's items ---
+    calls = match_calls()
+    picked = read("test_ai_pick")
+    all_drafts["test_ai_pick"] = picked
+    if match_calls() != calls + 1:
+        fail("invoice matching: exactly ONE AI call for all unresolved lines")
+    chik, zzz = picked["lines"]
+    if chik["match"]["state"] != "check_match" or chik["match"]["source"] != "ai" or chik["match"]["suggestion"]["name"] != "Crispy Chicken Burger":
+        fail(f"invoice matching: the AI should suggest Crispy Chicken Burger as a check_match, got {chik['match']}")
+    if zzz["match"]["state"] != "unmatched":
+        fail(f"invoice matching: a line the AI can't place stays unmatched, got {zzz['match']}")
+
+    failed_ai = read("test_ai_fail")
+    if failed_ai["lines"][0]["match"]["state"] != "unmatched":
+        fail("invoice matching: a failed AI match call leaves the line unmatched")
+    foreign = read("test_ai_pick") and read("test_foreign_id")
+    if foreign["lines"][0]["match"]["state"] != "unmatched":
+        fail("invoice matching: an item id outside the owner's list must be dropped")
+    own_ids = {i.id for i in DjSellItem.objects.filter(business_id=business_id)}
+    cleaned = BillMatchResult.model_validate(
+        {"matches": [{"line_id": "l1", "sell_item_id": 987654321, "confidence": 0.9},
+                     {"line_id": "l9", "sell_item_id": next(iter(own_ids)), "confidence": 0.9},
+                     {"line_id": "l2", "sell_item_id": next(iter(own_ids)), "confidence": 0.9}]}
+    ).sanitized(own_ids, {"l1", "l2"})
+    if [(m["line_id"], m["sell_item_id"] is not None) for m in cleaned["matches"]] != [("l1", False), ("l2", True)]:
+        fail(f"invoice matching: the AI result must be cut down to known lines and the owner's items, got {cleaned}")
+    for name, draft in all_drafts.items():
+        for line in draft["lines"]:
+            if line["match"]["state"] == "matched" and line["match"]["source"] == "ai":
+                fail(f"invoice matching: an AI pick must never be 'matched' ({name})")
+    print("OK - one AI call, its pick is always check_match, foreign ids are dropped, a failed call leaves the import ready.")
+
+    # --- zero match and a line with no numbers ---
+    zero = read("test_zero_match")
+    if "ZERO_MATCH" not in codes(zero) or any(l["match"]["state"] != "unmatched" for l in zero["lines"]):
+        fail(f"invoice matching: no match at all should raise ZERO_MATCH, got {codes(zero)}")
+    if any("ZERO_MATCH" in codes(d) for d in all_drafts.values()):
+        fail("invoice matching: ZERO_MATCH must not fire when lines were matched")
+    nums = read("test_missing_numbers")
+    line = nums["lines"][0]
+    if line["match"]["state"] != "matched" or line["qty"] is not None or line["amount"] is not None:
+        fail(f"invoice matching: a line with no qty/amount is still matched by name, got {line}")
+    if "LINE_AMOUNT_MISMATCH" in codes(nums):
+        fail("invoice matching: no amount check unless qty, rate and amount are all printed")
+    print("OK - ZERO_MATCH fires only with no match; a line without numbers is still matched by name.")
+
+    # --- remembered aliases ---
+    owner_id = DjSellItem.objects.get(id=item_ids["Chicken Fried Rice"]).created_by_id
+    alias_burger = SellItemAlias.objects.create(
+        business_id=business_id, normalized_alias=normalize_name("Crspy Chi Burgr"),
+        kind=AliasKind.ITEM, sell_item_id=item_ids["Chicken Fried Rice"], created_by_id=owner_id,
+    )
+    alias_pork = SellItemAlias.objects.create(
+        business_id=business_id, normalized_alias=normalize_name("Mutton Keema Panni Puri"),
+        kind=AliasKind.NOT_ITEM, created_by_id=owner_id,
+    )
+    remembered = read("meat_my_truk")["lines"][0]["match"]
+    if remembered["state"] != "matched" or remembered["source"] != "remembered" or remembered["sell_item_name"] != "Chicken Fried Rice":
+        fail(f"invoice matching: a remembered alias must win over fuzzy, got {remembered}")
+    not_item = read("fomo_14753")["lines"][1]["match"]
+    if not_item["state"] != "not_an_item_suggested" or not_item["source"] != "remembered":
+        fail(f"invoice matching: a remembered not-an-item name is suggested as such, got {not_item}")
+    alias_burger.delete()
+    alias_pork.delete()
+    print("OK - a remembered alias wins over fuzzy and exact (item and not-an-item).")
+
+    # --- checks ---
+    spice = read("spice_route")
+    bhagini = read("bhagini")
+    for name, draft in {**all_drafts, "spice_route": spice, "bhagini": bhagini}.items():
+        if "TOTAL_MISMATCH" in codes(draft):
+            fail(f"invoice matching: {name} reconciles and must not raise TOTAL_MISMATCH ({draft['checks']})")
+    if "REPRINT_COPY" not in codes(all_drafts["fomo_14753"]):
+        fail("invoice matching: a Duplicate/Copy stamp raises REPRINT_COPY")
+    old = check_of(bhagini, "DATE_OLD")
+    if not old or old[0]["severity"] != "warn" or old[0]["data"]["days_old"] <= 7:
+        fail(f"invoice matching: a 2024 bill is DATE_OLD (warn), got {bhagini['checks']}")
+    if check_of(read("test_future"), "DATE_FUTURE")[0]["severity"] != "block":
+        fail("invoice matching: a future bill date blocks (DATE_FUTURE)")
+    bad = read("test_checks")
+    if check_of(bad, "DATE_MISSING")[0]["severity"] != "block":
+        fail("invoice matching: a missing date blocks (DATE_MISSING)")
+    if check_of(bad, "BILL_NUMBER_MISSING")[0]["severity"] != "info":
+        fail("invoice matching: a missing bill number is info")
+    mismatch = check_of(bad, "LINE_AMOUNT_MISMATCH")
+    if len(mismatch) != 1 or mismatch[0]["line_id"] != "l1" or mismatch[0]["data"]["expected"] != "60.00":
+        fail(f"invoice matching: line 1 (3 x 20 printed as 65) should be flagged, got {mismatch}")
+    if bad["lines"][0]["flags"]["amount_mismatch"] is not True or bad["lines"][1]["flags"]["amount_mismatch"] is not False:
+        fail("invoice matching: only the wrong line carries the amount_mismatch flag")
+    totals = {c["data"]["kind"]: c["data"] for c in check_of(bad, "TOTAL_MISMATCH")}
+    if totals["items"]["sum_of_lines"] != "445.00" or totals["items"]["printed"] != "1000.00":
+        fail(f"invoice matching: items total check should give both numbers, got {totals}")
+    if totals["grand"]["computed"] != "1000.00" or totals["grand"]["printed"] != "1110.00":
+        fail(f"invoice matching: grand total check should give both numbers, got {totals}")
+    low = check_of(bad, "LOW_CONFIDENCE")[0]["data"]["fields"]
+    if not any(f["field"] == "bill_number" for f in low):
+        fail(f"invoice matching: a field under 0.7 confidence is listed, got {low}")
+    if "REPRINT_COPY" not in codes(bad):
+        fail("invoice matching: the crafted draft is a reprint")
+    print("OK - every check code fires on a crafted draft; Spice Route, FOMO and Bhagini reconcile without recalculating tax.")
+
+    posted_after = (
+        DjInvoice.objects.filter(business_id=business_id).count(),
+        DjSale.objects.filter(business_id=business_id).count(),
+    )
+    if posted_after != posted_before:
+        fail("invoice matching: nothing may be posted in this step")
+    print("OK - matching and checks post nothing (no invoice, no sale).")
+
+
 def check_admin_delete_flow() -> None:
     """Step F1: Django admin delete rules for User/Business — direct ORM + django.test.Client against
     the same dev database the rest of this suite's API checks use (admin pages are server-rendered,
@@ -8656,6 +8901,7 @@ ALL_CHECKS = [
     check_invoices_flow,
     check_invoice_payments_flow,
     check_invoice_imports_flow,
+    check_invoice_import_matching_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -8681,7 +8927,7 @@ AREA_CHECKS: dict[str, list] = {
     ],
     "sales": [check_sales_and_gap_flow],
     "invoices": [check_invoices_flow, check_invoice_payments_flow],
-    "invoice_import": [check_invoice_imports_flow],
+    "invoice_import": [check_invoice_imports_flow, check_invoice_import_matching_flow],
     "alerts": [check_alerts_flow, check_expiry_alerts_flow, check_low_stock_flow],
     "wastage": [check_count_and_wastage_flow],
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],

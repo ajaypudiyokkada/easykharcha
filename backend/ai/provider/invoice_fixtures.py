@@ -115,3 +115,82 @@ FIXTURES: dict[str, dict] = {
         "lines": [],
     },
 }
+
+
+# Test-only readings (used by the smoke suite to reach matching and check cases; not real bills).
+FIXTURES.update(
+    {
+        # One line the AI (fake) can resolve, one nothing can.
+        "test_ai_pick": {
+            "readability": {"ok": True},
+            "bill_number": "T1",
+            "bill_date_printed": "19/11/26",
+            "lines": [_line("Chik Bur", 1, 180, 180), _line("Zzz Qqq", 1, 10, 10)],
+            "grand_total": 190,
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+        },
+        # The AI match call fails every attempt: the import must still be ready.
+        "test_ai_fail": {
+            "readability": {"ok": True},
+            "bill_number": "T2",
+            "bill_date_printed": "19/11/26",
+            "lines": [_line("Chik Bur FORCE_AI_MATCH_ERROR", 1, 180, 180)],
+            "grand_total": 180,
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+        },
+        # The AI (fake) answers an item id the owner doesn't have: it must be dropped.
+        "test_foreign_id": {
+            "readability": {"ok": True},
+            "bill_number": "T3",
+            "bill_date_printed": "19/11/26",
+            "lines": [_line("Chik Bur FORCE_FOREIGN_ID", 1, 180, 180)],
+            "grand_total": 180,
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+        },
+        # Two near-identical items on the owner's list: a near tie is never auto-matched.
+        "test_ambiguous": {
+            "readability": {"ok": True},
+            "bill_number": "T4",
+            "bill_date_printed": "19/11/26",
+            "lines": [_line("Chicken Biryanii", 1, 250, 250)],
+            "grand_total": 250,
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+        },
+        "test_zero_match": {
+            "readability": {"ok": True},
+            "bill_number": "T5",
+            "bill_date_printed": "19/11/26",
+            "lines": [_line("Zzz Qqq", 1, 10, 10), _line("Www Xxx", 2, 20, 40)],
+            "grand_total": 50,
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+        },
+        # Date unreadable, no number, a wrong line amount, totals that do not add up, low confidence.
+        "test_checks": {
+            "readability": {"ok": True},
+            "lines": [
+                _line("Water Bottle", 3, 20, 65),
+                _line("Fire Pork", 1, 380, 380),
+            ],
+            "items_total": 1000,
+            "grand_total": 1110,
+            "is_reprint": True,
+            "confidence": {"bill_number": 0.5, "grand_total": 0.9},
+        },
+        # A matched-by-name line whose quantity and amount were not printed.
+        "test_missing_numbers": {
+            "readability": {"ok": True},
+            "bill_number": "T7",
+            "bill_date_printed": "19/11/26",
+            "lines": [{"name_as_printed": "Fire Pork", "confidence": 0.9}],
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9},
+        },
+        "test_future": {
+            "readability": {"ok": True},
+            "bill_number": "T6",
+            "bill_date_printed": "01/01/2999",
+            "lines": [_line("Water Bottle", 1, 20, 20)],
+            "grand_total": 20,
+            "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+        },
+    }
+)

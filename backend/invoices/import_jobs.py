@@ -11,8 +11,11 @@ from ai.limits import monthly_cost_cap_exceeded, record_usage
 from ai.models import AiUsageKind
 from ai.provider import extract_invoice
 from ai.provider.errors import AiProviderCallError, AiSchemaError
+from sales.service import business_today
 
 from .images import absolute_path
+from .import_checks import compute_checks
+from .import_matching import match_lines
 from .models import ImportStatus, InvoiceImport, StoredImage, StoredImageKind
 
 logger = logging.getLogger(__name__)
@@ -84,6 +87,9 @@ def _run(imp: InvoiceImport) -> None:
     same_import_id = _same_photo_import_id(imp)
     data["same_photo_before"] = same_import_id is not None
     data["same_photo_import_id"] = same_import_id if same_import_id not in (None, 0) else None
+    # Matching is a suggestion (the owner confirms); its AI call can fail without failing the import.
+    match_lines(imp, data["lines"])
+    data["checks"] = compute_checks(data, business_today(imp.business))
     _finish(imp, ImportStatus.READY, draft=data, model=result.model)
 
 

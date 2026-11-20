@@ -111,6 +111,8 @@ class AiUsageKind(models.TextChoices):
     SETUP_INGREDIENT_MERGE = "setup_ingredient_merge", "setup_ingredient_merge"
     # Step S4a: reading one imported customer bill (invoices/import_jobs.py).
     INVOICE_READ = "invoice_read", "invoice_read"
+    # Step S4b: matching unresolved bill lines to the owner's items (invoices/import_matching.py).
+    INVOICE_MATCH = "invoice_match", "invoice_match"
 
 
 class AiUsage(models.Model):

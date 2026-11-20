@@ -215,3 +215,38 @@ class InvoiceImport(models.Model):
 
     def __str__(self) -> str:
         return f"Invoice import {self.id} ({self.status}) for business {self.business_id}"
+
+
+class AliasKind(models.TextChoices):
+    ITEM = "item", "Item"
+    NOT_ITEM = "not_item", "Not an item"
+
+
+class SellItemAlias(models.Model):
+    """A bill line name the owner has settled once, so the next import resolves it without asking:
+    either "this name is that item you sell" or "this is not an item" (a parcel or service charge).
+    Created only when the owner ticks "Remember this match" in the confirm step (Step S4c), never by
+    the AI and never by matching. `normalized_alias` comes from normalize.normalize_name."""
+
+    business = models.ForeignKey(
+        Business, on_delete=models.CASCADE, related_name="sell_item_aliases"
+    )
+    normalized_alias = models.CharField(max_length=120)
+    kind = models.CharField(max_length=10, choices=AliasKind.choices)
+    sell_item = models.ForeignKey(
+        SellItem, on_delete=models.CASCADE, null=True, blank=True, related_name="aliases"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["business", "normalized_alias"], name="unique_sell_item_alias"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.normalized_alias} -> {self.kind}"
