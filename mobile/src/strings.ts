@@ -484,9 +484,12 @@ export const strings = {
       search: 'Search items',
       noItems: 'You have no items you sell yet.',
       noMatch: 'No items match your search.',
-      tapToAdd: 'Tap to add',
-      added: 'Added',
+      add: 'Add',
+      onBill: (n: number) => `On bill: ${n}`,
+      notOnBill: 'Not on the bill yet',
       done: 'Done',
+      doneCount: (n: number) => `Done (${n} item${n === 1 ? '' : 's'})`,
+      quantity: (name: string) => `Quantity for ${name}`,
     },
     errors: {
       noItems: 'Add at least one item before you continue.',
@@ -522,8 +525,6 @@ export const strings = {
     },
     already: {
       banner: 'This invoice was already created. We opened the original. No new invoice was added.',
-      heading: (number: string) => `Invoice ${number}`,
-      items: 'Items',
       done: 'Done',
     },
     manage: {
@@ -544,7 +545,13 @@ export const strings = {
       tryAgain: 'Try again',
       back: 'Back',
       backToInvoices: 'Back to invoices',
-      detailTitle: (number: string) => `Invoice ${number}`,
+      detailTitle: 'Invoice',
+      body: {
+        number: 'Invoice number',
+        date: 'Sale date',
+        customer: 'Customer',
+        phone: 'Phone',
+      },
       items: 'Items',
       sendWhatsApp: 'Send on WhatsApp',
       print: 'Print invoice',

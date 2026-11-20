@@ -1,6 +1,6 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ApiError } from '../../src/api/client';
 import type { Invoice, InvoiceSettings } from '../../src/api/invoices';
@@ -10,6 +10,7 @@ import { can } from '../../src/auth/permissions';
 import { formatDate } from '../../src/format';
 import { DateField } from '../../src/invoices/DateField';
 import { InvoiceActions } from '../../src/invoices/InvoiceActions';
+import { InvoiceBody } from '../../src/invoices/InvoiceBody';
 import {
   emptyDraft,
   invoiceDraftStorage,
@@ -195,13 +196,13 @@ export default function CreateInvoice() {
     setFailed(false);
   }
 
-  function addItem(item: SellItem) {
+  function addItem(item: SellItem, quantity: number) {
     setDraft((current) => {
       if (!current) return current;
       const existing = current.lines.findIndex((l) => l.sellItemId === item.id);
       if (existing >= 0) {
-        // Tapping an item already on the bill adds one more of it.
-        const qty = (parseScaled(current.lines[existing].quantity, 0) ?? 0) + 1;
+        // An item already on the bill gets the chosen quantity added to its existing line.
+        const qty = (parseScaled(current.lines[existing].quantity, 0) ?? 0) + quantity;
         return {
           ...current,
           lines: current.lines.map((l, i) =>
@@ -216,7 +217,7 @@ export default function CreateInvoice() {
           {
             sellItemId: item.id,
             name: item.name,
-            quantity: '1',
+            quantity: String(quantity),
             rate: plainRate(item.selling_price),
           },
         ],
@@ -725,12 +726,13 @@ function AddItemList({
   items: SellItem[];
   loaded: boolean;
   lines: InvoiceLineDraft[];
-  onAdd: (item: SellItem) => void;
+  onAdd: (item: SellItem, quantity: number) => void;
   onDone: () => void;
 }) {
   const [query, setQuery] = useState('');
   const shown = items.filter((i) => i.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const added = new Set(lines.map((l) => l.sellItemId));
+  const onBill = new Map(lines.map((l) => [l.sellItemId, parseScaled(l.quantity, 0) ?? 0]));
+  const doneLabel = lines.length > 0 ? s.addSheet.doneCount(lines.length) : s.addSheet.done;
 
   if (loaded && items.length === 0) {
     return (
@@ -748,25 +750,84 @@ function AddItemList({
         <Small style={styles.muted}>{s.addSheet.noMatch}</Small>
       ) : null}
       {shown.map((item) => (
-        <Pressable
-          key={item.id}
-          accessibilityRole="button"
-          accessibilityLabel={item.name}
-          onPress={() => onAdd(item)}
-          style={styles.itemRow}
-        >
-          <View style={styles.flex}>
-            <Body style={styles.lineName}>{item.name}</Body>
-            <Small style={styles.muted}>
-              {added.has(item.id) ? s.addSheet.added : s.addSheet.tapToAdd}
-            </Small>
-          </View>
-          <Body style={styles.lineName}>
-            {formatPaise(parseScaled(item.selling_price, 2) ?? 0)}
-          </Body>
-        </Pressable>
+        <AddItemRow key={item.id} item={item} onBill={onBill.get(item.id)} onAdd={onAdd} />
       ))}
-      <Button label={s.addSheet.done} variant="primary" onPress={onDone} />
+      <Button label={doneLabel} variant="primary" onPress={onDone} />
+    </View>
+  );
+}
+
+/** One item in the Add item sheet: name and price on top, then a fixed-height line with the
+ * quantity stepper (default 1, whole numbers like the bill itself) and an Add button, so the layout
+ * never shifts when "On bill: N" appears. */
+function AddItemRow({
+  item,
+  onBill,
+  onAdd,
+}: {
+  item: SellItem;
+  onBill: number | undefined;
+  onAdd: (item: SellItem, quantity: number) => void;
+}) {
+  const [quantity, setQuantity] = useState('1');
+  const parsed = parseScaled(quantity, 0);
+  const valid = parsed !== null && parsed >= 1;
+
+  function change(delta: number) {
+    setQuantity(String(Math.max(1, (parsed ?? 1) + delta)));
+  }
+
+  return (
+    <View style={styles.itemRow}>
+      <View style={styles.itemTop}>
+        <View style={styles.flex}>
+          <Body style={styles.lineName}>{item.name}</Body>
+          <Small style={styles.muted}>
+            {onBill ? s.addSheet.onBill(onBill) : s.addSheet.notOnBill}
+          </Small>
+        </View>
+        <Body style={styles.lineName}>{formatPaise(parseScaled(item.selling_price, 2) ?? 0)}</Body>
+      </View>
+      <View style={styles.itemControls}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={s.decrease}
+          onPress={() => change(-1)}
+          style={styles.miniStep}
+        >
+          <Icon name="minus" size={18} colour={colours.primary} />
+        </Pressable>
+        <TextInput
+          accessibilityLabel={s.addSheet.quantity(item.name)}
+          value={quantity}
+          onChangeText={(text) => setQuantity(text.replace(/[^0-9]/g, ''))}
+          keyboardType="number-pad"
+          maxLength={6}
+          style={styles.miniQty}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={s.increase}
+          onPress={() => change(1)}
+          style={styles.miniStep}
+        >
+          <Icon name="plus" size={18} colour={colours.primary} />
+        </Pressable>
+        <View style={styles.flex} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${s.addSheet.add} ${item.name}`}
+          accessibilityState={{ disabled: !valid }}
+          disabled={!valid}
+          onPress={() => {
+            onAdd(item, parsed ?? 1);
+            setQuantity('1');
+          }}
+          style={[styles.addBtn, !valid ? styles.addBtnDisabled : null]}
+        >
+          <Body style={styles.addBtnText}>{s.addSheet.add}</Body>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -780,41 +841,10 @@ function ResultView({
   already: boolean;
   onDone: () => void;
 }) {
-  const taxOn = Number(invoice.tax_amount) > 0;
-  const money = (value: string) => formatPaise(parseScaled(value, 2) ?? 0);
   return (
     <View style={styles.page}>
       {already ? (
-        <>
-          <Banner kind="info">{s.already.banner}</Banner>
-          <Heading level={2}>{s.already.heading(invoice.number)}</Heading>
-          <Small style={styles.muted}>{formatDate(`${invoice.sale_date}T00:00:00Z`, 'UTC')}</Small>
-          <View style={styles.card}>
-            <Body style={styles.sectionTitle}>{s.already.items}</Body>
-            {invoice.lines.map((line) => (
-              <View key={line.id} style={styles.reviewLine}>
-                <View style={styles.flex}>
-                  <Body style={styles.lineName}>{line.name}</Body>
-                  <Small style={styles.muted}>
-                    {Number(line.quantity)} × {money(line.rate)}
-                  </Small>
-                </View>
-                <Body style={styles.lineName}>{money(line.amount)}</Body>
-              </View>
-            ))}
-            <TotalsBlock
-              totals={{
-                subtotal: parseScaled(invoice.subtotal, 2) ?? 0,
-                tax: parseScaled(invoice.tax_amount, 2) ?? 0,
-                total: parseScaled(invoice.total, 2) ?? 0,
-              }}
-              taxEnabled={taxOn}
-              taxRateLabel={String(Number(invoice.tax_rate))}
-            />
-          </View>
-          <InvoiceActions invoice={invoice} />
-          <Button label={s.already.done} variant="primary" onPress={onDone} />
-        </>
+        <Banner kind="info">{s.already.banner}</Banner>
       ) : (
         <>
           <View style={styles.successIcon}>
@@ -822,18 +852,15 @@ function ResultView({
           </View>
           <Heading level={2}>{s.success.title}</Heading>
           <Body style={styles.muted}>{s.success.body}</Body>
-          <View style={styles.card}>
-            <SummaryRow label={s.success.number} value={invoice.number} />
-            <SummaryRow
-              label={s.success.saleDate}
-              value={formatDate(`${invoice.sale_date}T00:00:00Z`, 'UTC')}
-            />
-            <SummaryRow label={s.success.total} value={money(invoice.total)} />
-          </View>
-          <InvoiceActions invoice={invoice} />
-          <Button label={s.success.done} variant="primary" onPress={onDone} />
         </>
       )}
+      <InvoiceBody invoice={invoice} />
+      <InvoiceActions invoice={invoice} />
+      <Button
+        label={already ? s.already.done : s.success.done}
+        variant="primary"
+        onPress={onDone}
+      />
     </View>
   );
 }
@@ -925,16 +952,46 @@ const styles = StyleSheet.create({
   sheetMessage: { marginBottom: spacing.lg },
   sheetStack: { gap: spacing.sm },
   itemRow: {
-    minHeight: 64,
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.md,
+    padding: spacing.md,
     borderWidth: 2,
     borderColor: colours.mint,
     borderRadius: radii.md,
     backgroundColor: colours.card,
   },
+  itemTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44 },
+  itemControls: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 48 },
+  miniStep: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.pill,
+    backgroundColor: colours.mint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniQty: {
+    width: 64,
+    height: 44,
+    textAlign: 'center',
+    borderWidth: 2,
+    borderColor: colours.mint,
+    borderRadius: radii.md,
+    color: colours.text,
+    fontFamily: fonts.bodyExtraBold,
+    fontSize: type.md,
+    backgroundColor: colours.card,
+  },
+  addBtn: {
+    minWidth: 88,
+    height: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.pill,
+    backgroundColor: colours.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addBtnDisabled: { opacity: 0.4 },
+  addBtnText: { color: colours.card, fontFamily: fonts.bodyExtraBold },
   successIcon: {
     width: 56,
     height: 56,
