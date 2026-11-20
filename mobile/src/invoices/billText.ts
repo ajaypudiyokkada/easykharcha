@@ -23,7 +23,7 @@ export type BillInvoice = {
   total: string;
   payment_status: 'paid' | 'unpaid';
   payment_mode: string;
-  lines: { name: string; quantity: string; rate: string; amount: string }[];
+  lines: { name: string; quantity: string | null; rate: string | null; amount: string | null }[];
 };
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -34,9 +34,9 @@ export function billDate(isoDate: string): string {
   return `${day} ${MONTHS[month - 1]} ${year}`;
 }
 
-const paise = (value: string): number => parseScaled(value, 2) ?? 0;
-const money = (value: string): string => formatPaise(paise(value));
-const quantity = (value: string): string => String(Number(value));
+const paise = (value: string | null): number => parseScaled(value ?? '', 2) ?? 0;
+const money = (value: string | null): string => formatPaise(paise(value));
+const quantity = (value: string | null): string => String(Number(value ?? 0));
 
 const MODE_WORDS: Record<string, string> = {
   cash: 'cash',

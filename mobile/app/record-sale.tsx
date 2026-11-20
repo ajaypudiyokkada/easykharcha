@@ -1,5 +1,5 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../src/auth/AuthContext';
@@ -36,7 +36,7 @@ const FULL_DAY_OPTIONS: { key: OptionKey; icon: IconName }[] = [
 export default function RecordSaleHub() {
   const router = useRouter();
   const { status, user, businesses } = useAuth();
-  const params = useLocalSearchParams<{ returnTo?: string; date?: string }>();
+  const params = useLocalSearchParams<{ returnTo?: string; date?: string; open?: string }>();
   const returnsToSales = params.returnTo === 'sales';
   const backPath = returnsToSales ? '/sales' : '/home';
   const business = businesses[0];
@@ -44,6 +44,11 @@ export default function RecordSaleHub() {
 
   const [manualVisible, setManualVisible] = useState(false);
   const [comingSoonKey, setComingSoonKey] = useState<OptionKey | null>(null);
+
+  // "Enter manually instead" from Import invoice lands here with the manual sheet already open.
+  useEffect(() => {
+    if (params.open === 'manual') setManualVisible(true);
+  }, [params.open]);
 
   if (status === 'bootstrapping') {
     return (
@@ -57,6 +62,9 @@ export default function RecordSaleHub() {
   }
 
   const goBack = () => router.replace(backPath);
+  const importPath = `/import-invoice?returnTo=${returnsToSales ? 'sales' : 'home'}${
+    params.date ? `&date=${params.date}` : ''
+  }`;
   const invoicePath = `/invoices/new?returnTo=${returnsToSales ? 'sales' : 'home'}${
     params.date ? `&date=${params.date}` : ''
   }`;
@@ -72,7 +80,7 @@ export default function RecordSaleHub() {
 
   const renderOption = (option: { key: OptionKey; icon: IconName }) => {
     const copy = s.options[option.key];
-    const comingSoon = option.key !== 'manual' && option.key !== 'invoice';
+    const comingSoon = option.key === 'report';
     const badge = comingSoon ? s.comingSoonBadge : option.key === 'manual' ? s.fastestBadge : null;
     return (
       <Pressable
@@ -83,6 +91,7 @@ export default function RecordSaleHub() {
         onPress={() => {
           if (comingSoon) setComingSoonKey(option.key);
           else if (option.key === 'invoice') router.push(invoicePath);
+          else if (option.key === 'import') router.push(importPath);
           else setManualVisible(true);
         }}
       >
