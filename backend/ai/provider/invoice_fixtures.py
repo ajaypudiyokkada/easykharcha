@@ -212,3 +212,34 @@ FIXTURES.update(
         },
     }
 )
+
+# Real-bill findings (Step S4f).
+# Spice Route again, but the model wrongly listed "Taxable value = 558" as a tax line: the server
+# guard must drop it so the totals still reconcile.
+FIXTURES["spice_taxable_value"] = {
+    **FIXTURES["spice_route"],
+    "taxes": [{"label": "Taxable value", "amount": 558}, *FIXTURES["spice_route"]["taxes"]],
+}
+# A retail bill whose line amounts already include tax (amount != qty x rate on three lines).
+FIXTURES["retail_tax_inclusive"] = {
+    "readability": {"ok": True, "reason": ""},
+    "bill_number": "ITEM1113",
+    "bill_date_printed": "07-04-2026",
+    "bill_date": "2026-04-07",
+    "lines": [
+        _line("Suit", 1, 450, 472.5),
+        _line("Sleeper", 1, 230, 241.5),
+        _line("T-shirt", 1, 450, 472.5),
+        _line("Rebook shoes", 1, 2999, 2999),
+    ],
+    "items_total": 4129,
+    "discounts": [{"label": "Discount", "amount": -845.8}],
+    "taxes": [
+        {"label": "Fixed", "amount": 100},
+        {"label": "CGST", "amount": 22.6},
+        {"label": "SGST", "amount": 22.6},
+    ],
+    "round_off": -0.40,
+    "grand_total": 3428,
+    "confidence": {"bill_number": 0.9, "bill_date": 0.9, "grand_total": 0.9},
+}

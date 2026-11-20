@@ -8700,6 +8700,22 @@ def check_invoice_import_matching_flow() -> None:
         fail("invoice matching: the crafted draft is a reprint")
     print("OK - every check code fires on a crafted draft; Spice Route, FOMO and Bhagini reconcile without recalculating tax.")
 
+    # --- real-bill hardening (Step S4f) ---
+    taxable = read("spice_taxable_value")
+    labels = [t["label"] for t in taxable["taxes"]]
+    if labels != ["CGST", "SGST"]:
+        fail(f"invoice matching: 'Taxable value' must not stay a tax line, got {labels}")
+    if "TOTAL_MISMATCH" in codes(taxable):
+        fail(f"invoice matching: the taxable-value bill must reconcile, got {taxable['checks']}")
+    retail = read("retail_tax_inclusive")
+    flagged = sorted(c["line_id"] for c in check_of(retail, "LINE_AMOUNT_MISMATCH"))
+    if flagged != ["l1", "l2", "l3"]:
+        fail(f"invoice matching: the three tax-inclusive lines should be flagged, got {flagged}")
+    kinds = {c["data"]["kind"]: c["data"] for c in check_of(retail, "TOTAL_MISMATCH")}
+    if set(kinds) != {"items"} or kinds["items"]["sum_of_lines"] != "4185.50" or kinds["items"]["printed"] != "4129.00":
+        fail(f"invoice matching: expected only the items total check, 4185.50 vs 4129.00, got {kinds}")
+    print("OK - 'Taxable value' is dropped from tax lines; the tax-inclusive retail bill flags its 3 lines and 4185.50 vs 4129.")
+
     posted_after = (
         DjInvoice.objects.filter(business_id=business_id).count(),
         DjSale.objects.filter(business_id=business_id).count(),

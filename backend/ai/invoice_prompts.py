@@ -4,7 +4,7 @@ prompt or tool shape changes meaningfully."""
 
 import base64
 
-INVOICE_PROMPT_VERSION = 1
+INVOICE_PROMPT_VERSION = 2
 INVOICE_TOOL_NAME = "record_bill"
 
 INVOICE_SYSTEM_PROMPT = (
@@ -38,6 +38,10 @@ INVOICE_SYSTEM_PROMPT = (
     "payable. payment_mode only if printed: cash, upi, card, bank_transfer or other. "
     "is_reprint: true only if the bill is stamped or labelled Duplicate, Copy or Reprint. "
     "confidence: a 0 to 1 score for bill_number, bill_date, grand_total and items_total. "
+    "Tax lines are ONLY actual tax or charge amounts that are ADDED to the bill: CGST, SGST, IGST, "
+    "service charge, cess and similar. Labels like Taxable value, Taxable amount, Net amount, Sub "
+    "total, Total before tax and Amount before tax are NOT tax lines: leave them out of taxes "
+    "entirely (the items total, if printed, goes in items_total). "
     "Record your answer with the record_bill tool."
 )
 

@@ -6,6 +6,7 @@ returns anyway never reaches the stored draft. The model reads exactly what is p
 only cleans formats (numbers, dates). No total, tax or amount is ever worked out here: AI never does
 the maths."""
 
+import logging
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -13,7 +14,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+logger = logging.getLogger(__name__)
+
 MAX_LINES = 100
+# A label that names a subtotal-type figure is not a tax line, whatever the model listed it as.
+# Matched on the normalised label only (never on the amount).
+_NOT_TAX_LABELS = (
+    "taxable value",
+    "taxable amount",
+    "taxable amt",
+    "net amount",
+    "net amt",
+    "sub total",
+    "subtotal",
+    "total before tax",
+    "amount before tax",
+)
 _NUMBER_JUNK = re.compile(r"[^\d.\-+]")
 _MONTHS = {
     name: index
@@ -99,6 +115,17 @@ def _safe_date(year: int, month: int, day: int) -> date | None:
         return date(year, month, day)
     except ValueError:
         return None
+
+
+def _normalise_label(label: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(label).lower())).strip()
+
+
+def is_subtotal_label(label: str) -> bool:
+    """True for labels like "Taxable value", "Sub Total", "Total before tax:" (also with a trailing
+    figure or note, e.g. "Taxable value 558")."""
+    norm = _normalise_label(label)
+    return any(norm == phrase or norm.startswith(phrase + " ") for phrase in _NOT_TAX_LABELS)
 
 
 def _clean_text(value, limit: int) -> str:
@@ -216,6 +243,13 @@ class InvoiceExtractionResult(_Base):
         data["lines"] = [line for line in data["lines"][:MAX_LINES] if line["name_as_printed"]]
         parsed = parse_bill_date(self.bill_date_printed) or _iso_or_none(self.bill_date)
         data["bill_date"] = parsed.isoformat() if parsed else None
+        kept = [tax for tax in data["taxes"] if not is_subtotal_label(tax["label"])]
+        if len(kept) != len(data["taxes"]):
+            logger.info(
+                "invoice read: dropped %d subtotal-type line(s) listed as tax",
+                len(data["taxes"]) - len(kept),
+            )
+        data["taxes"] = kept
         return data
 
 

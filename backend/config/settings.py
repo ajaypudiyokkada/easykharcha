@@ -228,7 +228,7 @@ AI_MODEL_RECIPE = env.str("AI_MODEL_RECIPE", default="claude-haiku-5-5")
 # Step EK-1: kitchen-base discovery (backend/ai/base_discovery.py) — same tier as menu/recipe calls.
 AI_MODEL_KITCHEN = env.str("AI_MODEL_KITCHEN", default="claude-haiku-5-5")
 # Step S4a: reading one imported customer bill (backend/invoices/import_jobs.py).
-AI_MODEL_INVOICE = env.str("AI_MODEL_INVOICE", default="claude-haiku-5-5")
+AI_MODEL_INVOICE = env.str("AI_MODEL_INVOICE", default="claude-sonnet-5-5")
 # Step S4b: the one call per import that suggests which of the owner's items an unmatched bill line is.
 AI_MODEL_INVOICE_MATCH = env.str("AI_MODEL_INVOICE_MATCH", default=AI_MODEL_INVOICE)
 # Tried once, only when the first call's result fails schema validation — see ai/provider/base.py.
