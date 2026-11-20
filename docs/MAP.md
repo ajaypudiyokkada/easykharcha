@@ -58,6 +58,7 @@ One line per item. Current as of Step 16. Backend API prefix on every endpoint b
 - `wastage/` — wastage entries; models.py (WastageEntry — Step U1b-1 widened `unit_cost_at_entry`
   to 4dp/12 digits, matching `usual_price`), views.py, serializers.py, urls.py
 - `sales/` — manual sales entries (one row per sell item per business date); models.py (Sale), views.py, serializers.py, exceptions.py, urls.py
+- `invoices/` — Step S3b: Create Invoice (customer bill, not a tax invoice); models.py (Invoice, InvoiceLine, InvoiceSequence), service.py (`create_invoice`: sequence row `select_for_update` + invoice + one new Sale per line in ONE transaction; `void_invoice`), views.py, urls.py. Endpoints: `GET/POST businesses/<id>/invoices/`, `GET .../invoices/<iid>/`, `POST .../invoices/<iid>/void/` (Owner, `sales.delete`), `GET/PATCH businesses/<id>/invoice-settings/` (Owner, `settings.manage`: tax on/off + rate, bill address/phone/GSTIN — fields on `BusinessSettings`).
 - `alerts/` — Step 15: alerts computed on read (opening_late/closing_late — Step 23b's split of the
   old count_late, price_rise, wastage_high, gap_flagged, Step 18's expiry_soon, Step 41b1b3a's
   low_stock — daily-keyed, text carries no money), never scheduled;

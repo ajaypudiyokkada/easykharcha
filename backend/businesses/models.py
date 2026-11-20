@@ -152,6 +152,13 @@ class BusinessSettings(models.Model):
     # Step 18: how many days ahead of an estimated expiry date alerts/service.py's expiry_soon alert
     # starts warning (0 days or past = danger instead).
     expiry_warn_days = models.PositiveSmallIntegerField()
+    # Customer bills (invoices app) — a simple flat tax rate ADDED ON TOP of prices, off by default.
+    # Address/phone/GSTIN are optional text printed on the bill; none is validated or used in maths.
+    invoice_tax_enabled = models.BooleanField(default=False)
+    invoice_tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    bill_address = models.CharField(max_length=240, blank=True, default="")
+    bill_phone = models.CharField(max_length=20, blank=True, default="")
+    bill_gstin = models.CharField(max_length=20, blank=True, default="")
 
     def __str__(self) -> str:
         return f"Settings for {self.business_id}"

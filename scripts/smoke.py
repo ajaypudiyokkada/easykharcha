@@ -7540,6 +7540,223 @@ def check_ek_setup_apply_flow() -> None:
 # Every check, in the suite's original order — the default (no --area) runs exactly this list, same
 # as before --area existed. check_health() is always run first regardless of --area; it's the
 # "is the server even up" sanity ping, not tied to any one area.
+def check_invoices_flow() -> None:
+    """Step S3b: Create Invoice - number format, one Sale row per line, tax added on top,
+    idempotency, Owner-only void that soft-deletes the sales, permissions, and gap-free numbers
+    under concurrent saves."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, owner_access, _ = signup_and_login("Invoice Owner")
+    status, body, _ = request(
+        "POST",
+        "/businesses/",
+        {"name": "Invoice Test Biz", "business_type": "cloud_kitchen", "city": "Pune"},
+        token=owner_access,
+    )
+    if status != 201:
+        fail(f"invoices: business create expected 201, got {status} ({body})")
+    business_id = body["id"]
+    _, manager_access, _ = _add_team_member(business_id, owner_access, "Inv Manager", "manager")
+    _, chef_access, _ = _add_team_member(business_id, owner_access, "Inv Chef", "head_chef")
+
+    status, body, _ = request(
+        "POST",
+        f"/businesses/{business_id}/stock-items/bulk/",
+        {"items": [{"name": "Milk", "unit": "L"}]},
+        token=owner_access,
+    )
+    milk_id = body[0]["id"]
+    tea_id, _ = _create_dish(business_id, owner_access, "Tea", "20.00", [(milk_id, "0.200")])
+    today = _now_iso()[:10]
+    url = f"/businesses/{business_id}/invoices/"
+    sales_url = f"/businesses/{business_id}/sales/"
+
+    def make(token, key=None, qty="3", rate=None, date=today):
+        line = {"sell_item": tea_id, "quantity": qty}
+        if rate is not None:
+            line["rate"] = rate
+        payload = {"sale_date": date, "lines": [line]}
+        if key:
+            payload["idempotency_key"] = key
+        return request("POST", url, payload, token=token)
+
+    def sold_today():
+        return request("GET", sales_url, token=owner_access)[1]["summary"]["items_sold_today"]
+
+    status, body, _ = make(owner_access, key="k1")
+    if status != 201:
+        fail(f"invoices: create expected 201, got {status} ({body})")
+    if body["number"] != f"EK_{business_id}_INV-000001":
+        fail(f"invoices: unexpected first number {body['number']}")
+    if (body["subtotal"], body["tax_amount"], body["total"]) != ("60.00", "0.00", "60.00"):
+        fail(f"invoices: tax should be off by default, got {body}")
+    first_id = body["id"]
+    print("OK - an invoice saves with number EK_<id>_INV-000001, tax off by default.")
+
+    if Decimal(sold_today()) != Decimal("3"):
+        fail(f"invoices: expected the sale to be recorded (3 sold today), got {sold_today()}")
+    print("OK - saving an invoice records its sale (before tax).")
+
+    status, body, _ = make(owner_access, key="k1")
+    if status != 200 or body["id"] != first_id:
+        fail(f"invoices: same key should return the first invoice, got {status} ({body})")
+    if Decimal(sold_today()) != Decimal("3"):
+        fail("invoices: a retried save must not record a second sale")
+    print("OK - a retried save returns the same invoice and records nothing twice.")
+
+    status, body, _ = request(
+        "PATCH",
+        f"/businesses/{business_id}/invoice-settings/",
+        {"invoice_tax_enabled": True, "invoice_tax_rate": "5", "bill_address": "1 Main Rd"},
+        token=owner_access,
+    )
+    if status != 200 or body["invoice_tax_rate"] != "5.00":
+        fail(f"invoices: settings patch expected 200, got {status} ({body})")
+    status, body, _ = make(owner_access, qty="2", rate="25.00")
+    if (body.get("subtotal"), body.get("tax_amount"), body.get("total")) != (
+        "50.00",
+        "2.50",
+        "52.50",
+    ):
+        fail(f"invoices: expected 5% added on top of 50.00, got {status} ({body})")
+    if body["number"] != f"EK_{business_id}_INV-000002":
+        fail(f"invoices: expected number 000002, got {body['number']}")
+    second_id = body["id"]
+    sales_today = request("GET", sales_url, token=owner_access)[1]["summary"]["sales_today"]
+    if Decimal(sales_today) != Decimal("110.00"):
+        fail(f"invoices: sales must count 60.00 + 50.00 before tax (110.00), got {sales_today}")
+    print("OK - flat tax is added on top (never counted as sales); numbers run on without gaps.")
+
+    status, body, _ = make(owner_access, date="2999-01-01")
+    if status != 400 or "sale_date" not in body.get("field_errors", {}):
+        fail(f"invoices: a future date should be 400 with a sale_date error, got {status} ({body})")
+    status, _, _ = request(
+        "POST",
+        url,
+        {"sale_date": today, "lines": [{"sell_item": 999999, "quantity": "1"}]},
+        token=owner_access,
+    )
+    if status != 400:
+        fail(f"invoices: a foreign item should be 400, got {status}")
+    status, body, _ = make(owner_access, key="k-next")
+    if body.get("number") != f"EK_{business_id}_INV-000003":
+        fail(f"invoices: failed saves must not burn numbers, got {body.get('number')}")
+    print("OK - failed saves burn no invoice number.")
+
+    if make(manager_access)[0] != 201:
+        fail("invoices: a Manager should be able to create an invoice")
+    if make(chef_access)[0] != 403:
+        fail("invoices: a Head chef should get 403 on create")
+    settings_url = f"/businesses/{business_id}/invoice-settings/"
+    if request("PATCH", settings_url, {"bill_phone": "1"}, token=manager_access)[0] != 403:
+        fail("invoices: a Manager should get 403 on invoice settings")
+    void_url = f"{url}{second_id}/void/"
+    if request("POST", void_url, {"reason": "x"}, token=manager_access)[0] != 403:
+        fail("invoices: a Manager should get 403 on void")
+    print("OK - Manager can create but not void or change settings; Head chef cannot create.")
+
+    before = Decimal(sold_today())
+    status, body, _ = request("POST", void_url, {"reason": "Wrong bill"}, token=owner_access)
+    if status != 200 or body["status"] != "void":
+        fail(f"invoices: void expected 200, got {status} ({body})")
+    if before - Decimal(sold_today()) != Decimal("2"):
+        fail("invoices: void should remove exactly its own 2 sold")
+    status, again, _ = request("POST", void_url, {"reason": "again"}, token=owner_access)
+    if status != 200 or again["status"] != "void" or again["void_reason"] != "Wrong bill":
+        fail(f"invoices: voiding twice should return the same void invoice (200), got {status}")
+    if Decimal(sold_today()) != before - Decimal("2"):
+        fail("invoices: a second void must not reverse anything again")
+    status, body, _ = request("GET", f"{url}{second_id}/", token=owner_access)
+    if body["number"] != f"EK_{business_id}_INV-000002":
+        fail("invoices: a void invoice keeps its number")
+    print("OK - Owner void soft-deletes only that invoice's sales and keeps the number.")
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda i: make(owner_access, key=f"c{i}", qty="1"), range(12)))
+    bad = [r for r in results if r[0] != 201]
+    if bad:
+        fail(f"invoices: concurrent saves should all be 201, got {[r[0] for r in bad]} ({bad[0][1]})")
+    numbers = sorted(int(r[1]["number"].rsplit("-", 1)[1]) for r in results)
+    # 1-4 are already used (k1, second, k-next, manager's), so the 12 must be exactly 5..16.
+    if numbers != list(range(5, 17)):
+        fail(f"invoices: concurrent saves must give gap-free unique numbers, got {numbers}")
+    print("OK - 12 concurrent saves got 12 unique, gap-free numbers.")
+
+    # --- validation (400 with field errors), phone, totals, old date, filters, 404, audit ---
+    def post(payload, token=owner_access):
+        return request("POST", url, payload, token=token)
+
+    line = {"sell_item": tea_id, "quantity": "1"}
+    status, body, _ = post({"sale_date": today, "lines": [line], "customer_phone": "12345"})
+    if status != 400 or "customer_phone" not in body.get("field_errors", {}):
+        fail(f"invoices: a bad phone should be 400 with a customer_phone error, got {status}")
+    for raw in ("98765 43210", "+91 98765-43210", "09876543210", "919876543210"):
+        status, body, _ = post({"sale_date": today, "lines": [line], "customer_phone": raw})
+        if status != 201 or body["customer_phone"] != "+919876543210":
+            fail(f"invoices: phone {raw!r} should be stored as +919876543210, got {status} ({body})")
+    status, body, _ = post({"sale_date": today, "lines": [{**line, "amount": "99.00"}]})
+    if status != 400 or body.get("row_errors", [{}])[0].get("field") != "amount":
+        fail(f"invoices: a wrong line amount should be rejected on that row, got {status} ({body})")
+    status, body, _ = post({"sale_date": today, "lines": [line], "total": "1.00"})
+    if status != 400 or "total" not in body.get("field_errors", {}):
+        fail(f"invoices: client totals that differ should be rejected, got {status} ({body})")
+    status, body, _ = post({"sale_date": today, "lines": [line], "total": "21.00", "subtotal": "20.00"})
+    if status != 201:
+        fail(f"invoices: matching client totals (20.00 + 5% = 21.00) should pass, got {status} ({body})")
+    status, body, _ = post({"sale_date": today, "lines": [line], "discount": "5"})
+    if status != 400 or "discount" not in body.get("field_errors", {}):
+        fail(f"invoices: discounts are not in v1, got {status} ({body})")
+    for bad in ({"sale_date": today, "lines": []}, {"lines": [line]}, {"sale_date": today, "lines": [{**line, "quantity": "0"}]}):
+        if post(bad)[0] != 400:
+            fail(f"invoices: expected 400 for {bad}")
+    status, body, _ = post({"sale_date": "2020-01-01", "lines": [line]})
+    if status != 201 or body["date_is_old"] is not True:
+        fail(f"invoices: an old date is allowed with date_is_old, got {status} ({body})")
+    if body["tax_amount"] != "1.00":
+        fail(f"invoices: expected 5% of 20.00 = 1.00, got {body['tax_amount']}")
+    print("OK - validation: 400 field errors, phone stored as +91, totals/amount checked, no discounts, old date flagged.")
+
+    status, body, _ = request("GET", f"{url}?status=void", token=owner_access)
+    if status != 200 or [i["id"] for i in body["results"]] != [second_id]:
+        fail(f"invoices: status=void filter should list only the voided one, got {status} ({body})")
+    status, body, _ = request("GET", f"{url}?date=2020-01-01", token=owner_access)
+    if status != 200 or len(body["results"]) != 1:
+        fail(f"invoices: date filter should find the 2020 bill, got {status} ({body})")
+    status, body, _ = request("GET", url, token=owner_access)
+    ids = [i["id"] for i in body["results"]]
+    if ids != sorted(ids, reverse=True) or body["results"][0]["lines"] == []:
+        fail("invoices: list should be newest first and carry lines")
+    if request("GET", url, token=chef_access)[0] != 403 or request("GET", f"{url}{first_id}/", token=chef_access)[0] != 403:
+        fail("invoices: a Head chef should get 403 on list and detail")
+    status, other, _ = request("POST", "/businesses/", {"name": "Other Biz", "business_type": "cloud_kitchen", "city": "Pune"}, token=owner_access)
+    other_url = f"/businesses/{other['id']}/invoices/"
+    if request("GET", f"{other_url}{first_id}/", token=owner_access)[0] != 404:
+        fail("invoices: another business's invoice id should be 404")
+    if request("POST", f"{other_url}{first_id}/void/", {}, token=owner_access)[0] != 404:
+        fail("invoices: voiding another business's invoice id should be 404")
+    print("OK - list filters + newest first; Head chef 403; another business's invoice is 404.")
+
+    # Audit: exactly one entry per invoice created / voided (not per line).
+    backend_dir = os.path.join(os.path.dirname(__file__), "..", "backend")
+    sys.path.insert(0, os.path.abspath(backend_dir))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+
+    django.setup()
+    from audit.models import AuditLog
+
+    def audit_count(action, invoice_id):
+        return sum(
+            1
+            for row in AuditLog.objects.filter(business_id=business_id, action=action)
+            if row.metadata.get("invoice_id") == invoice_id
+        )
+
+    if audit_count("invoice.create", first_id) != 1 or audit_count("invoice.void", second_id) != 1:
+        fail("invoices: expected exactly one invoice.create and one invoice.void audit entry each")
+    print("OK - one audit entry per invoice created and per invoice voided.")
+
+
 def check_admin_delete_flow() -> None:
     """Step F1: Django admin delete rules for User/Business — direct ORM + django.test.Client against
     the same dev database the rest of this suite's API checks use (admin pages are server-rendered,
@@ -7738,6 +7955,7 @@ ALL_CHECKS = [
     check_ek_setup_flow,
     check_ek_setup_apply_flow,
     check_admin_delete_flow,
+    check_invoices_flow,
 ]
 
 # One check can serve more than one area (e.g. check_sales_and_gap_flow is both "sales" and
@@ -7762,6 +7980,7 @@ AREA_CHECKS: dict[str, list] = {
         check_sector_change_flow,
     ],
     "sales": [check_sales_and_gap_flow],
+    "invoices": [check_invoices_flow],
     "alerts": [check_alerts_flow, check_expiry_alerts_flow, check_low_stock_flow],
     "wastage": [check_count_and_wastage_flow],
     "permissions": [check_permission_table, check_team_flow, check_team_reset_flow],
