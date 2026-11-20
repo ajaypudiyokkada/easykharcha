@@ -9,6 +9,10 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import type { PaymentModeKey } from '../api/invoices';
+
+const MODES: string[] = ['cash', 'upi', 'card', 'bank_transfer'];
+
 export type InvoiceLineDraft = {
   sellItemId: number;
   name: string;
@@ -25,6 +29,11 @@ export type InvoiceDraft = {
   name: string;
   lines: InvoiceLineDraft[];
   step: 'form' | 'review';
+  /** Payment chosen on the form: Unpaid by default; Paid needs a mode, and a proof photo (its id,
+   * already uploaded) for every mode except Cash. */
+  paid: boolean;
+  mode: PaymentModeKey | '';
+  proofId: number | null;
 };
 
 export function newIdempotencyKey(): string {
@@ -35,7 +44,17 @@ export function newIdempotencyKey(): string {
 }
 
 export function emptyDraft(date: string): InvoiceDraft {
-  return { key: newIdempotencyKey(), date, phone: '', name: '', lines: [], step: 'form' };
+  return {
+    key: newIdempotencyKey(),
+    date,
+    phone: '',
+    name: '',
+    lines: [],
+    step: 'form',
+    paid: false,
+    mode: '',
+    proofId: null,
+  };
 }
 
 function storageKey(businessId: number): string {
@@ -91,7 +110,14 @@ export const invoiceDraftStorage = {
       if (!raw) return null;
       const parsed: unknown = JSON.parse(raw);
       return isDraft(parsed)
-        ? { ...parsed, step: parsed.step === 'review' ? 'review' : 'form' }
+        ? {
+            ...parsed,
+            step: parsed.step === 'review' ? 'review' : 'form',
+            // Drafts saved before payments existed have none of these.
+            paid: parsed.paid === true,
+            mode: MODES.includes(parsed.mode) ? parsed.mode : '',
+            proofId: typeof parsed.proofId === 'number' ? parsed.proofId : null,
+          }
         : null;
     } catch {
       return null;

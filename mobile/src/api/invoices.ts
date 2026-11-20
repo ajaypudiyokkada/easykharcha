@@ -8,6 +8,8 @@ export type InvoiceLine = {
   sale: number;
 };
 
+export type PaymentModeKey = 'cash' | 'upi' | 'card' | 'bank_transfer';
+
 export type Invoice = {
   id: number;
   number: string;
@@ -24,6 +26,12 @@ export type Invoice = {
   created_at: string;
   voided_at: string | null;
   void_reason: string;
+  payment_status: 'paid' | 'unpaid';
+  payment_mode: PaymentModeKey | '';
+  paid_at: string | null;
+  proof_available: boolean;
+  proof_removed: boolean;
+  proof_already_used: boolean;
   lines: InvoiceLine[];
 };
 

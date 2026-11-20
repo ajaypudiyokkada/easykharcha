@@ -11,6 +11,7 @@ import { formatDate } from '../../src/format';
 import { DateField } from '../../src/invoices/DateField';
 import { InvoiceActions } from '../../src/invoices/InvoiceActions';
 import { InvoiceBody } from '../../src/invoices/InvoiceBody';
+import { modeLabel, PaymentPicker } from '../../src/invoices/PaymentPicker';
 import {
   emptyDraft,
   invoiceDraftStorage,
@@ -62,6 +63,8 @@ type FormErrors = {
   date?: string;
   phone?: string;
   lines?: string;
+  mode?: string;
+  proof?: string;
   rows: Record<number, { quantity?: string; rate?: string }>;
 };
 
@@ -246,6 +249,10 @@ export default function CreateInvoice() {
     else if (draft!.date > today) next.date = s.errors.futureDate;
     if (normaliseIndianMobile(draft!.phone) === null) next.phone = s.errors.phone;
     if (draft!.lines.length === 0) next.lines = s.errors.noItems;
+    if (draft!.paid && draft!.mode === '') next.mode = strings.invoice.payment.modeRequired;
+    else if (draft!.paid && draft!.mode !== 'cash' && draft!.proofId === null) {
+      next.proof = strings.invoice.payment.proofRequired;
+    }
     draft!.lines.forEach((line, index) => {
       const row: { quantity?: string; rate?: string } = {};
       if (quantityMilli(line) === null) row.quantity = s.errors.quantity;
@@ -256,7 +263,9 @@ export default function CreateInvoice() {
   }
 
   function hasErrors(e: FormErrors): boolean {
-    return Boolean(e.date || e.phone || e.lines || Object.keys(e.rows).length > 0);
+    return Boolean(
+      e.date || e.phone || e.lines || e.mode || e.proof || Object.keys(e.rows).length > 0,
+    );
   }
 
   function goToReview() {
@@ -273,6 +282,12 @@ export default function CreateInvoice() {
     if (fields.sale_date) next.date = s.errors.futureDate;
     if (fields.customer_phone) next.phone = s.errors.phone;
     if (fields.lines) next.lines = s.errors.noItems;
+    if (fields.payment_mode) next.mode = strings.invoice.payment.modeRequired;
+    if (fields.proof_id) {
+      // The proof is missing, used, or expired: drop it and ask for the photo again.
+      next.proof = strings.invoice.payment.proofInvalid;
+      update({ proofId: null });
+    }
     for (const row of err.rowErrors ?? []) {
       const index = row.row - 1;
       const current = next.rows[index] ?? {};
@@ -313,6 +328,16 @@ export default function CreateInvoice() {
           subtotal: paiseToDecimal(totals.subtotal),
           tax_amount: paiseToDecimal(totals.tax),
           total: paiseToDecimal(totals.total),
+          ...(draft.paid && draft.mode
+            ? {
+                payment: {
+                  mode: draft.mode,
+                  ...(draft.mode !== 'cash' && draft.proofId !== null
+                    ? { proof_id: draft.proofId }
+                    : {}),
+                },
+              }
+            : {}),
         },
       });
       await invoiceDraftStorage.clear(businessId);
@@ -382,6 +407,21 @@ export default function CreateInvoice() {
             {phoneNormalised ? (
               <SummaryRow label={s.reviewScreen.phone} value={formatPhone(phoneNormalised)} />
             ) : null}
+            <SummaryRow
+              label={strings.invoice.payment.reviewRow}
+              value={
+                draft.paid
+                  ? strings.invoice.payment.reviewPaid(
+                      modeLabel(draft.mode),
+                      draft.mode !== 'cash' && draft.proofId !== null,
+                    )
+                  : strings.invoice.payment.reviewUnpaid
+              }
+              action={{
+                label: strings.invoice.payment.change,
+                onPress: () => setStage({ kind: 'form' }),
+              }}
+            />
             <SummaryRow label={s.reviewScreen.number} value={s.reviewScreen.numberLater} muted />
           </View>
 
@@ -515,6 +555,20 @@ export default function CreateInvoice() {
             {taxEnabled ? <Small style={styles.muted}>{s.taxNote(taxRateLabel)}</Small> : null}
           </View>
         ) : null}
+
+        <View style={styles.card}>
+          <Heading level={3}>{strings.invoice.payment.title}</Heading>
+          <PaymentPicker
+            allowUnpaid
+            value={{ paid: draft.paid, mode: draft.mode, proofId: draft.proofId }}
+            onChange={(next) => {
+              update(next);
+              setErrors((e) => ({ ...e, mode: undefined, proof: undefined }));
+            }}
+            modeError={errors.mode}
+            proofError={errors.proof}
+          />
+        </View>
 
         <Button label={s.review} variant="primary" onPress={goToReview} />
         <Button label={s.cancel} variant="secondary" onPress={() => setCancelVisible(true)} />
